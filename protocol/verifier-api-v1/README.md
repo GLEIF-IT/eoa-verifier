@@ -98,6 +98,32 @@ See the [verification](../../docs/diagrams/sequence/association-verification-seq
 [status](../../docs/diagrams/sequence/revocation-status-sequence.md) diagrams. The diagrams describe
 workflows; they do not freeze HTTP endpoints or signing encodings.
 
+## Status lookup
+
+`GET /v1/associations/{associationSaid}/status` lets an authenticated external
+caller read the verifier's stored status for one association ACDC. It uses the
+existing service request/reply authentication and the deployment's configured
+chain ID and trusted RPC URL; the caller supplies only the SAID.
+
+Return the association SAID and three distinct pieces of information:
+
+- **Credential status:** last known native issuance/revocation status and its
+  observation time, or unknown when native acceptance has not been established.
+- **Verification status:** pending or the latest assessment outcome and reason,
+  with its assessment time. Issuance alone does not mean verified; a revoked
+  source can invalidate an association whose own credential remains issued.
+- **Ethereum account status:** bound address and chain ID, last observed account
+  classification under the existing empty-code/EIP-7702 rule, block number/hash
+  and observation time, or unknown when no account observation exists.
+
+Known associations return `200`, including pending or unavailable verification;
+unknown SAIDs return `404`. A failed later check preserves the last observation
+and exposes the failed check's time/reason separately. Known revocation remains
+terminal for the affected association. GET performs no RPC, refresh or enrollment and cannot establish current
+freshness or authorize an endorsement. PR 04 implements this stored view; PR 06
+keeps it updated through continuing reassessment. Settle response fields and
+focused route tests with that implementation.
+
 ## Trust and freshness requirements
 
 The webhook receiver is assumed capable of verifying requests signed by the
