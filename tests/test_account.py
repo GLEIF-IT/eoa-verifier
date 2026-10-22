@@ -2,16 +2,10 @@
 
 import falcon
 import pytest
-from eth_account import Account
-from eth_account.messages import encode_typed_data
 from hio.base import doing
 from hio.core import http, tcp
-from keri import core
-from keri.core import coring
-from native_helpers import association_from_challenge
-from test_native import KEY, free_port
+from native_helpers import candidate, free_port
 
-from eoa_verifier.verification.eoa import build_challenge
 from eoa_verifier.verification.worker import EoaVerifierDoer
 
 
@@ -31,18 +25,6 @@ class Rpc:
                 "eth_getCode": self.code,
             }[body["method"]],
         }
-
-
-def candidate():
-    said = coring.Diger(ser=b"test").qb64
-    challenge = build_challenge(
-        issuer_aid=core.Signer().verfer.qb64,
-        le_vlei_said=said,
-        ext_id=f"eip155:31337:{Account.from_key(KEY).address.lower()}",
-        nonce="test-account",
-    )
-    sig = Account.sign_message(encode_typed_data(full_message=challenge), KEY).signature
-    return association_from_challenge(challenge, "0x" + sig.hex(), said).sad
 
 
 def run_worker(worker, server_doer):

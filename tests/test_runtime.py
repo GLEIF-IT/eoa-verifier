@@ -4,22 +4,10 @@ from unittest.mock import patch
 
 import pytest
 from falcon.testing import TestClient
-from keri import core
 from keri.app import indirecting
 
 from eoa_verifier.cli import main
-from eoa_verifier.serving import ServiceConfig, run_service, setup_service
-
-
-@pytest.fixture
-def config(tmp_path):
-    return ServiceConfig(
-        trusted_geda_aid=core.Signer().verfer.qb64,
-        rpc_url="http://127.0.0.1:1",
-        chain_id=31337,
-        head_dir=str(tmp_path),
-        http_port=0,
-    )
+from eoa_verifier.serving import run_service, setup_service
 
 
 def test_identity_progress_and_terminal_duplicates_survive_reopen(config):
@@ -35,8 +23,10 @@ def test_identity_progress_and_terminal_duplicates_survive_reopen(config):
             work = runtime.baser.start_verification(
                 association_said=state, grant_said="first"
             )
-            work.state, work.failureReason = state, "retained"
-            runtime.baser.pin_verification(work)
+            if state == "verified":
+                runtime.baser.complete_verification(work)
+            else:
+                getattr(runtime.baser, f"mark_{state}")(work, "retained")
     finally:
         runtime.close()
     runtime = setup_service(config)
@@ -49,7 +39,7 @@ def test_identity_progress_and_terminal_duplicates_survive_reopen(config):
             assert (work.state, work.grantSaid, work.failureReason) == (
                 state,
                 "first",
-                "retained",
+                "" if state == "verified" else "retained",
             )
     finally:
         runtime.close()
@@ -107,10 +97,9 @@ def test_failed_work_cannot_complete(config):
 def test_forged_said_cannot_create_verification_work(config):
     from types import SimpleNamespace
 
-    from keri import kering
-    from test_account import candidate
+    from native_helpers import candidate
 
-    from eoa_verifier.receiving.grants import GrantNotificationDoer
+    from eoa_verifier.receiving.grants import GrantNotificationDoer, InvalidGrantError
 
     association = candidate()
     association["u"] = "tampered after SAID computation"
@@ -124,7 +113,7 @@ def test_forged_said_cannot_create_verification_work(config):
                 "eoa_verifier.receiving.grants.exchanging.cloneMessage",
                 return_value=(SimpleNamespace(ked={"e": {"acdc": association}}), {}),
             ),
-            pytest.raises(kering.ValidationError),
+            pytest.raises(InvalidGrantError),
         ):
             grants.process_grant_notice({"d": "grant"})
         assert runtime.baser.get_verification(association["d"]) is None

@@ -49,6 +49,7 @@ class PresentationVerifierDoer(doing.DoDoer):
         # Restart may retry sooner, but cannot lose or falsely complete the work.
         self.retry_at = {}
         self.pending = None
+        self.scan_after = ""
         if eoa_verifier is None:
             raise ValueError("association verification requires an EOA worker")
         super().__init__(doers=[eoa_verifier, doing.doify(self.verify_do)], **kwa)
@@ -73,8 +74,7 @@ class PresentationVerifierDoer(doing.DoDoer):
             if op is None or op.state != STATE_VERIFYING:
                 continue
             if cue["kin"] == "retry":
-                op.failureReason = cue["error"]
-                self.baser.pin_verification(op)
+                self.baser.mark_verifying(op, cue["error"])
                 self.retry_at[said] = self.tyme + self.retry_delay
             elif cue["kin"] == "failed":
                 self.baser.mark_failed(op, cue["error"])
@@ -88,6 +88,7 @@ class PresentationVerifierDoer(doing.DoDoer):
                         trusted_geda_aid=self.trusted_geda_aid,
                     )
                 except MissingCredentialArtifactsError as exc:
+                    self.retry_at[said] = self.tyme + self.retry_delay
                     self.baser.mark_awaiting_artifacts(op, str(exc))
                 except (VerificationError, kering.ValidationError) as exc:
                     self.baser.mark_failed(op, str(exc))
@@ -97,14 +98,20 @@ class PresentationVerifierDoer(doing.DoDoer):
     def process_ready(self) -> None:
         """Retry operations ready for verification or waiting for KERI artifacts."""
 
-        for op in list(
-            self.baser.verification_by_state(STATE_VERIFYING, STATE_AWAITING_ARTIFACTS)
-        ):
-            if self.pending is not None:
-                break
+        if self.pending is not None:
+            return
+        batch = self.baser.verification_batch(after=self.scan_after)
+        if not batch:
+            self.scan_after = ""
+            return
+        for op in batch:
+            self.scan_after = op.associationSaid
+            if op.state not in (STATE_VERIFYING, STATE_AWAITING_ARTIFACTS):
+                continue
             if self.retry_at.get(op.associationSaid, 0) > self.tyme:
                 continue
             self.verify_operation(op)
+            break  # At most one native verification attempt per scheduler turn.
 
     def verify_operation(self, op: VerificationWork) -> VerificationWork:
         """Verify the selected credential profile before completing initial verification."""
@@ -121,15 +128,17 @@ class PresentationVerifierDoer(doing.DoDoer):
                 candidate=candidate,
                 trusted_geda_aid=self.trusted_geda_aid,
             )
-            # The database remains the work list. The queue contains only the
-            # current dispatch, so restart recovers work without queue persistence.
-            self.retry_at.pop(op.associationSaid, None)
-            op.state = STATE_VERIFYING
-            self.baser.pin_verification(op)
-            self.pending = op.associationSaid
-            self.eoa_verifier.msgs.append(association.sad)
-            return op
         except MissingCredentialArtifactsError as exc:
+            self.retry_at[op.associationSaid] = self.tyme + self.retry_delay
             return self.baser.mark_awaiting_artifacts(op, str(exc))
         except (VerificationError, kering.ValidationError) as exc:
+            self.retry_at.pop(op.associationSaid, None)
             return self.baser.mark_failed(op, str(exc))
+
+        # The database remains the work list. The queue contains only the
+        # current dispatch, so restart recovers work without queue persistence.
+        self.retry_at.pop(op.associationSaid, None)
+        self.baser.mark_verifying(op, op.failureReason)
+        self.pending = op.associationSaid
+        self.eoa_verifier.msgs.append(association.sad)
+        return op

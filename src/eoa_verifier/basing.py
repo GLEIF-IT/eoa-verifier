@@ -1,6 +1,7 @@
 """Persist initial verification progress independently of native evidence."""
 
 from dataclasses import dataclass
+from itertools import islice
 
 from keri.db import dbing, koming
 
@@ -33,7 +34,7 @@ class VerifierBaser(dbing.LMDBer):
     def get_verification(self, said):
         return self.verifications.get(keys=(said,))
 
-    def pin_verification(self, work):
+    def _pin_verification(self, work):
         self.verifications.pin(keys=(work.associationSaid,), val=work)
         return work
 
@@ -43,7 +44,7 @@ class VerifierBaser(dbing.LMDBer):
         return (
             existing
             if existing is not None
-            else self.pin_verification(
+            else self._pin_verification(
                 VerificationWork(associationSaid=association_said, grantSaid=grant_said)
             )
         )
@@ -53,19 +54,36 @@ class VerifierBaser(dbing.LMDBer):
         if current is None or current.state != STATE_VERIFYING:
             raise ValueError("only unfinished verification can complete")
         current.state, current.failureReason = STATE_VERIFIED, ""
-        self.pin_verification(current)
+        self._pin_verification(current)
+
+    def mark_verifying(self, work, reason=""):
+        work.state, work.failureReason = STATE_VERIFYING, reason
+        return self._pin_verification(work)
 
     def mark_awaiting_artifacts(self, work, reason):
         if work.state != STATE_AWAITING_ARTIFACTS or work.failureReason != reason:
             work.state, work.failureReason = STATE_AWAITING_ARTIFACTS, reason
-            self.pin_verification(work)
+            self._pin_verification(work)
         return work
 
     def mark_failed(self, work, reason):
         work.state, work.failureReason = STATE_FAILED, reason
-        return self.pin_verification(work)
+        return self._pin_verification(work)
 
-    def verification_by_state(self, *states):
-        for _, work in self.verifications.getItemIter():
-            if work.state in states:
-                yield work
+    def verification_batch(self, *, after="", limit=32):
+        """Read a bounded page after a SAID, closing the transaction before return.
+
+        Include terminal records so scanning is bounded even with a long history.
+        The caller wraps to the start after an empty page; no cursor survives a yield.
+        """
+        with self.env.begin(db=self.verifications.sdb) as txn:
+            with txn.cursor() as cursor:
+                if not cursor.set_range(after.encode()):
+                    return []
+                if after and cursor.key() == after.encode():
+                    if not cursor.next():
+                        return []
+                return [
+                    self.verifications.deserializer(raw)
+                    for _, raw in islice(cursor.iternext(), limit)
+                ]

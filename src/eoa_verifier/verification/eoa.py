@@ -9,7 +9,6 @@ from eth_account import Account
 from eth_account.messages import encode_typed_data
 from eth_keys.constants import SECPK1_N
 from eth_keys.exceptions import BadSignature
-from eth_utils import is_checksum_address
 from keri.core import coring
 
 DOMAIN_TAG = "vlei-external-association/v1"
@@ -35,26 +34,6 @@ def validate_association_identifiers(
         raise ValueError(
             "LE credential SAID must be canonical with no trailing material"
         )
-
-
-def normalize_ext_id(chain_id: int, address: str) -> str:
-    """Return lowercase CAIP-10, checking EIP-55 on mixed-case input addresses."""
-    if (
-        type(chain_id) is not int
-        or not 0 < chain_id < 2**256
-        or len(str(chain_id)) > 32
-    ):
-        raise ValueError(
-            "chain ID must be a positive uint256 within the CAIP-2 32-character reference limit"
-        )
-    if not isinstance(address, str) or not re.fullmatch(r"0x[0-9a-fA-F]{40}", address):
-        raise ValueError("account must be a 20-byte 0x-prefixed address")
-    letters = address[2:]
-    if not (
-        letters == letters.lower() or letters == letters.upper()
-    ) and not is_checksum_address(address):
-        raise ValueError("mixed-case account has an invalid EIP-55 checksum")
-    return f"eip155:{chain_id}:{address.lower()}"
 
 
 def ext_id_chain(ext_id: str) -> int:

@@ -4,6 +4,11 @@ The verifier library receives and verifies; these helpers own test controllers,
 credential issuance setup, and supporting evidence transport.
 """
 
+import socket
+
+from eth_account import Account
+from eth_account.messages import encode_typed_data
+from keri import core
 from hio.base import doing
 from keri.app import habbing, signing
 from keri.core import coring, eventing, parsing, serdering
@@ -14,6 +19,27 @@ from keri.vdr import credentialing, verifying
 
 from eoa_verifier.verification.constants import ASSOCIATION_SCHEMA, LE_SCHEMA
 from eoa_verifier.verification.eoa import DOMAIN_TAG, PROOF_ALGORITHM, build_challenge
+
+
+KEY = "0x" + "0" * 63 + "1"  # Public Anvil test account only.
+
+
+def free_port():
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def candidate():
+    said = coring.Diger(ser=b"test").qb64
+    challenge = build_challenge(
+        issuer_aid=core.Signer().verfer.qb64,
+        le_vlei_said=said,
+        ext_id=f"eip155:31337:{Account.from_key(KEY).address.lower()}",
+        nonce="test-account",
+    )
+    sig = Account.sign_message(encode_typed_data(full_message=challenge), KEY).signature
+    return association_from_challenge(challenge, "0x" + sig.hex(), said).sad
 
 
 def anchor(hab, event) -> serdering.SerderKERI:

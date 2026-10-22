@@ -1,7 +1,6 @@
 """Real witnessed KERI/IPEX verification with isolated stores and local Anvil."""
 
 import shutil
-import socket
 import subprocess
 from contextlib import ExitStack
 from importlib.resources import files
@@ -16,6 +15,8 @@ from keri.core import coring, scheming
 from keri.db import basing
 from keri.help import helping
 from native_helpers import (
+    KEY,
+    free_port,
     IssuerEscrows,
     anchor,
     approve_qvi,
@@ -32,14 +33,6 @@ from native_helpers import (
 from eoa_verifier.serving import ServiceConfig, setup_service
 from eoa_verifier.verification.constants import LE_SCHEMA, QVI_SCHEMA
 from eoa_verifier.verification.eoa import build_challenge
-
-KEY = "0x" + "0" * 63 + "1"  # Public Anvil test account only.
-
-
-def free_port():
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 def test_native_grant_verification_and_restart(tmp_path):
@@ -247,7 +240,9 @@ def test_native_grant_verification_and_restart(tmp_path):
             yield from send(stream)
             while runtime.baser.get_verification(raced.said) is None:
                 yield 0.01
-            coordinator.process_ready()
+            while coordinator.pending != raced.said:
+                coordinator.process_ready()
+                yield 0.01
             while not coordinator.eoa_verifier.cues:
                 yield 0.01
             assert coordinator.eoa_verifier.cues[0]["kin"] == "verified"
