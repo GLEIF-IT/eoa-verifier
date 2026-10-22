@@ -1,0 +1,27 @@
+# Local editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+
+# Python environments, bytecode and tooling caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Build artifacts and local configuration
+build/
+dist/
+*.egg-info/
+.env
+.env.*
+!.env.example
+
+# Disposable local review output
+.ignored/
