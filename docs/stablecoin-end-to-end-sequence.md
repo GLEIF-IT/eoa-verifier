@@ -4,7 +4,14 @@ Proposed local end-to-end workflow. Both parties first establish an EOA associat
 
 [Open the rendered chart](stablecoin-end-to-end-sequence.svg). The detailed ceremony is in [EOA association creation and verification](association-verification-sequence.md).
 
-```mermaid
+![Sequence chart showing verified EOA associations and policy-controlled stablecoin transfers on Anvil](stablecoin-end-to-end-sequence.svg)
+
+<details>
+<summary>Editable Mermaid source</summary>
+
+Render exports on an opaque white canvas to preserve this palette in light and dark viewers.
+
+```text
 %%{init: {"theme":"base","fontFamily":"Arial, sans-serif","themeCSS":"text { font-family: Arial, sans-serif !important; }","themeVariables":{"fontFamily":"Arial, sans-serif","primaryColor":"#003336","primaryTextColor":"#FFFFFF","primaryBorderColor":"#003336","lineColor":"#6A7B7F","actorBkg":"#003336","actorBorder":"#003336","actorTextColor":"#FFFFFF","actorLineColor":"#6A7B7F","signalColor":"#003336","signalTextColor":"#003336","labelBoxBkgColor":"#DFFBC0","labelBoxBorderColor":"#6A7B7F","labelTextColor":"#003336","loopTextColor":"#003336","noteBkgColor":"#E5DCE6","noteBorderColor":"#6A7B7F","noteTextColor":"#003336","sequenceNumberColor":"#FFFFFF"},"sequence":{"mirrorActors":false,"actorMargin":32,"width":165,"height":55,"messageMargin":25,"noteMargin":12,"diagramMarginX":20,"diagramMarginY":20,"wrap":false,"actorFontFamily":"Arial","messageFontFamily":"Arial","noteFontFamily":"Arial"}}}%%
 sequenceDiagram
     autonumber
@@ -66,6 +73,8 @@ sequenceDiagram
         end
     end
 ```
+
+</details>
 
 The transfer path is the local **policy-controlled stablecoin wrapper** (`wUSDC`), with test balances prepared in setup; a direct transfer of the underlying mock USDC does not enforce this policy. Check the underlying `Transfer` event and balances: a successful receipt alone does not prove a transfer, because a policy failure can return `false`. Anvil executes the transactions. Forge is deployment/test tooling, not a participant in each transfer.
 

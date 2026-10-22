@@ -4,7 +4,14 @@ Proposed design. A legal entity operator uses an Ethereum wallet and a vLEI wall
 
 [Open the rendered chart](association-verification-sequence.svg). Dark teal participants, lavender notes and green completion bands follow the methodology's sequence diagram.
 
-```mermaid
+![Sequence chart showing EOA association creation, independent verification and webhook delivery](association-verification-sequence.svg)
+
+<details>
+<summary>Editable Mermaid source</summary>
+
+Render exports on an opaque white canvas to preserve this palette in light and dark viewers.
+
+```text
 %%{init: {"theme":"base","fontFamily":"Arial, sans-serif","themeCSS":"text { font-family: Arial, sans-serif !important; }","themeVariables":{"fontFamily":"Arial, sans-serif","primaryColor":"#003336","primaryTextColor":"#FFFFFF","primaryBorderColor":"#003336","lineColor":"#6A7B7F","actorBkg":"#003336","actorBorder":"#003336","actorTextColor":"#FFFFFF","actorLineColor":"#6A7B7F","signalColor":"#003336","signalTextColor":"#003336","labelBoxBkgColor":"#DFFBC0","labelBoxBorderColor":"#6A7B7F","labelTextColor":"#003336","loopTextColor":"#003336","noteBkgColor":"#E5DCE6","noteBorderColor":"#6A7B7F","noteTextColor":"#003336","sequenceNumberColor":"#FFFFFF"},"sequence":{"mirrorActors":false,"actorMargin":28,"width":155,"height":55,"messageMargin":24,"noteMargin":12,"diagramMarginX":20,"diagramMarginY":20,"wrap":false,"actorFontFamily":"Arial","messageFontFamily":"Arial","noteFontFamily":"Arial"}}}%%
 sequenceDiagram
     autonumber
@@ -67,6 +74,8 @@ sequenceDiagram
         end
     end
 ```
+
+</details>
 
 The webhook carries the association SAID, issuer AID, LE vLEI SAID, canonical `extId`, verdict, revision, issuance-order facts and observation time/block. The oracle derives `wallet` from `extId` and `identityRef = keccak256(issuerAid)`; it checks request authenticity and deployment scope rather than repeating association-proof verification. Its verifier AID allowlist is configured: OOBI discovery alone does not authorize a caller.
 
