@@ -18,6 +18,11 @@ def request_rpc(client, *, request_id, method, params, tymth, timeout, tock):
     if response["status"] != 200:
         raise ValueError(f"{method} HTTP status {response['status']}")
     payload = json.loads(response["body"])
-    if payload.get("id") != request_id or "error" in payload:
+    if (
+        not isinstance(payload, dict)
+        or payload.get("id") != request_id
+        or "error" in payload
+        or "result" not in payload
+    ):
         raise ValueError(f"{method} returned an invalid RPC response")
     return payload["result"]

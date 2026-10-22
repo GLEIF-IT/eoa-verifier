@@ -105,3 +105,89 @@ def test_rpc_timeout_yields_and_closes_connection():
     worker.msgs.append(candidate())
     cue = run_worker(worker, tcp.ServerDoer(server=server))
     assert cue["kin"] == "retry" and "timed out" in cue["error"]
+
+
+@pytest.mark.parametrize("payload", [None, [], {"id": 1}, {"id": 1, "error": {}}])
+def test_malformed_rpc_envelope_remains_retryable(payload):
+    class Endpoint:
+        def on_post(self, req, rep):
+            import json
+
+            rep.content_type = "application/json"
+            rep.text = json.dumps(payload)
+
+    app = falcon.App()
+    app.add_route("/", Endpoint())
+    server = http.Server(host="127.0.0.1", port=free_port(), app=app)
+    worker = EoaVerifierDoer(
+        rpc_url=f"http://127.0.0.1:{server.servant.ha[1]}", chain_id=31337
+    )
+    worker.msgs.append(candidate())
+    cue = run_worker(worker, http.ServerDoer(server=server))
+    assert cue["kin"] == "retry" and "invalid RPC response" in cue["error"]
+
+
+@pytest.mark.parametrize(
+    "block",
+    [None, {"number": 42, "hash": "0x" + "12" * 32}, {"number": "0x2a", "hash": None}],
+)
+def test_malformed_block_remains_retryable(block):
+    class Endpoint(Rpc):
+        def on_post(self, req, rep):
+            super().on_post(req, rep)
+            if req.media["method"] == "eth_getBlockByNumber":
+                rep.media["result"] = block
+
+    app = falcon.App()
+    endpoint = Endpoint()
+    app.add_route("/", endpoint)
+    server = http.Server(host="127.0.0.1", port=free_port(), app=app)
+    worker = EoaVerifierDoer(
+        rpc_url=f"http://127.0.0.1:{server.servant.ha[1]}", chain_id=31337
+    )
+    worker.msgs.append(candidate())
+    cue = run_worker(worker, http.ServerDoer(server=server))
+    assert cue["kin"] == "retry" and "no identified block" in cue["error"]
+    assert [call["method"] for call in endpoint.calls] == [
+        "eth_chainId",
+        "eth_getBlockByNumber",
+    ]
+
+
+def test_programming_error_surfaces_and_closes_client(monkeypatch):
+    clients = []
+
+    def broken_request(client, **kwa):
+        clients.append(client)
+        raise AttributeError("programming defect")
+
+    monkeypatch.setattr("eoa_verifier.verification.worker.request_rpc", broken_request)
+    worker = EoaVerifierDoer(rpc_url="http://127.0.0.1:1", chain_id=31337)
+    worker.msgs.append(candidate())
+    with pytest.raises(AttributeError, match="programming defect"):
+        doing.Doist(limit=0.05).do(doers=[worker])
+    assert not worker.cues
+    assert not any(isinstance(d, http.ClientDoer) for d in worker.doers)
+    assert clients and not clients[0].connector.opened
+
+
+def test_cancellation_closes_in_flight_client_without_result():
+    server = tcp.Server(host="127.0.0.1", port=free_port())
+    server_doer = tcp.ServerDoer(server=server)
+    worker = EoaVerifierDoer(rpc_url=f"http://127.0.0.1:{server.ha[1]}", chain_id=31337)
+    worker.msgs.append(candidate())
+    clients = []
+
+    def cancel(tymth, tock=0.0, **kwa):
+        yield tock
+        while not server.ixes:
+            yield 0.01
+        clients.extend(d.client for d in worker.doers if isinstance(d, http.ClientDoer))
+        parent.remove([worker, server_doer])
+
+    parent = doing.DoDoer(doers=[worker, server_doer, doing.doify(cancel)])
+    doing.Doist(real=True, tock=0.01, limit=2).do(doers=[parent])
+    assert parent.done and clients
+    assert not clients[0].connector.opened
+    assert not worker.cues
+    assert not any(isinstance(d, http.ClientDoer) for d in worker.doers)
