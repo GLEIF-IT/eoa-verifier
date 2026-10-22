@@ -2,17 +2,17 @@
 
 Proposed local end-to-end workflow. Both parties first establish an EOA association. `eoa-verifier` owns cryptographic verification and current-status queries; `vlei-oracle` authenticates results and manages on-chain endorsements. Forge deploys the demo; Anvil runs its Ethereum chain.
 
-[Open the rendered chart](stablecoin-end-to-end-sequence.svg). The detailed ceremony is in [EOA association creation and verification](association-verification-sequence.md).
+[Open the rendered chart](stablecoin-end-to-end-sequence.svg). Detailed charts cover [association creation](association-creation-sequence.md) and [independent verification and webhook delivery](association-verification-sequence.md).
 
 ![Sequence chart showing verified EOA associations and policy-controlled stablecoin transfers on Anvil](stablecoin-end-to-end-sequence.svg)
 
 <details>
 <summary>Editable Mermaid source</summary>
 
-Render exports on an opaque white canvas to preserve this palette in light and dark viewers.
+Render exports on an opaque white canvas to preserve this palette in light and dark viewers. Keep bottom participant labels enabled so lifelines span the full sequence.
 
 ```text
-%%{init: {"theme":"base","fontFamily":"Arial, sans-serif","themeCSS":"text { font-family: Arial, sans-serif !important; }","themeVariables":{"fontFamily":"Arial, sans-serif","primaryColor":"#003336","primaryTextColor":"#FFFFFF","primaryBorderColor":"#003336","lineColor":"#6A7B7F","actorBkg":"#003336","actorBorder":"#003336","actorTextColor":"#FFFFFF","actorLineColor":"#6A7B7F","signalColor":"#003336","signalTextColor":"#003336","labelBoxBkgColor":"#DFFBC0","labelBoxBorderColor":"#6A7B7F","labelTextColor":"#003336","loopTextColor":"#003336","noteBkgColor":"#E5DCE6","noteBorderColor":"#6A7B7F","noteTextColor":"#003336","sequenceNumberColor":"#FFFFFF"},"sequence":{"mirrorActors":false,"actorMargin":32,"width":165,"height":55,"messageMargin":25,"noteMargin":12,"diagramMarginX":20,"diagramMarginY":20,"wrap":false,"actorFontFamily":"Arial","messageFontFamily":"Arial","noteFontFamily":"Arial"}}}%%
+%%{init: {"theme":"base","fontFamily":"Arial, sans-serif","themeCSS":"text { font-family: Arial, sans-serif !important; }","themeVariables":{"fontFamily":"Arial, sans-serif","primaryColor":"#003336","primaryTextColor":"#FFFFFF","primaryBorderColor":"#003336","lineColor":"#6A7B7F","actorBkg":"#003336","actorBorder":"#003336","actorTextColor":"#FFFFFF","actorLineColor":"#6A7B7F","signalColor":"#003336","signalTextColor":"#003336","labelBoxBkgColor":"#DFFBC0","labelBoxBorderColor":"#6A7B7F","labelTextColor":"#003336","loopTextColor":"#003336","noteBkgColor":"#E5DCE6","noteBorderColor":"#6A7B7F","noteTextColor":"#003336","sequenceNumberColor":"#FFFFFF"},"sequence":{"mirrorActors":true,"actorMargin":32,"width":165,"height":55,"messageMargin":25,"noteMargin":12,"diagramMarginX":20,"diagramMarginY":20,"wrap":false,"actorFontFamily":"Arial","messageFontFamily":"Arial","noteFontFamily":"Arial"}}}%%
 sequenceDiagram
     autonumber
     participant Setup as Local setup<br/>Forge scripts
@@ -60,7 +60,7 @@ sequenceDiagram
         else Policy fails or is pending
             C-->>A: Wrapper returns false, no token movement
         end
-        Note over O,C: Contracts consume oracle endorsements<br/>They make no HTTP calls and do not verify KERI or EIP-712 proofs
+        Note over O,C: Contracts consume oracle endorsements<br/>No HTTP calls or verification<br/>of KERI or EIP-712 proofs
     end
 
     rect rgb(246, 243, 247)
