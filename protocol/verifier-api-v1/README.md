@@ -2,8 +2,8 @@
 
 `eoa-verifier` verifies EOA associations and delivers their status to a configured
 webhook. `vlei-oracle` uses that authenticated status to publish or withdraw
-Ethereum mappings. This document describes the service contract; no runtime is
-implemented yet. [ADR 0002](../../adrs/0002-verifier-result-object.md) illustrates
+Ethereum mappings. This document describes the intended service contract; see
+the [README](../../README.md) for the implemented scope. [ADR 0002](../../adrs/0002-verifier-result-object.md) illustrates
 a provisional result object.
 
 ## Responsibilities
@@ -47,6 +47,16 @@ reassessments. Initial source-chain validation remains mandatory.
 Persist acceptance and its webhook obligation together. Deliver after commit;
 the receiver durably stores the status before acknowledging. Retry unacknowledged
 events across restart, preserving event identity and duplicate-safe processing.
+
+Use one HIO sender per configured destination. Configurable defaults are one
+request in flight, at least one second between starts (including successes),
+and a 10-second overall request timeout. Transient failures use jittered
+exponential backoff from 1–2 seconds to a 150–300-second cap; valid `Retry-After`
+can extend that delay. Persist destination-wide cooldown across restart, reset
+failures only on an authenticated ACK, and retain permanent errors for correction.
+Retry the immutable event with a fresh signature; never discard failed events.
+Only the worker retries, using yielding waits. These are operational defaults,
+not cryptographic requirements; the authenticated ACK protocol is unchanged.
 
 Associations arrive through IPEX Grant with supporting native KERI evidence.
 Grant receipt or credential bytes alone do not prove revocation. Retire an
