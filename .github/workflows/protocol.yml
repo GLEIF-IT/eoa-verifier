@@ -1,0 +1,16 @@
+name: Protocol conformance
+on:
+  pull_request:
+  push:
+    branches: [master]
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y libsodium-dev
+      - run: python -m pip install -r protocol/verifier-api-v1/requirements.txt
+      - run: python -m unittest discover -s protocol/verifier-api-v1 -p 'test_*.py' -v

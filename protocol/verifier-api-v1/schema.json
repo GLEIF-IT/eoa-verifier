@@ -1,0 +1,779 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gleif-it.github.io/eoa-verifier/protocol/verifier-api-v1/schema.json",
+  "$ref": "#/$defs/envelope",
+  "$defs": {
+    "counter": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,19})$",
+      "maxLength": 20
+    },
+    "positive": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]{0,19}$",
+      "maxLength": 20
+    },
+    "chain": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]{0,31}$",
+      "maxLength": 32
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "maxLength": 64
+    },
+    "blockHash": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$",
+      "maxLength": 66
+    },
+    "aid": {
+      "type": "string",
+      "pattern": "^[BDE][A-Za-z0-9_-]{43}$",
+      "maxLength": 44
+    },
+    "said": {
+      "type": "string",
+      "pattern": "^E[A-Za-z0-9_-]{43}$",
+      "maxLength": 44
+    },
+    "nonce": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+      "maxLength": 43
+    },
+    "extId": {
+      "type": "string",
+      "pattern": "^eip155:[1-9][0-9]{0,31}:0x[0-9a-f]{40}$",
+      "maxLength": 82
+    },
+    "diagnostic": {
+      "type": "string",
+      "pattern": "^[ -~]{0,256}$",
+      "maxLength": 256
+    },
+    "establishment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "digest"
+      ],
+      "properties": {
+        "sequence": {
+          "$ref": "#/$defs/counter"
+        },
+        "digest": {
+          "$ref": "#/$defs/said"
+        }
+      }
+    },
+    "protected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "kind",
+        "signerAid",
+        "audience",
+        "establishment",
+        "method",
+        "target",
+        "issuedAt",
+        "expiresAt",
+        "nonce",
+        "payloadDigest",
+        "requestDigest",
+        "requestNonce",
+        "status"
+      ],
+      "properties": {
+        "version": {
+          "enum": [
+            "1"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "request",
+            "response"
+          ]
+        },
+        "signerAid": {
+          "$ref": "#/$defs/aid"
+        },
+        "audience": {
+          "$ref": "#/$defs/aid"
+        },
+        "establishment": {
+          "$ref": "#/$defs/establishment"
+        },
+        "method": {
+          "enum": [
+            "GET",
+            "POST"
+          ]
+        },
+        "target": {
+          "type": "string",
+          "pattern": "^/v1/[A-Za-z0-9/?=&_-]+$",
+          "maxLength": 256
+        },
+        "issuedAt": {
+          "$ref": "#/$defs/counter"
+        },
+        "expiresAt": {
+          "$ref": "#/$defs/counter"
+        },
+        "nonce": {
+          "$ref": "#/$defs/nonce"
+        },
+        "payloadDigest": {
+          "$ref": "#/$defs/hash"
+        },
+        "requestDigest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/hash"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requestNonce": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nonce"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "enum": [
+                "200",
+                "202",
+                "400",
+                "401",
+                "403",
+                "404",
+                "409",
+                "413",
+                "422",
+                "503"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "facts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issuerAid",
+        "leSaid",
+        "qviSaid",
+        "extId",
+        "issuance"
+      ],
+      "properties": {
+        "issuerAid": {
+          "$ref": "#/$defs/aid"
+        },
+        "leSaid": {
+          "$ref": "#/$defs/said"
+        },
+        "qviSaid": {
+          "$ref": "#/$defs/said"
+        },
+        "extId": {
+          "$ref": "#/$defs/extId"
+        },
+        "issuance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "registrySaid",
+            "telSequence",
+            "telDigest",
+            "anchorSequence",
+            "anchorDigest"
+          ],
+          "properties": {
+            "registrySaid": {
+              "$ref": "#/$defs/said"
+            },
+            "telSequence": {
+              "enum": [
+                "0"
+              ]
+            },
+            "telDigest": {
+              "$ref": "#/$defs/said"
+            },
+            "anchorSequence": {
+              "$ref": "#/$defs/counter"
+            },
+            "anchorDigest": {
+              "$ref": "#/$defs/said"
+            }
+          }
+        }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome",
+        "reasonCode",
+        "facts",
+        "provenance"
+      ],
+      "properties": {
+        "outcome": {
+          "enum": [
+            "valid",
+            "invalid",
+            "unavailable"
+          ]
+        },
+        "reasonCode": {
+          "enum": [
+            "VALID",
+            "ASSOCIATION_INVALID",
+            "SOURCE_INVALID",
+            "SOURCE_REVOKED",
+            "ASSOCIATION_REVOKED",
+            "PROOF_INVALID",
+            "ACCOUNT_CONTRACT",
+            "EVIDENCE_UNAVAILABLE",
+            "SOURCE_UNAVAILABLE",
+            "RPC_UNAVAILABLE",
+            "NETWORK_MISMATCH",
+            "FRESHNESS_UNAVAILABLE"
+          ]
+        },
+        "facts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/facts"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "policy",
+            "evidenceDigest"
+          ],
+          "properties": {
+            "policy": {
+              "enum": [
+                "eoa-v1"
+              ]
+            },
+            "evidenceDigest": {
+              "$ref": "#/$defs/hash"
+            }
+          }
+        }
+      }
+    },
+    "account": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "chainId",
+        "blockNumber",
+        "blockHash",
+        "observedAt",
+        "codeClass",
+        "codeDigest"
+      ],
+      "properties": {
+        "chainId": {
+          "$ref": "#/$defs/chain"
+        },
+        "blockNumber": {
+          "$ref": "#/$defs/counter"
+        },
+        "blockHash": {
+          "$ref": "#/$defs/blockHash"
+        },
+        "observedAt": {
+          "$ref": "#/$defs/counter"
+        },
+        "codeClass": {
+          "enum": [
+            "empty",
+            "delegation",
+            "contract"
+          ]
+        },
+        "codeDigest": {
+          "$ref": "#/$defs/hash"
+        }
+      }
+    },
+    "peer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "peerAid",
+        "kelDigest",
+        "telDigest",
+        "completedAt"
+      ],
+      "properties": {
+        "peerAid": {
+          "$ref": "#/$defs/aid"
+        },
+        "kelDigest": {
+          "$ref": "#/$defs/hash"
+        },
+        "telDigest": {
+          "$ref": "#/$defs/hash"
+        },
+        "completedAt": {
+          "$ref": "#/$defs/counter"
+        }
+      }
+    },
+    "credential": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "credentialSaid",
+        "registrySaid",
+        "telSequence",
+        "telDigest",
+        "issuerAid",
+        "kelSequence",
+        "kelDigest",
+        "startedAt",
+        "completedAt",
+        "peers"
+      ],
+      "properties": {
+        "credentialSaid": {
+          "$ref": "#/$defs/said"
+        },
+        "registrySaid": {
+          "$ref": "#/$defs/said"
+        },
+        "telSequence": {
+          "$ref": "#/$defs/counter"
+        },
+        "telDigest": {
+          "$ref": "#/$defs/said"
+        },
+        "issuerAid": {
+          "$ref": "#/$defs/aid"
+        },
+        "kelSequence": {
+          "$ref": "#/$defs/counter"
+        },
+        "kelDigest": {
+          "$ref": "#/$defs/said"
+        },
+        "startedAt": {
+          "$ref": "#/$defs/counter"
+        },
+        "completedAt": {
+          "$ref": "#/$defs/counter"
+        },
+        "peers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/peer"
+          },
+          "minItems": 1,
+          "maxItems": 16
+        }
+      }
+    },
+    "observations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "account",
+        "credentials"
+      ],
+      "properties": {
+        "account": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/account"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "credentials": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/credential"
+          },
+          "minItems": 0,
+          "maxItems": 3
+        }
+      }
+    },
+    "assessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "profile",
+        "verifierAid",
+        "associationSaid",
+        "revision",
+        "decision",
+        "decisionDigest",
+        "observations"
+      ],
+      "properties": {
+        "version": {
+          "enum": [
+            "1"
+          ]
+        },
+        "profile": {
+          "enum": [
+            "vlei-external-association/eoa/v1"
+          ]
+        },
+        "verifierAid": {
+          "$ref": "#/$defs/aid"
+        },
+        "associationSaid": {
+          "$ref": "#/$defs/said"
+        },
+        "revision": {
+          "$ref": "#/$defs/positive"
+        },
+        "decision": {
+          "$ref": "#/$defs/decision"
+        },
+        "decisionDigest": {
+          "$ref": "#/$defs/hash"
+        },
+        "observations": {
+          "$ref": "#/$defs/observations"
+        }
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "streamId",
+        "eventSequence",
+        "eventId",
+        "assessment"
+      ],
+      "properties": {
+        "streamId": {
+          "$ref": "#/$defs/nonce"
+        },
+        "eventSequence": {
+          "$ref": "#/$defs/positive"
+        },
+        "eventId": {
+          "$ref": "#/$defs/hash"
+        },
+        "assessment": {
+          "$ref": "#/$defs/assessment"
+        }
+      }
+    },
+    "ack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "acceptanceId",
+        "eventId",
+        "payloadDigest",
+        "outcome"
+      ],
+      "properties": {
+        "acceptanceId": {
+          "$ref": "#/$defs/hash"
+        },
+        "eventId": {
+          "$ref": "#/$defs/hash"
+        },
+        "payloadDigest": {
+          "$ref": "#/$defs/hash"
+        },
+        "outcome": {
+          "enum": [
+            "applied",
+            "same",
+            "stale"
+          ]
+        }
+      }
+    },
+    "factsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "profile",
+        "verifierAid",
+        "associationSaid",
+        "facts"
+      ],
+      "properties": {
+        "version": {
+          "enum": [
+            "1"
+          ]
+        },
+        "profile": {
+          "enum": [
+            "vlei-external-association/eoa/v1"
+          ]
+        },
+        "verifierAid": {
+          "$ref": "#/$defs/aid"
+        },
+        "associationSaid": {
+          "$ref": "#/$defs/said"
+        },
+        "facts": {
+          "$ref": "#/$defs/facts"
+        }
+      }
+    },
+    "refreshRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "associationSaid",
+        "chainId",
+        "minRevision"
+      ],
+      "properties": {
+        "associationSaid": {
+          "$ref": "#/$defs/said"
+        },
+        "chainId": {
+          "$ref": "#/$defs/chain"
+        },
+        "minRevision": {
+          "$ref": "#/$defs/counter"
+        }
+      }
+    },
+    "pending": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestId",
+        "associationSaid",
+        "originRequestDigest",
+        "originRequestNonce",
+        "expiresAt",
+        "state"
+      ],
+      "properties": {
+        "requestId": {
+          "$ref": "#/$defs/hash"
+        },
+        "associationSaid": {
+          "$ref": "#/$defs/said"
+        },
+        "originRequestDigest": {
+          "$ref": "#/$defs/hash"
+        },
+        "originRequestNonce": {
+          "$ref": "#/$defs/nonce"
+        },
+        "expiresAt": {
+          "$ref": "#/$defs/counter"
+        },
+        "state": {
+          "enum": [
+            "pending"
+          ]
+        }
+      }
+    },
+    "complete": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestId",
+        "associationSaid",
+        "originRequestDigest",
+        "originRequestNonce",
+        "expiresAt",
+        "state",
+        "assessment"
+      ],
+      "properties": {
+        "requestId": {
+          "$ref": "#/$defs/hash"
+        },
+        "associationSaid": {
+          "$ref": "#/$defs/said"
+        },
+        "originRequestDigest": {
+          "$ref": "#/$defs/hash"
+        },
+        "originRequestNonce": {
+          "$ref": "#/$defs/nonce"
+        },
+        "expiresAt": {
+          "$ref": "#/$defs/counter"
+        },
+        "state": {
+          "enum": [
+            "complete"
+          ]
+        },
+        "assessment": {
+          "$ref": "#/$defs/assessment"
+        }
+      }
+    },
+    "replay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "streamId",
+        "after",
+        "next",
+        "highWater",
+        "events"
+      ],
+      "properties": {
+        "streamId": {
+          "$ref": "#/$defs/nonce"
+        },
+        "after": {
+          "$ref": "#/$defs/counter"
+        },
+        "next": {
+          "$ref": "#/$defs/counter"
+        },
+        "highWater": {
+          "$ref": "#/$defs/counter"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/event"
+          },
+          "minItems": 0,
+          "maxItems": 20
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "diagnostic",
+        "retryable"
+      ],
+      "properties": {
+        "code": {
+          "enum": [
+            "MALFORMED",
+            "AUTHENTICATION_FAILED",
+            "FORBIDDEN",
+            "NOT_FOUND",
+            "CONFLICT",
+            "TOO_LARGE",
+            "UNSUPPORTED",
+            "UNAVAILABLE"
+          ]
+        },
+        "diagnostic": {
+          "$ref": "#/$defs/diagnostic"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      }
+    },
+    "empty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {}
+    },
+    "envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protected",
+        "payload",
+        "signature"
+      ],
+      "properties": {
+        "protected": {
+          "$ref": "#/$defs/protected"
+        },
+        "payload": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/event"
+            },
+            {
+              "$ref": "#/$defs/ack"
+            },
+            {
+              "$ref": "#/$defs/assessment"
+            },
+            {
+              "$ref": "#/$defs/factsResponse"
+            },
+            {
+              "$ref": "#/$defs/refreshRequest"
+            },
+            {
+              "$ref": "#/$defs/pending"
+            },
+            {
+              "$ref": "#/$defs/complete"
+            },
+            {
+              "$ref": "#/$defs/replay"
+            },
+            {
+              "$ref": "#/$defs/error"
+            },
+            {
+              "$ref": "#/$defs/empty"
+            }
+          ]
+        },
+        "signature": {
+          "type": "string",
+          "pattern": "^AA[A-Za-z0-9_-]{86}$",
+          "maxLength": 88
+        }
+      }
+    }
+  }
+}
