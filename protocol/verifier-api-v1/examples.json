@@ -1,0 +1,38 @@
+[
+  {
+    "version": "1",
+    "profile": "vlei-external-association/eoa/v1",
+    "associationSaid": "example-association",
+    "revision": 1,
+    "outcome": "valid",
+    "reasonCode": "VALID",
+    "binding": {
+      "issuerAid": "example-issuer",
+      "leSaid": "example-le",
+      "qviSaid": "example-qvi",
+      "extId": "eip155:31337:0x1111111111111111111111111111111111111111"
+    }
+  },
+  {
+    "version": "1",
+    "profile": "vlei-external-association/eoa/v1",
+    "associationSaid": "example-association",
+    "revision": 2,
+    "outcome": "invalid",
+    "reasonCode": "ASSOCIATION_REVOKED",
+    "binding": {
+      "issuerAid": "example-issuer",
+      "leSaid": "example-le",
+      "qviSaid": "example-qvi",
+      "extId": "eip155:31337:0x1111111111111111111111111111111111111111"
+    }
+  },
+  {
+    "version": "1",
+    "profile": "vlei-external-association/eoa/v1",
+    "associationSaid": "example-incomplete-association",
+    "revision": 1,
+    "outcome": "unavailable",
+    "reasonCode": "EVIDENCE_UNAVAILABLE"
+  }
+]

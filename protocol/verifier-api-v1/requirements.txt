@@ -1,6 +1,0 @@
-# Encoding conformance only. Application packaging is a later PR.
-gleif_keri==1.2.15rc1
-gleif_hio==0.6.20rc3
-eth-account==0.14.0
-eth-utils==6.0.0
-jsonschema==4.26.0

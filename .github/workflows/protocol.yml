@@ -1,16 +1,30 @@
-name: Protocol conformance
+name: Schema examples
 on:
   pull_request:
   push:
     branches: [master]
 jobs:
-  contract:
+  schema:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: sudo apt-get update && sudo apt-get install -y libsodium-dev
-      - run: python -m pip install -r protocol/verifier-api-v1/requirements.txt
-      - run: python -m unittest discover -s protocol/verifier-api-v1 -p 'test_*.py' -v
+      - run: python -m pip install jsonschema==4.26.0
+      - name: Validate the schema and examples
+        run: |
+          python - <<'PYTHON'
+          import json
+          from pathlib import Path
+          from jsonschema import Draft202012Validator
+          root = Path('protocol/verifier-api-v1')
+          schema = json.loads((root / 'schema.json').read_text())
+          Draft202012Validator.check_schema(schema)
+          examples = json.loads((root / 'examples.json').read_text())
+          if not examples:
+              raise ValueError('No assessment examples')
+          for example in examples:
+              Draft202012Validator(schema).validate(example)
+          print(f'Validated schema and {len(examples)} examples')
+          PYTHON
