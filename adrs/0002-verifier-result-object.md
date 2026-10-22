@@ -25,7 +25,6 @@ This illustrative success payload preserves the proposed shape for that work:
   "association": {
     "issuerAid": "example-issuer",
     "leSaid": "example-le",
-    "qviSaid": "example-qvi",
     "extId": "eip155:31337:0x1111111111111111111111111111111111111111"
   }
 }
