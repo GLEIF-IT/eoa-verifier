@@ -14,7 +14,11 @@ from eoa_verifier.verification.errors import (
 
 
 def grant_candidate(rgy, grant_said):
-    """Read immutable candidate bytes from the native accepted Grant store."""
+    """Return an ACDC decoded from a locally accepted Grant, or None if absent.
+
+    The candidate supplies immutable bytes for inspection, not credential acceptance.
+    Native EXN/ACDC decoding and validation errors propagate. No network fetch occurs.
+    """
     exn, _ = (
         exchanging.cloneMessage(rgy.hby, said=grant_said)
         if grant_said
@@ -31,11 +35,16 @@ def verify_association(
     trusted_geda_aid: str,
     candidate: serdering.SerderACDC | None = None,
 ) -> serdering.SerderACDC:
-    """Check current LE/QVI trust and return the accepted association ACDC.
+    """Return a natively accepted association after local LE/QVI trust checks.
 
-    Missing accepted credentials or TEL state raise MissingCredentialArtifactsError
-    for retry. Invalid relationships and revoked credentials raise VerificationError.
-    External-profile verification is a separate step owned by the coordinator.
+    rgy supplies accepted credentials, schemas, TEL and issuer key state. said and
+    schema_said identify the expected association; trusted_geda_aid anchors QVI
+    issuance/delegation. Optional candidate bytes aid rejection while escrowed but
+    cannot establish acceptance. Require untargeted I2I LE linkage, correct holders,
+    nested SAIDs and witnessed issuance. Missing local artifacts raise
+    MissingCredentialArtifactsError; invalid relationships/revocation raise
+    VerificationError or native ValidationError. Wallet/RPC checks are separate.
+    No claim is made about evidence not yet delivered to these native stores.
     """
     # Escrowed bytes are not authority. They can, however, establish that this
     # candidate names a revoked or mismatched accepted source. Acceptance is
@@ -76,11 +85,12 @@ def verify_association(
 
 
 def accepted_credential(rgy, said: str, schema_said: str) -> serdering.SerderACDC:
-    """Read an accepted credential with the expected schema and live TEL state.
+    """Return a schema-checked, natively accepted credential with locally issued TEL state.
 
-    KERIpy's ``saved`` index marks credential acceptance. Re-read TEL status
-    because an accepted credential may since have been revoked. Missing evidence
-    is retryable; an unexpected schema, registry issuer, or revocation is invalid.
+    The native saved index supplies acceptance; TEL state supplies known status.
+    Missing credential/registry/status raises MissingCredentialArtifactsError;
+    wrong schema/registry issuer or known revocation raises VerificationError.
+    Read-through native caches support reopen. No network freshness query is made.
     """
     if rgy.reger.saved.get(keys=(said,)) is None:
         raise MissingCredentialArtifactsError(f"credential {said} is not accepted yet")
@@ -106,7 +116,13 @@ def accepted_credential(rgy, said: str, schema_said: str) -> serdering.SerderACD
 def stored_credential(
     rgy, said: str, schema_said: str, *, candidate=None
 ) -> serdering.SerderACDC:
-    """Read and validate credential bytes separately from acceptance/status."""
+    """Return schema-validated ACDC bytes for said, using candidate only if none are stored.
+
+    Reconstruct the native Serder to validate serialization, then require the exact
+    SAID and pinned schema. This does not establish native acceptance or TEL status.
+    Missing bytes/schema raise MissingCredentialArtifactsError; identity, schema or
+    serialized-data mismatches raise VerificationError (or native validation errors).
+    """
     creder = rgy.reger.creds.get(keys=(said,))
     if creder is None:
         creder = candidate
@@ -135,7 +151,14 @@ def stored_credential(
 
 
 def verify_witnessed_anchor(rgy, association):
-    """Use native anchor, historical witness-state, and signature APIs."""
+    """Verify locally stored issuance anchoring and witness receipts; return None.
+
+    Precondition: association passed accepted_credential, so registry/TEL state
+    exists. Use native anchor and historical witness-state/signature APIs for that
+    issuer event. Missing anchor/establishment/receipts raise
+    MissingCredentialArtifactsError; known revocation or an unwitnessed issuer raises
+    VerificationError. This reads native evidence, not a remote freshness guarantee.
+    """
     tever = rgy.reger.tevers[association.regi]
     state = tever.vcState(association.said)
     if state.et not in ("iss", "bis"):

@@ -16,15 +16,27 @@ from eoa_verifier.verification.eoa import (
 
 
 class EoaVerifierDoer(doing.DoDoer):
-    """Consume association ACDCs from ``msgs`` and emit completion ``cues``.
+    """Own initial wallet verification and one sequential account observation at a time.
 
-    Each cue identifies the association by ``said`` and has a ``kin`` of
-    ``verified`` (with result fields), ``failed`` (invalid proof/account), or
-    ``retry`` (RPC unavailable or unusable). Only the coordinator persists state.
-    One request runs at a time; HTTP clients are owned and closed by this worker.
+    msgs contains schema-validated association ACDC dictionaries, including d, i,
+    u, a.extId, a.proof and e.le.n. cues contains ordinary dictionaries:
+    - {kin: "verified", said, verified: {wallet, observation}};
+    - {kin: "failed", said, error} for an invalid wallet proof or account;
+    - {kin: "retry", said, error} for unavailable or unusable RPC responses.
+
+    observation contains chainId and blockNumber integers, blockHash and code hex
+    strings, and observedAt ISO timestamp. It is emitted, not persisted here or in
+    VerificationWork. The coordinator alone persists work status. Programming errors
+    propagate instead of becoming retry cues. Each HTTP ClientDoer is a child whose
+    lifetime ends on completion, failure or cancellation.
     """
 
     def __init__(self, *, rpc_url, chain_id, timeout=5.0, **kwa):
+        """Configure the trusted rpc_url, expected chain_id and per-call timeout in seconds.
+
+        msgs and cues are transient HIO decks; the coordinator persists work status
+        instead of these queues. kwa supplies native DoDoer options such as scheduling tock.
+        """
         self.rpc_url = rpc_url
         self.chain_id = chain_id
         self.timeout = timeout
@@ -33,7 +45,11 @@ class EoaVerifierDoer(doing.DoDoer):
         super().__init__(doers=[doing.doify(self.verify_do)], **kwa)
 
     def verify_do(self, tymth, tock=0.0, **opts):
-        """Consume one association at a time and emit its result cue."""
+        """Yield on the HIO clock while idle; process messages sequentially and append cues.
+
+        This long-lived generator has no result of its own. Cancellation unwinds any
+        active observation through its child-client cleanup.
+        """
         yield tock
         while True:
             if not self.msgs:
@@ -43,7 +59,13 @@ class EoaVerifierDoer(doing.DoDoer):
             self.cues.append(cue)
 
     def _verify_one(self, association):
-        """Keep proof/account failures distinct from unavailable RPC evidence."""
+        """Yield through one initial observation and return a cue for the ACDC's SAID.
+
+        Local proof/configured-chain ValueErrors and account-policy ValueErrors fail
+        the association. OSError or ValueError from RPC observation requests a retry;
+        this includes timeouts and a responding node on the wrong chain. Input shape
+        is assumed schema-validated. Unexpected programming errors propagate.
+        """
         said = association["d"]
         try:
             verify_eoa_proof(association)
@@ -71,9 +93,13 @@ class EoaVerifierDoer(doing.DoDoer):
         return {"kin": "verified", "said": said, "verified": result}
 
     def _observe_account(self, wallet):
-        """Own one HTTP client through the sequential RPC observation."""
-        # A new connection prevents a late response from a timed-out operation
-        # from being consumed as evidence for another association.
+        """Yield through chain ID, latest block, then code at that block; return observation.
+
+        A new worker-owned client prevents late responses from a timed-out observation
+        being consumed by another association. Each RPC has its own timeout. Finally
+        remove its ClientDoer, closing the connection even on cancellation or failure.
+        The timestamp records observation time, not an association validity deadline.
+        """
         client = http.Client(path=self.rpc_url, reconnectable=True)
         client_doer = http.ClientDoer(client=client)
         try:
@@ -92,7 +118,11 @@ class EoaVerifierDoer(doing.DoDoer):
             self.remove([client_doer])
 
     def _read_chain_id(self, client, expected_chain_id):
-        """Read a canonical chain quantity and require the configured network."""
+        """Yield for eth_chainId and return its integer value if it matches expected_chain_id.
+
+        Use the worker's per-call timeout; raise ValueError for a noncanonical quantity
+        or another network. Transport and envelope failures propagate to _verify_one.
+        """
         chain = yield from request_rpc(
             client,
             request_id=1,
@@ -112,7 +142,11 @@ class EoaVerifierDoer(doing.DoDoer):
         return chain_id
 
     def _read_block(self, client):
-        """Require an identified block before requesting account code."""
+        """Yield for the latest block and return its dictionary after number/hash checks.
+
+        Require a canonical hex quantity and 32-byte lowercase hash; unusable results
+        raise ValueError. This identifies the subsequent code read, not finality.
+        """
         block = yield from request_rpc(
             client,
             request_id=2,
@@ -133,7 +167,11 @@ class EoaVerifierDoer(doing.DoDoer):
         return block
 
     def _read_code(self, client, wallet, block_hash):
-        """Read account code at the identified, still-canonical block."""
+        """Yield for wallet code at block_hash with requireCanonical=True; return hex data.
+
+        Raise ValueError for unusable byte encoding. RPC refusal of the block is a
+        retryable observation failure, not evidence that the association is invalid.
+        """
         code = yield from request_rpc(
             client,
             request_id=3,

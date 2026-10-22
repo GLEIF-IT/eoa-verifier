@@ -1,6 +1,6 @@
 # Oracle acceptance and on-chain endorsement
 
-Proposed workflow for one verified association. The verifier has completed cryptographic verification. The oracle now decides whether that result may grant authority in its configured deployment.
+Future workflow beyond PR #2 for one accepted, verified association. The verifier has completed cryptographic verification. The oracle now decides whether that result may grant authority in its configured deployment.
 
 [Open the rendered chart](oracle-endorsement-sequence.svg) · [Workflow guide](../../README.md)
 
@@ -21,34 +21,33 @@ sequenceDiagram
 
     rect rgb(246, 243, 247)
         Note over V,C: 1. Accept an authenticated verification result
-        V->>O: AID-signed verified-event webhook<br/>Stable event ID, revision and association binding
+        V->>O: AID-signed verified-event webhook<br/>Stable event ID, revision and association
         O->>O: Check signature, allowed AID, action and chain<br/>Atomically deduplicate and persist accepted state
         O-->>V: Durable acknowledgement
         Note over V,O: Retry with the same event ID until acknowledged<br/>Acknowledgement is not an on-chain endorsement
         O->>O: Derive wallet from canonical extId<br/>Derive identityRef from issuer AID
     end
     rect rgb(246, 243, 247)
-        Note over V,C: 2. Gate new authority on fresh status and policy
-        O->>V: Query current association / source status<br/>and Ethereum account assessment
-        V-->>O: Valid / invalid / unavailable<br/>Revision, chain and observation block/time
-        O->>O: Check freshness and accepted revision<br/>Apply deployment and replacement policy
+        Note over V,C: 2. Select the accepted association
+        O->>O: Check durable revocation and replacement state<br/>Apply configured chain and ownership policy
+        Note over V,O: Trust authenticated verifier status<br/>No new verification or account query before posting
     end
-    alt Valid, fresh and eligible
+    alt Issued, verified and selected
         rect rgb(223, 251, 192)
             O->>C: Register identity hint, then publish<br/>exact-wallet / exact-association endorsement
             C-->>O: Transaction receipts
-            O->>O: Reconcile canonical confirmations<br/>Persist endorsement state
+            O->>O: Check receipts and contract state<br/>Persist endorsement state
             Note over O,C: Confirmed endorsement can satisfy transfer policy
         end
-    else Invalid, unavailable, stale or ineligible
-        O->>O: Do not grant new authority<br/>Retry transient failures or handle invalidation
+    else Revoked, superseded or ineligible
+        O->>O: Do not grant new authority<br/>Record the reason without publishing
     end
 ```
 
 </details>
 
-The oracle derives `wallet` from `extId` and `identityRef = keccak256(issuerAid)`, and checks these against the accepted binding and deployment scope. It authenticates the verifier's result without repeating KERI or EIP-712 association-proof verification. Unauthenticated or out-of-scope events do not enter accepted state; duplicates do not create duplicate effects.
+The oracle derives `wallet` from `extId` and `identityRef = keccak256(issuerAid)`, and checks these against the accepted association and deployment scope. It authenticates the verifier's result without repeating KERI or EIP-712 association-proof verification. Unauthenticated or out-of-scope events do not enter accepted state; duplicates do not create duplicate effects.
 
-Freshness also gates recovery/rebroadcast. Durable transaction, nonce, cancellation and chain-reorganization handling remain oracle responsibilities behind these simplified arrows. For invalidation of existing authority, see [revocation and status maintenance](revocation-status-sequence.md); for use of an endorsement, see [stablecoin transfers](stablecoin-end-to-end-sequence.md).
+Use existing contract operations and ordinary submission/result handling. Report failures accurately: submission alone is not confirmed contract state. Retrying an accepted association checks durable revocation/replacement state without repeating verification. No new nonce-reconciliation, cancellation or reorg-recovery subsystem is required. See [association revocation](revocation-status-sequence.md) and [stablecoin transfers](stablecoin-end-to-end-sequence.md).
 
-Sources: [EOA profile](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/eoa-profile.docx), [methodology and original color theme](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/methodology.docx), [wallet association policy](../../../../gl1/vlei-comply/src/policies/VLEIWalletAssociationPolicy.sol), [oracle registry](../../../../gl1/vlei-comply/src/attestation/VLEIOracleRegistry.sol), and [wrapped token](../../../../gl1/vlei-comply/src/wrappers/wUSDC.sol). Contract behavior is grounded in local `vlei-comply` commit `6220cd7`; the separate verifier and webhook/query boundary are planned.
+Sources: [EOA profile](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/eoa-profile.docx), [methodology and original color theme](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/methodology.docx), [wallet association policy](../../../../gl1/vlei-comply/src/policies/VLEIWalletAssociationPolicy.sol), [oracle registry](../../../../gl1/vlei-comply/src/attestation/VLEIOracleRegistry.sol), and [wrapped token](../../../../gl1/vlei-comply/src/wrappers/wUSDC.sol). Contract behavior is grounded in local `vlei-comply` commit `6220cd7`; the separate verifier and webhook boundary are planned.

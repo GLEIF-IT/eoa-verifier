@@ -10,10 +10,14 @@ from eoa_verifier.verification.worker import EoaVerifierDoer
 
 
 class Rpc:
+    """Falcon endpoint simulating RPC facts over real HIO HTTP transport, without an Ethereum node."""
+
     def __init__(self, chain="0x7a69", code="0x"):
+        """Set simulated chain/code results and an initially empty calls list for request assertions."""
         self.chain, self.code, self.calls = chain, code, []
 
     def on_post(self, req, rep):
+        """Record the request and return deterministic chain, identified-block or account-code JSON."""
         body = req.media
         self.calls.append(body)
         rep.media = {
@@ -28,7 +32,14 @@ class Rpc:
 
 
 def run_worker(worker, server_doer):
+    """Schedule the worker and test server until a cue arrives, returning that cue.
+
+    Own both task lifetimes through the parent DoDoer; assert completion within
+    three real seconds and verify the worker released its child client.
+    """
+
     def watch(tymth, tock=0.0, **kwa):
+        """Yield until a result exists, then unschedule worker/server so HIO closes their resources."""
         yield tock
         while not worker.cues:
             yield 0.01
@@ -53,6 +64,7 @@ def run_worker(worker, server_doer):
     ],
 )
 def test_account_checks(chain, code, expected):
+    """Exercise chain/code policy against simulated facts carried by real local HTTP requests."""
     endpoint, app = Rpc(chain, code), falcon.App()
     app.add_route("/", endpoint)
     server = http.Server(host="127.0.0.1", port=free_port(), app=app)
@@ -71,6 +83,7 @@ def test_account_checks(chain, code, expected):
 
 
 def test_invalid_wallet_proof_never_contacts_rpc():
+    """Tamper with the signed nonce and prove rejection occurs before any account observation."""
     worker = EoaVerifierDoer(rpc_url="http://127.0.0.1:1", chain_id=31337)
     bad = candidate()
     bad["u"] = "changed"
@@ -80,6 +93,7 @@ def test_invalid_wallet_proof_never_contacts_rpc():
 
 
 def test_rpc_timeout_yields_and_closes_connection():
+    """A real TCP peer that never replies must yield a retry cue and close the client."""
     server = tcp.Server(host="127.0.0.1", port=free_port())
     worker = EoaVerifierDoer(
         rpc_url=f"http://127.0.0.1:{server.ha[1]}", chain_id=31337, timeout=0.1
@@ -91,8 +105,13 @@ def test_rpc_timeout_yields_and_closes_connection():
 
 @pytest.mark.parametrize("payload", [None, [], {"id": 1}, {"id": 1, "error": {}}])
 def test_malformed_rpc_envelope_remains_retryable(payload):
+    """Malformed simulated JSON-RPC envelopes must remain retryable over the actual HTTP path."""
+
     class Endpoint:
+        """Serve the selected invalid envelope without applying normal RPC response construction."""
+
         def on_post(self, req, rep):
+            """Serialize the parametrized bad payload as the HTTP JSON response."""
             import json
 
             rep.content_type = "application/json"
@@ -114,8 +133,13 @@ def test_malformed_rpc_envelope_remains_retryable(payload):
     [None, {"number": 42, "hash": "0x" + "12" * 32}, {"number": "0x2a", "hash": None}],
 )
 def test_malformed_block_remains_retryable(block):
+    """Invalid block identity must request retry before any code read is sent."""
+
     class Endpoint(Rpc):
+        """Keep valid chain responses while replacing only the block result."""
+
         def on_post(self, req, rep):
+            """Use the common simulated RPC handler, then override the selected block response."""
             super().on_post(req, rep)
             if req.media["method"] == "eth_getBlockByNumber":
                 rep.media["result"] = block
@@ -137,9 +161,11 @@ def test_malformed_block_remains_retryable(block):
 
 
 def test_programming_error_surfaces_and_closes_client(monkeypatch):
+    """Inject an unexpected RPC helper error; it must escape while closing the owned client."""
     clients = []
 
     def broken_request(client, **kwa):
+        """Capture the real allocated client and raise a simulated implementation defect."""
         clients.append(client)
         raise AttributeError("programming defect")
 
@@ -154,6 +180,7 @@ def test_programming_error_surfaces_and_closes_client(monkeypatch):
 
 
 def test_cancellation_closes_in_flight_client_without_result():
+    """Cancel after a real TCP connection and prove cleanup emits no verification result."""
     server = tcp.Server(host="127.0.0.1", port=free_port())
     server_doer = tcp.ServerDoer(server=server)
     worker = EoaVerifierDoer(rpc_url=f"http://127.0.0.1:{server.ha[1]}", chain_id=31337)
@@ -161,6 +188,7 @@ def test_cancellation_closes_in_flight_client_without_result():
     clients = []
 
     def cancel(tymth, tock=0.0, **kwa):
+        """Yield until the server accepts a connection, capture clients and remove both child tasks."""
         yield tock
         while not server.ixes:
             yield 0.01

@@ -1,16 +1,23 @@
 # EOA verifier workflow diagrams
 
-These charts describe the proposed service split. Start with the overview, then open the detail relevant to the stage you are reviewing.
+These charts describe the intended service split, not the delivered scope of
+PR #2. That increment implements native intake and initial verification only;
+acceptance/outbox, public stored status, authenticated webhooks and continuing
+association retirement remain future work. See the [runtime README](../README.md).
 
-| Chart                                                                            | Scope                                                                      |
-| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+Accepted associations have no time-based expiry. Initial verification is mandatory;
+refreshes, periodic account checks and continuing source-chain reassessment are
+outside this build. Start with the overview, then open the relevant detail.
+
+| Chart                                                                                              | Scope                                                                      |
+| -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | [Service overview after association creation](diagrams/sequence/service-overview-sequence.md)      | Verifier, oracle and Ethereum chain from issued associations to transfers  |
 | [End-to-end overview](diagrams/sequence/stablecoin-end-to-end-sequence.md)                         | Association, verification, endorsement and stablecoin transfer             |
 | [Local setup](diagrams/sequence/local-setup-sequence.md)                                           | Anvil, contract deployment, trust configuration and network alignment      |
 | [Association creation](diagrams/sequence/association-creation-sequence.md)                         | Four-actor ceremony producing the issued association                       |
 | [Association verification](diagrams/sequence/association-verification-sequence.md)                 | Joint KERI/Ethereum verification and durable webhook delivery              |
-| [Oracle endorsement](diagrams/sequence/oracle-endorsement-sequence.md)                             | Accepted result, fresh status, deployment policy and confirmed endorsement |
-| [Revocation and status maintenance](diagrams/sequence/revocation-status-sequence.md)               | Freshness queries, invalidation and exact-association withdrawal           |
+| [Oracle endorsement](diagrams/sequence/oracle-endorsement-sequence.md)                             | Authenticated status, ownership/replacement and confirmed endorsement      |
+| [Revocation and status maintenance](diagrams/sequence/revocation-status-sequence.md)               | Native association revocation and exact-association withdrawal             |
 | [On-chain compliance and transfer](diagrams/sequence/on-chain-transfer-sequence.md)                | Contract calls for identity resolution, wallet checks and USDC movement    |
 | [Exact-wallet endorsement evaluation](diagrams/sequence/wallet-endorsement-evaluation-sequence.md) | Policy role checks and current wallet-to-identity endorsement matching     |
 | [Transfer outcomes and failures](diagrams/sequence/on-chain-transfer-outcomes-sequence.md)         | Policy rejection, pending requests and token-transfer reverts              |

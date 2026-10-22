@@ -1,6 +1,6 @@
 # From issued associations to compliant transfers
 
-Proposed high-level flow across **eoa-verifier**, **vlei-oracle**, and the **Ethereum chain running vlei-comply**. Sender and recipient have already [created their associations](association-creation-sequence.md), and [deployment setup](local-setup-sequence.md) is complete. The verifier's RPC and the oracle's deployment target the same intended network.
+Intended flow beyond PR #2 across **eoa-verifier**, **vlei-oracle**, and the **Ethereum chain running vlei-comply**. Sender and recipient have already [created their associations](association-creation-sequence.md), and [deployment setup](local-setup-sequence.md) is complete. The verifier's RPC and the oracle's deployment target the same intended network.
 
 [Open the rendered chart](service-overview-sequence.svg) · [Workflow guide](../../README.md)
 
@@ -22,7 +22,7 @@ sequenceDiagram
     Note over V,C: Sender and recipient associations already issued<br/>Presented to the verifier with supporting evidence
     loop For each party's association
         rect rgb(246, 243, 247)
-            Note over V,C: 1. Verify the binding and deliver the result
+            Note over V,C: 1. Verify the association and deliver the result
             V->>V: Verify KERI / vLEI credential chain<br/>and Ethereum wallet signature
             V->>C: Read chain identity and EOA account state via RPC
             C-->>V: Chain and account observation
@@ -32,11 +32,10 @@ sequenceDiagram
         end
         rect rgb(246, 243, 247)
             Note over V,C: 2. Establish eligible on-chain authority
-            O->>V: Check fresh credential and account status
-            V-->>O: Valid / invalid / unavailable<br/>Revision and observation time/block
-            opt Fresh, valid and permitted by oracle policy
+            O->>O: Select accepted, issued association<br/>Check durable revocation and replacement state
+            opt Verified, issued and selected
                 O->>C: Register identity mapping and publish<br/>exact-wallet / exact-association endorsement
-                C-->>O: Receipts — oracle reconciles confirmations
+                C-->>O: Receipts and resulting contract state
             end
         end
     end
@@ -51,8 +50,8 @@ sequenceDiagram
 
 </details>
 
-The verifier establishes the cryptographic binding and observes current status. The oracle authenticates that result, applies deployment policy and manages the endorsement transactions. The contracts consume the posted endorsements. Wallet presentation and the sender's transfer transaction are shown as boundary notes to keep the chart to these three participants; the oracle does not initiate the user's transfer.
+The verifier initially checks the association and account, then delivers accepted status. The oracle authenticates that result, applies deployment policy and manages the endorsement transactions. The contracts consume the posted endorsements. Wallet presentation and the sender's transfer transaction are shown as boundary notes to keep the chart to these three participants; the oracle does not initiate the user's transfer.
 
-Only a valid verification produces the success webhook. Missing evidence stays pending; invalid evidence is rejected. Delivery retries, current-status reassessment and transaction recovery are condensed. Both parties need eligible endorsements for the transfer; a successful webhook acknowledgement alone does not grant on-chain authority.
+Only a valid verification produces the success webhook. Missing evidence stays pending; invalid evidence is rejected. Delivery retries and ordinary transaction results are condensed. Accepted status does not expire, and publication requires no repeat verification or account check. Both parties need eligible endorsements for the transfer; a successful webhook acknowledgement alone does not grant on-chain authority.
 
 Details: [verification](association-verification-sequence.md), [oracle endorsement](oracle-endorsement-sequence.md), and [on-chain transfer](on-chain-transfer-sequence.md). See [revocation/status maintenance](revocation-status-sequence.md) for later withdrawal and outage limits, and [transfer outcomes](on-chain-transfer-outcomes-sequence.md) for policy rejection, pending requests and token reverts. This overview follows the proposed extraction design and the documented `vlei-comply` behavior at commit `6220cd7`.

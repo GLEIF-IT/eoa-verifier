@@ -12,6 +12,7 @@ from eoa_verifier.verification.worker import EoaVerifierDoer
 
 
 def test_work_scan_is_bounded_and_resumes_after_terminal_records():
+    """Page through real LMDB history, observing between-page writes and stopping at the final key."""
     with dbing.openLMDB(cls=VerifierBaser) as baser:
         for i in range(65):
             work = baser.start_verification(association_said=f"{i:03}", grant_said="")
@@ -31,6 +32,7 @@ def test_work_scan_is_bounded_and_resumes_after_terminal_records():
 
 
 def test_busy_worker_skips_scan_and_missing_artifacts_wait_fairly():
+    """Use a controlled HIO clock and simulated missing evidence to check busy, fairness and cooldown rules."""
     with dbing.openLMDB(cls=VerifierBaser) as baser:
         for said in ("a", "b"):
             baser.start_verification(association_said=said, grant_said="")

@@ -21,16 +21,19 @@ from eoa_verifier.verification.constants import ASSOCIATION_SCHEMA, LE_SCHEMA
 from eoa_verifier.verification.eoa import DOMAIN_TAG, PROOF_ALGORITHM, build_challenge
 
 
-KEY = "0x" + "0" * 63 + "1"  # Public Anvil test account only.
+# Public deterministic test signing key; never a production secret.
+KEY = "0x" + "0" * 63 + "1"
 
 
 def free_port():
+    """Return an available loopback port, releasing the probe socket; the caller must bind it promptly."""
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
 
 
 def candidate():
+    """Return a signed, SAID-valid test ACDC dict without native issuance or acceptance evidence."""
     said = coring.Diger(ser=b"test").qb64
     challenge = build_challenge(
         issuer_aid=core.Signer().verfer.qb64,
@@ -43,7 +46,7 @@ def candidate():
 
 
 def anchor(hab, event) -> serdering.SerderKERI:
-    """Seal a TEL event in a signed interaction, as the single-sig KLI does."""
+    """Append a signed TEL seal to hab’s KEL and return its native interaction Serder."""
     message = hab.interact(
         data=[eventing.SealEvent(event.pre, event.snh, event.said)._asdict()]
     )
@@ -51,10 +54,10 @@ def anchor(hab, event) -> serdering.SerderKERI:
 
 
 def replay(hab, rgy, registry, creder) -> bytes:
-    """Export issuer KEL, registry TEL, credential TEL, and accepted ACDC bytes.
+    """Return issuer KEL, registry/credential TEL and accepted ACDC bytes from native stores.
 
-    Uses the same replay and serialization APIs as KLI artifact delivery.
-    Callers prepend upstream streams when the receiver needs the source chain.
+    The caller supplies an issued credential and its registry. Prepend upstream
+    streams when the receiver also needs LE/QVI evidence; this helper does no network I/O.
     """
     return b"".join(
         [
@@ -67,7 +70,11 @@ def replay(hab, rgy, registry, creder) -> bytes:
 
 
 def issue_credential(issuer, registry, creder):
-    """Schedule native TEL/KEL issuance and wait for Credentialer completion."""
+    """Schedule native TEL/KEL issuance for creder in registry using the supplied Credentialer.
+
+    Yield 0.01 HIO seconds until completion, then return None. The caller must run
+    Registrar, Credentialer and escrow Doers and own their stores.
+    """
     issuance = registry.issue(said=creder.said, dt=creder.attrib.get("dt"))
     anc = anchor(registry.hab, issuance)
     issuer.issue(creder, issuance)
@@ -77,7 +84,11 @@ def issue_credential(issuer, registry, creder):
 
 
 def revoke_credential(issuer, registry, creder):
-    """Anchor native revocation and wait for witnessed Registrar completion."""
+    """Anchor native revocation and schedule it on the supplied issuer's Registrar.
+
+    Yield 0.01 HIO seconds until witnessed completion, then return None. The caller
+    owns scheduling and later transports the resulting TEL/KEL evidence.
+    """
     revocation = registry.revoke(said=creder.said)
     issuer.registrar.revoke(creder, revocation, anchor(registry.hab, revocation))
     while not issuer.registrar.complete(creder.said, sn=revocation.sn):
@@ -102,7 +113,7 @@ def receive(hby, rgy, stream) -> None:
 
 
 def rules(schema) -> dict:
-    """SAIDify the exact disclaimer text required by the published vLEI schema."""
+    """Return a SAID-bearing rules dict with the exact disclaimers required by the supplied native schema."""
     fields = schema.sed["properties"]["r"]["oneOf"][1]["properties"]
     return coring.Saider.saidify(
         sad={
@@ -125,10 +136,11 @@ def grant(
     include_anchor=True,
     acdc=None,
 ) -> bytes:
-    """Create the ACDC, issuance, and anchor embeds used by ``kli ipex grant``.
+    """Return native IPEX Grant bytes addressed to recipient from the supplied issuer stores.
 
-    Source credentials travel separately, allowing a complete Grant to arrive
-    before the evidence needed to verify its LE edge.
+    Use the issued creder plus native issuance/anchor embeds by default; flags can
+    omit those embeds and acdc can override serialized credential bytes. Source
+    credentials travel separately so tests can withhold them. This builds, not sends.
     """
     acdc = (
         signing.serialize(*rgy.reger.cloneCred(creder.said)) if acdc is None else acdc
@@ -160,11 +172,12 @@ class IssuerEscrows(doing.Doer):
     """
 
     def __init__(self, issuers):
+        """Borrow issuer runtimes in issuers and recur every 0.03125 HIO seconds; do not own their stores."""
         self.issuers = issuers
         super().__init__(tock=0.03125)
 
     def recur(self, tyme):
-        """Advance evidence acceptance without blocking another actor's doers."""
+        """Process borrowed registry/verifier escrows once and return False to remain scheduled."""
         for issuer in self.issuers:
             issuer.rgy.processEscrows()
             issuer.verifier.processEscrows()
@@ -172,7 +185,7 @@ class IssuerEscrows(doing.Doer):
 
 
 def issuer_for(hby, rgy):
-    """Compose the native single-sig issuance runtime for one controller store."""
+    """Return a native Credentialer with Registrar and Verifier borrowing the supplied Habery/Regery."""
     registrar = credentialing.Registrar(hby=hby, rgy=rgy, counselor=None)
     return credentialing.Credentialer(
         hby=hby,
@@ -183,7 +196,12 @@ def issuer_for(hby, rgy):
 
 
 def open_issuers(stack, schemas, *, base, temp, witness):
-    """Open isolated, witnessed GEDA/QVI/LE stores and native issuance doers."""
+    """Return actor and issuer dictionaries for isolated witnessed GEDA/QVI/LE controllers.
+
+    Pin supplied native schemas and configure QVI delegation to GEDA. stack owns store closure;
+    temp selects disposable stores, base selects their namespace, witness supplies
+    the witness AID. The caller must schedule the returned native issuance tasks.
+    """
     actors, issuers = {}, {}
     for name in ("geda", "qvi", "le"):
         hby = stack.enter_context(habbing.openHby(name=name, base=base, temp=temp))
@@ -208,7 +226,7 @@ def open_issuers(stack, schemas, *, base, temp, witness):
 
 
 def collect_receipts(issuer, hab, sn):
-    """Yield while the native Registrar's receipt worker contacts the witness."""
+    """Queue hab/sn on the issuer’s native receipt worker; yield until its completion cue, then return None."""
     receiptor = issuer.registrar.receiptor
     receiptor.msgs.append({"pre": hab.pre, "sn": sn})
     while not any(cue["pre"] == hab.pre and cue["sn"] == sn for cue in receiptor.cues):
@@ -216,7 +234,11 @@ def collect_receipts(issuer, hab, sn):
 
 
 def approve_qvi(actors, issuers):
-    """Schedule witnessed delegation approval using the KLI authorizer seal."""
+    """Yield through real witnessed QVI delegation approval among the supplied actors.
+
+    Use the KLI authorizer seal and replay accepted evidence to issuer stores.
+    Return None after GEDA accepts the delegation; the caller owns actor scheduling.
+    """
     geda_hby, geda, _geda_rgy = actors["geda"]
     qvi_hby, qvi, qvi_rgy = actors["qvi"]
     _le_hby, le, _le_rgy = actors["le"]
@@ -239,7 +261,12 @@ def approve_qvi(actors, issuers):
 
 
 def association_from_challenge(challenge, signature, registry):
-    """Assemble schema-specific blocks with native KERIpy SAID/ACDC APIs."""
+    """Return a native SAID-bearing association ACDC for typed challenge, signature and registry.
+
+    Require the exact EOA challenge shape and canonical registry SAID, raising
+    ValueError on mismatch. Build nested proof/attribute/LE-edge SAIDs but do not
+    verify the wallet signature, issue the credential or establish native acceptance.
+    """
     fields = challenge["message"]
     expected = build_challenge(
         issuer_aid=fields["issuerAid"],

@@ -36,6 +36,12 @@ from eoa_verifier.verification.eoa import build_challenge
 
 
 def test_native_grant_verification_and_restart(tmp_path):
+    """Exercise real witnessed GEDA/QVI/LE issuance, IPEX HTTP delivery and local Anvil.
+
+    Own isolated native stores/processes with ExitStack and all network tasks with
+    HIO. Missing Anvil fails rather than skips. Test delayed evidence across restart,
+    duplicate delivery, revocation during initial RPC, and invalid proof/relationships.
+    """
     anvil_path = shutil.which("anvil")
     assert anvil_path, "Anvil is required for native integration; install Foundry"
     schemas = [
@@ -96,6 +102,7 @@ def test_native_grant_verification_and_restart(tmp_path):
         finished = []
 
         def send(stream):
+            """Yield while sending CESR bytes through the owned HTTP client; assert each transport ACK, return None."""
             count = httping.streamCESRRequests(
                 client, bytearray(stream), runtime.hab.pre
             )
@@ -105,6 +112,7 @@ def test_native_grant_verification_and_restart(tmp_path):
                 assert client.responses.popleft()["status"] in (200, 202, 204)
 
         def deliver(stream, said, expected):
+            """Yield through HTTP delivery and wait up to ten HIO seconds for the expected durable row; return it."""
             yield from send(stream)
             deadline = workflow.tyme + 10
             while True:
@@ -115,6 +123,12 @@ def test_native_grant_verification_and_restart(tmp_path):
                 yield 0.01
 
         def issue_association(label, *, signer=KEY, chain=31337, holder=None):
+            """Yield through witnessed issuance and return (ACDC, native evidence/Grant bytes).
+
+            label names the scenario; signer, chain and holder select intentional invalid
+            cases. The normal issuer is the LE holder. This constructs genuine signatures
+            and anchors even when testing a mismatched holder relationship.
+            """
             hab = holder or le
             registry = registries["qvi" if holder else "le"]
             challenge = build_challenge(
@@ -152,6 +166,11 @@ def test_native_grant_verification_and_restart(tmp_path):
             return creder, evidence
 
         def run(tymth, tock=0.0, **kwa):
+            """Yield through issuance, restart, replay and the held-result revocation scenario.
+
+            Share runtime/client references so delivery uses reopened stores. On success
+            mark finished, unschedule the other tasks before stack cleanup, and return True.
+            """
             nonlocal runtime, client, client_doer
             yield tock
             for hby, _, _ in actors.values():
@@ -165,6 +184,7 @@ def test_native_grant_verification_and_restart(tmp_path):
                 while not issuers[name].registrar.complete(registry.regk):
                     yield 0.01
                 registries[name] = registry
+            # Issue the real GEDA -> QVI -> LE chain before association creation.
             for name, recipient, schema_said in [
                 ("geda", qvi, QVI_SCHEMA),
                 ("qvi", le, LE_SCHEMA),
@@ -200,6 +220,7 @@ def test_native_grant_verification_and_restart(tmp_path):
                 )
                 assert rgy.reger.saved.get(keys=(creder.said,))
 
+            # Deliver the association first, then reopen with its sources still absent.
             creder, evidence = yield from issue_association("delayed")
             yield from deliver(evidence, creder.said, "awaiting_artifacts")
             aid = runtime.hab.pre
@@ -220,6 +241,7 @@ def test_native_grant_verification_and_restart(tmp_path):
                 streams["geda"] + streams["qvi"], creder.said, "verified"
             )
             assert runtime.rgy.reger.saved.get(keys=(creder.said,))
+            # Replaying the same Grant must retain the completed work record.
             original = runtime.baser.get_verification(creder.said)
             yield from deliver(evidence, creder.said, "verified")
             assert runtime.baser.get_verification(creder.said) == original

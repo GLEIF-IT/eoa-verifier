@@ -14,19 +14,20 @@ from eoa_verifier.basing import VerificationWork, VerifierBaser
 
 
 class GrantNotReadyError(Exception):
-    """Raised when a grant notification arrives before its EXN material is readable."""
+    """Native Grant material is not yet readable; retain its notice for a later turn."""
 
 
 class InvalidGrantError(ValueError):
-    """A malformed or invalid Grant cannot create verification work."""
+    """Grant decoding or native validation failed; report and consume its notice."""
 
 
 class GrantNotificationDoer(doing.Doer):
-    """Convert accepted IPEX Grant notices into durable pending operations.
+    """Turn authenticated native IPEX notifications into durable verification work.
 
-    KERIpy's grant sender streams attachments before the EXN notice can be
-    processed. When the notice is visible before the exchanger can clone all
-    material, the Doer leaves the notice in place and retries on a later recur.
+    Accepted Grant signatures authenticate delivery; they do not establish native
+    ACDC acceptance. Embedded evidence is replayed through the shared parser,
+    which may escrow it. The coordinator separately checks credential acceptance.
+    Missing Grant material leaves its notice pending for a later HIO turn.
     """
 
     def __init__(
@@ -39,6 +40,12 @@ class GrantNotificationDoer(doing.Doer):
         expected_association_schema: str,
         **kwa,
     ):
+        """Borrow a work store, Habery, native Notifier and shared inbound parser.
+
+        expected_association_schema is the only accepted association schema SAID.
+        The service owns these resources and schedules parser/escrow processing;
+        this Doer only consumes notifications and creates work. kwa supplies HIO options.
+        """
         self.baser = baser
         self.hby = hby
         self.notifier = notifier
@@ -47,14 +54,20 @@ class GrantNotificationDoer(doing.Doer):
         super().__init__(**kwa)
 
     def recur(self, tyme):
-        """Poll for new grant notices on each HIO scheduler turn."""
+        """Process notices synchronously on this HIO turn and return False to remain scheduled."""
 
         _ = tyme
         self.process_notes()
         return False
 
     def process_notes(self) -> None:
-        """Consume accepted association Grant notices."""
+        """Consume native notices with attrs.r routing and attrs.d naming the Grant EXN.
+
+        Remove unrelated, successfully processed and invalid notices through Noter so
+        indexes/signatures are cleaned together. Report invalid input with a traceback;
+        retain missing material. Unexpected parser/storage errors propagate and leave
+        the failing notice intact. Return None; native notification storage is borrowed.
+        """
 
         for notice, _ in self.notifier.noter.getNotes(end=-1):
             attrs = notice.attrs
@@ -73,12 +86,13 @@ class GrantNotificationDoer(doing.Doer):
                 self.notifier.noter.rem(notice.rid)
 
     def process_grant_notice(self, attrs: dict[str, Any]) -> VerificationWork | None:
-        """Parse one IPEX Grant notice and create or fail its operation.
+        """Replay a decoded Grant's anc/iss/acdc streams and return durable work.
 
-        Embedded ``anc``, ``iss``, and ``acdc`` artifacts are replayed into the
-        parser so the verifier store can materialize the association and
-        recursive source chain. The association schema check happens early because
-        the verifier accepts a pinned schema set, not whatever the sender provides.
+        Only supplied embeds with attachments are replayed. Native parsing may escrow
+        evidence; creating work does not assert acceptance. Repeated matching Grants
+        retain existing work, including terminal status. A different schema records
+        failure. GrantNotReadyError retains incomplete material; InvalidGrantError
+        identifies decoding/native-validation failure. Other errors propagate.
         """
 
         grant_said, creder, streams = self._read_grant(attrs)
@@ -110,7 +124,13 @@ class GrantNotificationDoer(doing.Doer):
         return op
 
     def _read_grant(self, attrs):
-        """Decode the native envelope before replay or durable work creation."""
+        """Return (Grant SAID, native ACDC, replay bytearrays) from notification attributes.
+
+        Clone and verify the native EXN, then validate the embedded ACDC identity before
+        any replay or work creation. Missing native material raises GrantNotReadyError;
+        malformed serialized input raises InvalidGrantError. Broad decoding exceptions
+        are confined here, outside parser execution and persistence.
+        """
         grant_said = attrs.get("d")
         if not isinstance(grant_said, str) or not grant_said:
             raise InvalidGrantError("IPEX Grant notification has no message SAID")

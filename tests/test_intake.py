@@ -12,6 +12,7 @@ from eoa_verifier.serving import setup_service
 
 @pytest.mark.parametrize("kind", ["accepted", "malformed", "unrelated"])
 def test_consumed_notification_removes_all_native_records(config, kind):
+    """Use real Noter storage to prove success, bad input and unrelated notices clean all records."""
     runtime = setup_service(config)
     try:
         grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
@@ -43,6 +44,7 @@ def test_consumed_notification_removes_all_native_records(config, kind):
 @pytest.mark.parametrize("boundary", ["parser", "storage"])
 @pytest.mark.parametrize("error", [ValueError, KeyError, TypeError])
 def test_internal_failure_preserves_notification(config, boundary, error):
+    """Inject parser/storage errors after valid decoding and prove the native notice remains retryable."""
     runtime = setup_service(config)
     try:
         grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
@@ -74,6 +76,7 @@ def test_internal_failure_preserves_notification(config, boundary, error):
 
 
 def test_missing_grant_retains_notification_until_available(config):
+    """An actual absent EXN leaves its persisted notification untouched for later native delivery."""
     runtime = setup_service(config)
     try:
         grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))

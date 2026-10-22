@@ -11,6 +11,7 @@ from eoa_verifier.serving import run_service, setup_service
 
 
 def test_identity_progress_and_terminal_duplicates_survive_reopen(config):
+    """Reopen real native stores and prove duplicate Grants preserve identity and every work state."""
     runtime = setup_service(config)
     aid = runtime.hab.pre
     try:
@@ -46,6 +47,7 @@ def test_identity_progress_and_terminal_duplicates_survive_reopen(config):
 
 
 def test_setup_failure_releases_all_previously_opened_stores(config):
+    """Inject late setup failure; reopening the same paths detects leaked LMDB handles."""
     with (
         patch(
             "eoa_verifier.serving.oobiing.Oobiery",
@@ -60,6 +62,7 @@ def test_setup_failure_releases_all_previously_opened_stores(config):
 
 
 def test_run_unwinds_on_scheduler_failure(config):
+    """Inject scheduler entry failure and prove the service still closes its stores."""
     with (
         patch(
             "eoa_verifier.serving.doing.Doist.do",
@@ -73,6 +76,7 @@ def test_run_unwinds_on_scheduler_failure(config):
 
 
 def test_cli_has_no_posting_options_and_requires_network(capsys):
+    """Inspect argparse help for the verifier network boundary without starting a service."""
     with pytest.raises(SystemExit) as caught:
         main(["server", "start", "--help"])
     assert caught.value.code == 0
@@ -82,6 +86,7 @@ def test_cli_has_no_posting_options_and_requires_network(capsys):
 
 
 def test_failed_work_cannot_complete(config):
+    """Prove the completion guard rejects a persisted failed row in real storage."""
     runtime = setup_service(config)
     try:
         work = runtime.baser.start_verification(
@@ -95,6 +100,7 @@ def test_failed_work_cannot_complete(config):
 
 
 def test_forged_said_cannot_create_verification_work(config):
+    """Stub EXN lookup only; native ACDC decoding must reject tampering before persistence."""
     from types import SimpleNamespace
 
     from native_helpers import candidate
