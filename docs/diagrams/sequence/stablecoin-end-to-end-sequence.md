@@ -1,6 +1,6 @@
 # Verified wallet associations and stablecoin transfers
 
-Proposed local end-to-end workflow after [local setup](local-setup-sequence.md). Both parties create an association, the verifier checks it, and the oracle establishes eligible endorsements before the policy-controlled transfer.
+Intended local end-to-end workflow beyond PR #2 after [local setup](local-setup-sequence.md). Both parties create an association, the verifier checks it, and the oracle establishes eligible endorsements before the policy-controlled transfer.
 
 [Open the rendered chart](stablecoin-end-to-end-sequence.svg) · [Workflow guide](../../README.md)
 
@@ -27,12 +27,12 @@ sequenceDiagram
         A->>V: Present sender association + evidence
         B->>V: Present recipient association + evidence
         loop For each party's association
-            V->>V: Verify KERI/vLEI and Ethereum binding<br/>Check account state on the configured chain
+            V->>V: Verify KERI/vLEI and Ethereum association<br/>Check account state on the configured chain
             V->>O: Signed verified-event webhook
-            Note over V,O: Oracle authenticates and persists<br/>Checks freshness and policy
-            opt Fresh, valid and eligible
+            Note over V,O: Oracle authenticates and persists<br/>Checks durable revocation and replacement state
+            opt Verified, issued and selected
                 O->>C: Publish exact-wallet / exact-association endorsement
-                C-->>O: Receipts, reconcile confirmations
+                C-->>O: Receipts and resulting contract state
             end
         end
     end
@@ -61,4 +61,4 @@ The transfer path is the local **policy-controlled stablecoin wrapper** (`wUSDC`
 
 Existing endorsements can outlive an evidence outage or a revocation still propagating to the chain. See the status-maintenance chart for these limits; the transfer itself does not perform a live verifier query.
 
-Sources: [EOA profile](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/eoa-profile.docx), [methodology and original color theme](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/methodology.docx), [wallet association policy](../../../../gl1/vlei-comply/src/policies/VLEIWalletAssociationPolicy.sol), [oracle registry](../../../../gl1/vlei-comply/src/attestation/VLEIOracleRegistry.sol), and [wrapped token](../../../../gl1/vlei-comply/src/wrappers/wUSDC.sol). Contract behavior is grounded in local `vlei-comply` commit `6220cd7`; the separate verifier and webhook/query boundary are planned.
+Sources: [EOA profile](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/eoa-profile.docx), [methodology and original color theme](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/methodology.docx), [wallet association policy](../../../../gl1/vlei-comply/src/policies/VLEIWalletAssociationPolicy.sol), [oracle registry](../../../../gl1/vlei-comply/src/attestation/VLEIOracleRegistry.sol), and [wrapped token](../../../../gl1/vlei-comply/src/wrappers/wUSDC.sol). Contract behavior is grounded in local `vlei-comply` commit `6220cd7`; the separate verifier and webhook boundary are planned.

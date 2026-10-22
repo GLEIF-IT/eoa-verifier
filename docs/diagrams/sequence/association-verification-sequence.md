@@ -1,6 +1,6 @@
 # EOA association verification and webhook delivery
 
-Proposed design. Starting with an [issued EOA association](association-creation-sequence.md), `eoa-verifier` independently checks its KERI/vLEI evidence, Ethereum proof and account state before delivering a verified decision to `vlei-oracle`.
+Intended design; PR #2 implements only initial verification, not application acceptance or webhook delivery. Starting with an [issued EOA association](association-creation-sequence.md), `eoa-verifier` independently checks its KERI/vLEI evidence, Ethereum proof and account state before future acceptance and authenticated delivery to the configured webhook destination (`vlei-oracle` in this deployment).
 
 [Open the rendered chart](association-verification-sequence.svg). Dark teal participants, lavender notes and green completion bands follow the methodology's sequence diagram.
 
@@ -51,9 +51,9 @@ sequenceDiagram
         rect rgb(223, 251, 192)
             Note over V,O: 3. Deliver the verified decision durably
             V->>V: Atomically commit assessment and outbox event
-            V->>O: AID-signed webhook<br/>Event ID, revision, association and verified binding
+            V->>O: AID-signed webhook<br/>Event ID, revision, association and verified association
             O->>O: Verify request signature, allowed AID and chain<br/>Atomically deduplicate and save accepted state
-            O-->>V: Durable acknowledgement
+            O-->>V: Authenticated durable acknowledgement
             Note over V,O: Retry unacknowledged event with the same ID<br/>Acknowledged does not mean endorsed on-chain
         end
     end
@@ -63,6 +63,6 @@ sequenceDiagram
 
 The webhook carries the association SAID, issuer AID, LE vLEI SAID, canonical `extId`, verdict, revision, issuance-order facts and observation time/block. The oracle derives `wallet` from `extId` and `identityRef = keccak256(issuerAid)`; it checks request authenticity and deployment scope rather than repeating association-proof verification. Its verifier AID allowlist is configured: OOBI discovery alone does not authorize a caller.
 
-Verification establishes the binding and its observed status; it does not itself grant on-chain authority. Continue with [oracle acceptance and endorsement](oracle-endorsement-sequence.md), then the [stablecoin flow](stablecoin-end-to-end-sequence.md). Later reassessment and withdrawal are covered in [revocation and status maintenance](revocation-status-sequence.md).
+Initial verification checks the association and observes its account; it does not itself grant on-chain authority. Continue with [oracle acceptance and endorsement](oracle-endorsement-sequence.md), then the [stablecoin flow](stablecoin-end-to-end-sequence.md). Later native association revocation and withdrawal are covered in [revocation and status maintenance](revocation-status-sequence.md).
 
 Sources: [EOA profile](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/eoa-profile.docx), [methodology and original color theme](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/methodology.docx), and [current EIP-712 profile](../../../../gl1/vlei-oracle/protocol/external-association-v1/eoa-v1/README.md). The documents permit other challenge carriers; this design selects EIP-712 from our agreed plan. Webhook delivery is the proposed extraction boundary.
