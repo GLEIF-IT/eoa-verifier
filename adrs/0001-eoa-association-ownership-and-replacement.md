@@ -45,6 +45,11 @@ previously accepted association; the oracle must exclude it from selection and
 reconcile pending or confirmed effects through existing cancellation, exact-SAID
 withdrawal and recovery paths. Do not leave the first accepted because it arrived
 first.
+Supersession survives later invalidation or withdrawal: if Y replaced X, rejecting
+Y does not restore X. Retain Y's issuance position and claim identity across
+restart; another same-LE selection must have a strictly later issuance anchor.
+Until such a successor replaces Y, verified revocation of Y (or its invalidating
+source) releases the retained claim; revocation of superseded X does not.
 Detection uses verified issuer/issuance-event identity and distinct association
 SAIDs. No proof that no undiscovered association exists is required, and no
 conflict-resolution framework is introduced.
@@ -67,3 +72,7 @@ checks; invalidation delivery does not instantly reverse a mined transaction.
 - X and Z have distinct SAIDs anchored in A's event 10: reject both, including
   invalidating X if it was previously accepted. A third association in that
   event is rejected too. Delivering X twice alone does not trigger this rule.
+- X at 10 is replaced by Y at 12; Z later reveals a conflict with Y at 12.
+  Reject Y and Z and reconcile Y's effects, but do not restore X, including after
+  restart. A new same-LE association must be later than 12; verified revocation
+  releasing Y's retained claim permits a different LE to qualify.
