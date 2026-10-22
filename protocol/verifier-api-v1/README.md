@@ -72,9 +72,12 @@ A known revoked association must not be downgraded to merely unavailable.
 
 1. **Initial verification:** receive the association and its native evidence;
    check the source chain, wallet proof and account; persist the assessment.
-   A successful assessment enrolls continuing management and creates a durable
-   delivery obligation in the same application transaction. Incomplete or
-   rejected presentations remain queryable without a success notification.
+   A successful assessment enrolls continuing management and atomically records
+   an event for delivery to the configured webhook destination. The outbox
+   identifies the immutable event, its destination and delivery progress; it
+   does not encode oracle business logic. A worker sends the HTTP request after
+   commit and retries until authenticated acknowledgement. Incomplete or rejected
+   presentations remain queryable without a success notification.
 2. **Acceptance and endorsement:** authenticate the result, persist acceptance
    and recovery work, then acknowledge. Retrying the same committed event must
    not repeat effects. The oracle obtains fresh status and applies deployment
@@ -96,6 +99,16 @@ See the [verification](../../docs/diagrams/sequence/association-verification-seq
 workflows; they do not freeze HTTP endpoints or signing encodings.
 
 ## Trust and freshness requirements
+
+The webhook receiver is assumed capable of verifying requests signed by the
+EOA Verifier's KERI AID. Use the KERI ecosystem's HTTP-signature approach, as in
+Sally's webhook sender: `Signature-Input` and `Signature` headers generated with
+the verifier's habitat signing keys. Sign each delivery attempt, retaining the
+same event on retry. Use an authenticated body digest as part of the signed
+request to bind the delivered payload. Exact covered fields and encoding are
+settled with the authentication implementation, not a custom JSON envelope here.
+`vlei-oracle` is the initial receiver; the outbox targets the configured webhook,
+not a particular application type. One configured destination is sufficient.
 
 Authenticate delivery, queries, replies and acknowledgements using configured
 service AIDs and native accepted key state. Bind the body, intended peer/action
