@@ -22,7 +22,7 @@ This illustrative success payload preserves the proposed shape for that work:
   "revision": 1,
   "outcome": "valid",
   "reasonCode": "VALID",
-  "binding": {
+  "association": {
     "issuerAid": "example-issuer",
     "leSaid": "example-le",
     "qviSaid": "example-qvi",
