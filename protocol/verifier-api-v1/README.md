@@ -7,11 +7,11 @@ Exact signing, event and ACK contracts belong with their implementations.
 
 ## Responsibilities
 
-| Component | Owns |
-| --- | --- |
+| Component    | Owns                                                                                                                                                                          |
+|--------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | eoa-verifier | Native CESR/IPEX intake and credential stores, initial credential/wallet/account verification, durable acceptance and association revocation, authenticated webhook delivery. |
-| vlei-oracle | Trust in the configured verifier, durable status intake, ownership/replacement selection, Ethereum publish/withdraw and ordinary transaction result handling. |
-| vlei-comply | Existing registry, identity adapter and wallet-association policy for token transfers. |
+| vlei-oracle  | Trust in the configured verifier, durable status intake, ownership/replacement selection, Ethereum publish/withdraw and ordinary transaction result handling.                 |
+| vlei-comply  | Existing registry, identity adapter and wallet-association policy for token transfers.                                                                                        |
 
 Each service has its own identity, configuration and writable stores. Neither
 imports the other at runtime. The verifier has no Ethereum posting key. The
@@ -32,11 +32,11 @@ block. Recheck native status after the initial account RPC wait before accepting
 Keep the existing [EIP-712 profile and vectors][carrier]. The account check does
 not assess delegated-code safety; the ceremony does not prove against later theft.
 
-| Outcome | Meaning |
-| --- | --- |
-| `valid` | Initial required checks succeeded; stored acceptance suffices for endorsement processing subject to ownership/replacement and retirement state. |
-| `invalid` | Initial verification failed or the accepted association ACDC was revoked. |
-| `unavailable` | Initial verification lacks required evidence/access; do not accept that candidate. This does not invalidate an already accepted association. |
+| Outcome       | Meaning                                                                                                                                         |
+|---------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| `valid`       | Initial required checks succeeded; stored acceptance suffices for endorsement processing subject to ownership/replacement and retirement state. |
+| `invalid`     | Initial verification failed or the accepted association ACDC was revoked.                                                                       |
+| `unavailable` | Initial verification lacks required evidence/access; do not accept that candidate. This does not invalidate an already accepted association.    |
 
 `associationSaid` is the identity; no second ceremony UUID. `revision` orders
 changed decisions within one verifier AID/association, not issuance or expiry.
