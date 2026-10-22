@@ -5,74 +5,50 @@ Date: 2026-10-22
 
 ## Context
 
-The verifier and oracle need deterministic application rules for competing EOA
-associations. Transport order and assessment revisions do not establish ownership.
-An address claim is scoped to the configured Ethereum chain. LE identity here is
-the holder AID in the verified LE ACDC, which must equal the association issuer;
-an LE credential SAID or matching LEI is not a substitute for that AID.
+An Ethereum address on the configured chain needs one selected LE claim.
+LE identity is the holder AID in the verified LE ACDC, which must equal the
+association issuer. An LEI or LE credential SAID is not that identity.
 
 ## Decision
 
-Every candidate must satisfy the existing verification requirements: EIP-712
-wallet signature, native ACDC and source-chain verification through the LE ACDC,
-issuer/holder relationship, verified issuance anchoring, and account checks.
-These rules do not relax freshness or verification requirements.
+Every candidate must pass initial native KERI/ACDC and LE/QVI relationship
+checks, verified issuance anchoring, EIP-712 wallet signature verification and
+the configured-chain account check. Accepted associations remain valid indefinitely
+until their association ACDC is revoked or they are superseded. Age and outages
+do not invalidate them. No refreshes or continuing source/account checks.
 
-1. **Same LE: later issuance wins.** For the same chain/address and LE holder
-   AID, a fully verified association supersedes an earlier one only when its
-   verified issuance anchor has a strictly higher sequence number in that AID's
-   KEL. Use the anchor of TEL issuance, not a later revocation anchor. Delivery
-   order, assessment revision and wall-clock time cannot order replacement.
-2. **Different LE: revoke before transfer.** Reject a competing claim from a
-   different LE while the existing LE's claim is active. Only verified revocation
-   releasing the current claim permits transfer; revocation of an older,
-   already-replaced association does not release it. Missing evidence, outages
-   and application-policy rejection are not revocation. Never compare sequence
-   numbers across issuers' KELs. Preserve the existing verified source-revocation
-   invalidation path and exact-association withdrawal/transaction recovery.
-3. **One issuance event, multiple associations: reject all.** Distinct EOA
-   association ACDCs whose verified issuance anchors identify the same issuer
-   KEL event are all ineligible for application acceptance and replacement,
-   even if they name different addresses. Repeated delivery of one SAID is not
-   a conflict. Do not use arrival order, SAID sorting, timestamps or another
-   tie-breaker. This is application-policy rejection, not a claim that the
-   underlying signatures or native credential evidence are invalid.
-
-If a second association reveals rule 3's conflict after the first was accepted,
-mark every known involved association application-invalid using the existing
-assessment/invalidation path. Persist and deliver the changed assessment for any
-previously accepted association; the oracle must exclude it from selection and
-reconcile pending or confirmed effects through existing cancellation, exact-SAID
-withdrawal and recovery paths. Do not leave the first accepted because it arrived
-first.
-Supersession survives later invalidation or withdrawal: if Y replaced X, rejecting
-Y does not restore X. Retain Y's issuance position and claim identity across
-restart; another same-LE selection must have a strictly later issuance anchor.
-Until such a successor replaces Y, verified revocation of Y (or its invalidating
-source) releases the retained claim; revocation of superseded X does not.
-Detection uses verified issuer/issuance-event identity and distinct association
-SAIDs. No proof that no undiscovered association exists is required, and no
-conflict-resolution framework is introduced.
+1. **Same LE: later issuance wins.** For the same chain/address and holder AID,
+   a fully verified association supersedes the earlier one only at a strictly
+   higher verified issuance-anchor sequence in that AID's KEL. Do not use a
+   revocation anchor, arrival order, assessment revision or timestamps.
+2. **Different LE: revoke before transfer.** Reject another LE's competing
+   claim until verified revocation of the current association ACDC releases it.
+   Revoking an older, replaced association does not release its successor.
+   Missing evidence and outages are not revocation. Never compare sequence
+   numbers across different issuers' KELs.
 
 ## Consequences
 
-The verifier owns verified issuance facts and rule 3 assessment invalidation;
-the oracle uses authenticated facts to enforce claim ownership and replacement.
-Retain facts and discovered conflicts across restart. Reuse existing persistence,
-status, outbox/acknowledgement and recovery paths. Native acceptance can remain
-true while application acceptance is false. New authority still requires fresh
-checks; invalidation delivery does not instantly reverse a mined transaction.
+Persist acceptance, retirement and selected-claim history across restart. A
+superseded association does not become current again when its successor is revoked.
+The oracle uses authenticated stored status and checks durable selection/revocation
+before acting. Publish the accepted selected association; withdraw a revoked
+association by exact SAID. Use ordinary contract submission/result handling;
+submission is not confirmation. No new transaction-recovery framework is required.
 
 ## Examples
 
-- LE A issues X at KEL sequence 10 and Y for the same address at 12: fully
-  verified Y replaces X, regardless of delivery order. Revoking X leaves Y intact.
-- LE B's candidate cannot replace active Y, even at sequence 900. After verified
-  revocation releases Y's claim, B may qualify under all normal checks.
-- X and Z have distinct SAIDs anchored in A's event 10: reject both, including
-  invalidating X if it was previously accepted. A third association in that
-  event is rejected too. Delivering X twice alone does not trigger this rule.
-- X at 10 is replaced by Y at 12; Z later reveals a conflict with Y at 12.
-  Reject Y and Z and reconcile Y's effects, but do not restore X, including after
-  restart. A new same-LE association must be later than 12; verified revocation
-  releasing Y's retained claim permits a different LE to qualify.
+- X at sequence 10, then Y at 12 for the same LE/address: Y wins regardless of
+  delivery order. Revoking X does not remove Y.
+- Another LE at sequence 900 cannot replace Y until Y's verified revocation.
+  Revoking Y releases its claim; it does not restore X.
+
+## Appendix: possible future same-event policy — not implemented
+
+Multiple distinct EOA association ACDCs anchored in one issuer KEL event are
+outside ordinary usage and this build. A possible future policy is to reject all
+involved associations, including withdrawing earlier application acceptance when
+a conflict is discovered later. That would be application-policy rejection, not
+signature invalidity; duplicate delivery of one SAID would not be a conflict.
+Revisit only if needed. No detection, conflict state, invalidation path, special
+tests, tie-breaker or proof-of-absence machinery is required for this case now.
