@@ -88,8 +88,13 @@ A known revoked association must not be downgraded to merely unavailable.
    after a new valid assessment and the normal grant checks. Source revocation
    reaches every affected managed association. Queries and events must agree.
 4. **Replacement and recovery:** compare verified issuance facts, not event
-   arrival, wall-clock time or revision. Different-issuer/same-anchor ambiguity
-   remains unresolved. Withdraw by exact association SAID so a late revocation
+   arrival, wall-clock time or revision. Follow [ADR 0001](../../adrs/0001-eoa-association-ownership-and-replacement.md):
+   same-LE replacement requires a strictly later verified issuance anchor;
+   a different LE must wait for verified revocation releasing the current claim.
+   Reject all distinct associations sharing one issuer issuance event, including
+   invalidating an earlier accepted association when the conflict is discovered.
+   This is application policy, not signature invalidity. Withdraw by exact
+   association SAID so a late revocation
    cannot remove its replacement. Preserve signed attempts, nonce reconciliation,
    cancellation and reorg recovery across outages and independent restarts.
 
