@@ -1,0 +1,151 @@
+{
+  "$id": "EKeFW-30joNrTXUmq7Dpp2kExZgveYlsLfWrDml8hRYt",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "vLEI External Association v1",
+  "description": "An untargeted credential issued by a Legal Entity to associate its AID with an external identifier.",
+  "type": "object",
+  "properties": {
+    "v": {
+      "description": "ACDC version, JSON serialization format, and serialized credential byte count.",
+      "type": "string",
+      "pattern": "^ACDC10JSON[0-9a-f]{6}_$"
+    },
+    "d": {
+      "description": "BLAKE3-256 SAID of the complete association credential.",
+      "type": "string",
+      "pattern": "^E[A-Za-z0-9_-]{43}$"
+    },
+    "u": {
+      "description": "Unique nonce from any entropy source, reserved by the issuer and signed unchanged in the external challenge.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "i": {
+      "description": "AID of the issuing Legal Entity that holds the referenced LE vLEI credential.",
+      "type": "string",
+      "pattern": "^[BDE][A-Za-z0-9_-]{43}$"
+    },
+    "ri": {
+      "description": "SAID of the issuer's credential registry tracking issuance and revocation.",
+      "type": "string",
+      "pattern": "^E[A-Za-z0-9_-]{43}$"
+    },
+    "s": {
+      "description": "SAID of this association schema.",
+      "type": "string",
+      "pattern": "^E[A-Za-z0-9_-]{43}$"
+    },
+    "a": {
+      "description": "Association attributes containing the external identifier and its signed proof.",
+      "type": "object",
+      "properties": {
+        "d": {
+          "description": "BLAKE3-256 SAID of the association attributes.",
+          "type": "string",
+          "pattern": "^E[A-Za-z0-9_-]{43}$"
+        },
+        "extId": {
+          "description": "External identifier associated with the Legal Entity AID; its profile defines the canonical form.",
+          "type": "string",
+          "minLength": 1
+        },
+        "proof": {
+          "description": "External signature collected before issuance, binding the issuer AID, LE vLEI SAID, external identifier, and nonce.",
+          "type": "object",
+          "properties": {
+            "d": {
+              "description": "BLAKE3-256 SAID of this proof block, covering alg, tag, and sig.",
+              "type": "string",
+              "pattern": "^E[A-Za-z0-9_-]{43}$"
+            },
+            "alg": {
+              "description": "Identifies the signature scheme and cryptographic algorithm used for the external proof.",
+              "type": "string",
+              "minLength": 1
+            },
+            "tag": {
+              "description": "Domain-separation tag identifying the association protocol and version.",
+              "const": "vlei-external-association/v1"
+            },
+            "sig": {
+              "description": "External signature over the association challenge, encoded as defined by the identifier profile and signature scheme.",
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "d",
+            "alg",
+            "tag",
+            "sig"
+          ],
+          "additionalProperties": false
+        },
+        "dt": {
+          "description": "Optional issuer-declared timestamp in KERI UTC format with microseconds; TEL evidence supplies authenticated issuance time.",
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}\\+00:00$"
+        }
+      },
+      "required": [
+        "d",
+        "extId",
+        "proof"
+      ],
+      "additionalProperties": false
+    },
+    "e": {
+      "description": "Credential edges linking the association to the Legal Entity's LE vLEI.",
+      "type": "object",
+      "properties": {
+        "d": {
+          "description": "BLAKE3-256 SAID of the credential edges.",
+          "type": "string",
+          "pattern": "^E[A-Za-z0-9_-]{43}$"
+        },
+        "le": {
+          "description": "Reference to the LE vLEI credential held by the association issuer.",
+          "type": "object",
+          "properties": {
+            "n": {
+              "description": "SAID of the referenced LE vLEI credential, also signed in the external challenge.",
+              "type": "string",
+              "pattern": "^E[A-Za-z0-9_-]{43}$"
+            },
+            "s": {
+              "description": "SAID of the LE vLEI credential schema.",
+              "const": "ENPXp1vQzRF6JwIuS-mp2U8Uf1MoADoP_GqQ62VsDZWY"
+            },
+            "o": {
+              "description": "I2I edge operator requiring the association issuer to equal the LE vLEI issuee.",
+              "const": "I2I"
+            }
+          },
+          "required": [
+            "n",
+            "s",
+            "o"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "d",
+        "le"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "v",
+    "d",
+    "u",
+    "i",
+    "ri",
+    "s",
+    "a",
+    "e"
+  ],
+  "additionalProperties": false
+}
