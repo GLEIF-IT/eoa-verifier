@@ -55,7 +55,7 @@ sequenceDiagram
 
 </details>
 
-Detailed charts: [association creation](association-creation-sequence.md) → [verification and webhook delivery](association-verification-sequence.md) → [oracle endorsement](oracle-endorsement-sequence.md). Continuing authority is covered separately in [revocation and status maintenance](revocation-status-sequence.md).
+Detailed charts: [association creation](association-creation-sequence.md) → [verification and webhook delivery](association-verification-sequence.md) → [oracle endorsement](oracle-endorsement-sequence.md). The transfer internals are detailed in [on-chain compliance and transfer](on-chain-transfer-sequence.md). Continuing authority is covered separately in [revocation and status maintenance](revocation-status-sequence.md).
 
 The transfer path is the local **policy-controlled stablecoin wrapper** (`wUSDC`), with test balances prepared in setup; a direct transfer of the underlying mock USDC does not enforce this policy. Check the underlying `Transfer` event and balances: a successful receipt alone does not prove a transfer, because a policy failure can return `false`.
 
