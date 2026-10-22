@@ -90,9 +90,9 @@ A known revoked association must not be downgraded to merely unavailable.
    cannot remove its replacement. Preserve signed attempts, nonce reconciliation,
    cancellation and reorg recovery across outages and independent restarts.
 
-See the [verification](../../docs/association-verification-sequence.md),
-[endorsement](../../docs/oracle-endorsement-sequence.md) and
-[status](../../docs/revocation-status-sequence.md) diagrams. The diagrams describe
+See the [verification](../../docs/diagrams/sequence/association-verification-sequence.md),
+[endorsement](../../docs/diagrams/sequence/oracle-endorsement-sequence.md) and
+[status](../../docs/diagrams/sequence/revocation-status-sequence.md) diagrams. The diagrams describe
 workflows; they do not freeze HTTP endpoints or signing encodings.
 
 ## Trust and freshness requirements

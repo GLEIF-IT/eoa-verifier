@@ -2,7 +2,7 @@
 
 Proposed lifecycle after initial verification. Freshness checks gate new authority; accepted credential revocation triggers withdrawal of the affected association. These are separate paths, with different effects during an outage.
 
-[Open the rendered chart](revocation-status-sequence.svg) · [Workflow guide](README.md)
+[Open the rendered chart](revocation-status-sequence.svg) · [Workflow guide](../../README.md)
 
 ![Revocation and continuing status](revocation-status-sequence.svg)
 
@@ -53,4 +53,4 @@ Under the current plan, unavailable evidence leaves existing endorsements in pla
 
 See [oracle endorsement](oracle-endorsement-sequence.md) for the granting path and the [end-to-end flow](stablecoin-end-to-end-sequence.md) for transfers.
 
-Sources: [EOA profile](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/eoa-profile.docx), [methodology and original color theme](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/methodology.docx), [wallet association policy](../../gl1/vlei-comply/src/policies/VLEIWalletAssociationPolicy.sol), [oracle registry](../../gl1/vlei-comply/src/attestation/VLEIOracleRegistry.sol), and [wrapped token](../../gl1/vlei-comply/src/wrappers/wUSDC.sol). Contract behavior is grounded in local `vlei-comply` commit `6220cd7`; the separate verifier and webhook/query boundary are planned.
+Sources: [EOA profile](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/eoa-profile.docx), [methodology and original color theme](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/methodology.docx), [wallet association policy](../../../../gl1/vlei-comply/src/policies/VLEIWalletAssociationPolicy.sol), [oracle registry](../../../../gl1/vlei-comply/src/attestation/VLEIOracleRegistry.sol), and [wrapped token](../../../../gl1/vlei-comply/src/wrappers/wUSDC.sol). Contract behavior is grounded in local `vlei-comply` commit `6220cd7`; the separate verifier and webhook/query boundary are planned.

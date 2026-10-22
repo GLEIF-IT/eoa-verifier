@@ -2,7 +2,7 @@
 
 Proposed local end-to-end workflow after [local setup](local-setup-sequence.md). Both parties create an association, the verifier checks it, and the oracle establishes eligible endorsements before the policy-controlled transfer.
 
-[Open the rendered chart](stablecoin-end-to-end-sequence.svg) · [Workflow guide](README.md)
+[Open the rendered chart](stablecoin-end-to-end-sequence.svg) · [Workflow guide](../../README.md)
 
 ![Verified wallet associations and stablecoin transfers](stablecoin-end-to-end-sequence.svg)
 
@@ -61,4 +61,4 @@ The transfer path is the local **policy-controlled stablecoin wrapper** (`wUSDC`
 
 Existing endorsements can outlive an evidence outage or a revocation still propagating to the chain. See the status-maintenance chart for these limits; the transfer itself does not perform a live verifier query.
 
-Sources: [EOA profile](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/eoa-profile.docx), [methodology and original color theme](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/methodology.docx), [wallet association policy](../../gl1/vlei-comply/src/policies/VLEIWalletAssociationPolicy.sol), [oracle registry](../../gl1/vlei-comply/src/attestation/VLEIOracleRegistry.sol), and [wrapped token](../../gl1/vlei-comply/src/wrappers/wUSDC.sol). Contract behavior is grounded in local `vlei-comply` commit `6220cd7`; the separate verifier and webhook/query boundary are planned.
+Sources: [EOA profile](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/eoa-profile.docx), [methodology and original color theme](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/methodology.docx), [wallet association policy](../../../../gl1/vlei-comply/src/policies/VLEIWalletAssociationPolicy.sol), [oracle registry](../../../../gl1/vlei-comply/src/attestation/VLEIOracleRegistry.sol), and [wrapped token](../../../../gl1/vlei-comply/src/wrappers/wUSDC.sol). Contract behavior is grounded in local `vlei-comply` commit `6220cd7`; the separate verifier and webhook/query boundary are planned.
