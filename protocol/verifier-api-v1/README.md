@@ -1,9 +1,9 @@
 # EOA verifier service boundary
 
 This is the initial design for independently deployable `eoa-verifier` and
-`vlei-oracle`. The [schema](schema.json) and [examples](examples.json) describe
-basic assessment data, not a complete wire protocol or cryptographic proof.
-Exact signing, event and ACK contracts belong with their implementations.
+`vlei-oracle`. [ADR 0002](../../adrs/0002-verifier-result-object.md) records an
+illustrative JSON result object, not a frozen API or cryptographic proof.
+Exact payload, signing and ACK contracts belong with their implementations.
 
 ## Responsibilities
 
@@ -38,15 +38,11 @@ not assess delegated-code safety; the ceremony does not prove against later thef
 | `invalid`     | Initial verification failed or the accepted association ACDC was revoked.                                                                       |
 | `unavailable` | Initial verification lacks required evidence/access; do not accept that candidate. This does not invalidate an already accepted association.    |
 
-`associationSaid` is the identity; no second ceremony UUID. `revision` orders
-changed decisions within one verifier AID/association, not issuance or expiry.
-`binding` is required for `valid` and carries verified issuer/LE/QVI identities and
-canonical `extId`. The oracle derives wallet from `eip155:<chainId>:<address>` and
-`identityRef = keccak256(UTF-8(issuerAid))`; LEI and LE credential SAID are not
-substitutes. `reasonCode` explains the result; its final taxonomy is deferred.
-The synthetic examples show success, later revocation and a separate incomplete
-presentation. Schema validation is not native verification. Transport signatures,
-delivery IDs and issuance/account evidence fields are settled with implementation.
+The association SAID identifies the result. The oracle derives the wallet from
+canonical `extId` and `identityRef = keccak256(UTF-8(issuerAid))`; LEI and LE
+credential SAID are not substitutes. ADR 0002 preserves a provisional result
+example; it does not replace the existing association ACDC schema or native
+verification. Define necessary payload fields with the actual HTTP endpoints.
 
 ## Acceptance lifetime and service authentication
 
