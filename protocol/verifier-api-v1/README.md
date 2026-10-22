@@ -100,10 +100,10 @@ workflows; they do not freeze HTTP endpoints or signing encodings.
 
 ## Status lookup
 
-`GET /v1/associations/{associationSaid}/status` lets an authenticated external
-caller read the verifier's stored status for one association ACDC. It uses the
-existing service request/reply authentication and the deployment's configured
-chain ID and trusted RPC URL; the caller supplies only the SAID.
+`GET /v1/associations/{said}/status` is a public read-only route for one
+association ACDC. The caller supplies only its SAID; no KERI-AID request
+signature or signed response is required. Account observations use the
+deployment's configured chain ID and trusted RPC URL.
 
 Return the association SAID and three distinct pieces of information:
 
@@ -119,8 +119,8 @@ Return the association SAID and three distinct pieces of information:
 Known associations return `200`, including pending or unavailable verification;
 unknown SAIDs return `404`. A failed later check preserves the last observation
 and exposes the failed check's time/reason separately. Known revocation remains
-terminal for the affected association. GET performs no RPC, refresh or enrollment and cannot establish current
-freshness or authorize an endorsement. PR 04 implements this stored view; PR 06
+terminal for the affected association. GET performs no RPC, refresh or enrollment
+and cannot establish current freshness or authorize an endorsement. PR 04 implements this stored view; PR 06
 keeps it updated through continuing reassessment. Settle response fields and
 focused route tests with that implementation.
 
@@ -136,8 +136,9 @@ settled with the authentication implementation, not a custom JSON envelope here.
 `vlei-oracle` is the initial receiver; the outbox targets the configured webhook,
 not a particular application type. One configured destination is sufficient.
 
-Authenticate delivery, queries, replies and acknowledgements using configured
-service AIDs and native accepted key state. Bind the body, intended peer/action
+The public status lookup above is outside the authenticated service protocol.
+Authenticate delivery, service queries/replies and acknowledgements using
+configured service AIDs and native accepted key state. Bind the body, intended peer/action
 and request/response relationship; enforce expiry/replay policy across restart
 and supported same-AID rotation. Discovery is not authorization. A different
 service AID requires an explicit deployment trust change. The initial signing
