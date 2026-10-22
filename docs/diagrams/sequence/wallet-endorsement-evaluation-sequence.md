@@ -2,7 +2,7 @@
 
 The policy detail behind [on-chain compliance and USDC transfer](on-chain-transfer-sequence.md), grounded in `vlei-comply` commit `6220cd7`. Input is an enriched transaction envelope; output is **Pass or Fail with a reason code**. This read-only evaluation consumes existing endorsements and does not publish new authority.
 
-[Open the rendered chart](wallet-endorsement-evaluation-sequence.svg) · [Workflow guide](README.md)
+[Open the rendered chart](wallet-endorsement-evaluation-sequence.svg) · [Workflow guide](../../README.md)
 
 ![Policy evaluation of both customer roles and their exact-wallet endorsements](wallet-endorsement-evaluation-sequence.svg)
 
@@ -59,4 +59,4 @@ The transfer supplies no association SAID. The registry stores the SAID alongsid
 
 This policy never returns Pending. `PolicyManager` aggregates its result with all other registered policies, and `wUSDC` decides whether to call the underlying token. See [transfer outcomes and failures](on-chain-transfer-outcomes-sequence.md) for rejection, queueing and rollback behavior.
 
-Sources: [wallet association policy](../../gl1/vlei-comply/src/policies/VLEIWalletAssociationPolicy.sol), [endorsement checker](../../gl1/vlei-comply/src/attestation/VLEIEndorsementChecker.sol), [endorsement registry](../../gl1/vlei-comply/src/attestation/VLEIOracleRegistry.sol), and [compliance tests](../../gl1/vlei-comply/test/VLEIOracleComplianceTest.t.sol).
+Sources: [wallet association policy](../../../../gl1/vlei-comply/src/policies/VLEIWalletAssociationPolicy.sol), [endorsement checker](../../../../gl1/vlei-comply/src/attestation/VLEIEndorsementChecker.sol), [endorsement registry](../../../../gl1/vlei-comply/src/attestation/VLEIOracleRegistry.sol), and [compliance tests](../../../../gl1/vlei-comply/test/VLEIOracleComplianceTest.t.sol).

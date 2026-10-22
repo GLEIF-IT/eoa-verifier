@@ -2,7 +2,7 @@
 
 Successful call flow for the direct-wallet `wUSDC.transfer(recipient, amount)` path, grounded in `vlei-comply` commit `6220cd7`. All required policies pass and token checks succeed in this chart. The wallet-association policy must be registered in `PolicyManager`; both parties' identity mappings and endorsements come from the earlier [oracle endorsement workflow](oracle-endorsement-sequence.md).
 
-[Open the rendered chart](on-chain-transfer-sequence.svg) · [Workflow guide](README.md) · [End-to-end overview](stablecoin-end-to-end-sequence.md)
+[Open the rendered chart](on-chain-transfer-sequence.svg) · [Workflow guide](../../README.md) · [End-to-end overview](stablecoin-end-to-end-sequence.md)
 
 ![On-chain identity resolution, exact-wallet endorsement checks and underlying USDC transfer](on-chain-transfer-sequence.svg)
 
@@ -62,4 +62,4 @@ All calls after `transfer` execute within one Ethereum transaction. See [transfe
 
 `PolicyManager` emits `PoliciesRun` and returns the aggregate result. Verify the underlying USDC `Transfer` event and balances: transaction receipt success alone does not prove token movement. The registry reads consume previously posted state; no oracle HTTP call, KERI/EIP-712 verification, or credential-expiry check occurs here. Direct transfers of underlying USDC bypass this wrapper policy.
 
-Sources: [wrapper](../../gl1/vlei-comply/src/wrappers/wUSDC.sol), [policy manager](../../gl1/vlei-comply/src/policy/PolicyManager.sol), [identity adapter](../../gl1/vlei-comply/src/identity/ChainlinkCCIDIdentityAdapter.sol), [identity registry](../../gl1/vlei-comply/src/identity/IdentityRegistry.sol), [wallet association policy](../../gl1/vlei-comply/src/policies/VLEIWalletAssociationPolicy.sol), [endorsement checker](../../gl1/vlei-comply/src/attestation/VLEIEndorsementChecker.sol), [endorsement registry](../../gl1/vlei-comply/src/attestation/VLEIOracleRegistry.sol), [demo USDC](../../gl1/vlei-comply/src/assets/USDC.sol), and [compliance tests](../../gl1/vlei-comply/test/VLEIOracleComplianceTest.t.sol).
+Sources: [wrapper](../../../../gl1/vlei-comply/src/wrappers/wUSDC.sol), [policy manager](../../../../gl1/vlei-comply/src/policy/PolicyManager.sol), [identity adapter](../../../../gl1/vlei-comply/src/identity/ChainlinkCCIDIdentityAdapter.sol), [identity registry](../../../../gl1/vlei-comply/src/identity/IdentityRegistry.sol), [wallet association policy](../../../../gl1/vlei-comply/src/policies/VLEIWalletAssociationPolicy.sol), [endorsement checker](../../../../gl1/vlei-comply/src/attestation/VLEIEndorsementChecker.sol), [endorsement registry](../../../../gl1/vlei-comply/src/attestation/VLEIOracleRegistry.sol), [demo USDC](../../../../gl1/vlei-comply/src/assets/USDC.sol), and [compliance tests](../../../../gl1/vlei-comply/test/VLEIOracleComplianceTest.t.sol).

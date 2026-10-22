@@ -2,7 +2,7 @@
 
 Companion to the [successful on-chain transfer](on-chain-transfer-sequence.md), grounded in `vlei-comply` commit `6220cd7`. This chart starts after the wrapper's initial pause check and condenses identity enrichment and policy evaluation into `runPolicies`.
 
-[Open the rendered chart](on-chain-transfer-outcomes-sequence.svg) · [Workflow guide](README.md)
+[Open the rendered chart](on-chain-transfer-outcomes-sequence.svg) · [Workflow guide](../../README.md)
 
 ![Policy failure, pending requests and underlying USDC transfer success or revert](on-chain-transfer-outcomes-sequence.svg)
 
@@ -58,4 +58,4 @@ Fail/Pending return `false` without reverting, so a successful transaction recei
 
 The wrapper checks `AdminControls.isPaused()` before evaluation; the token also checks pause during its update. Insufficient allowance/balance or invalid sender/recipient addresses revert the token call. An uncaught policy or contract error also reverts the transaction; identity-enrichment read failures are caught, and a missing wallet identity then fails the association policy. A reverted transaction does not undo a previously confirmed approval. Administrative resolution of queued requests is outside this initial `transfer` flow.
 
-Sources: [wrapper](../../gl1/vlei-comply/src/wrappers/wUSDC.sol), [policy manager](../../gl1/vlei-comply/src/policy/PolicyManager.sol), [association policy](../../gl1/vlei-comply/src/policies/VLEIWalletAssociationPolicy.sol), [demo USDC](../../gl1/vlei-comply/src/assets/USDC.sol), [compliance tests](../../gl1/vlei-comply/test/VLEIOracleComplianceTest.t.sol), and [pending-request tests](../../gl1/vlei-comply/test/ComplianceTest.t.sol).
+Sources: [wrapper](../../../../gl1/vlei-comply/src/wrappers/wUSDC.sol), [policy manager](../../../../gl1/vlei-comply/src/policy/PolicyManager.sol), [association policy](../../../../gl1/vlei-comply/src/policies/VLEIWalletAssociationPolicy.sol), [demo USDC](../../../../gl1/vlei-comply/src/assets/USDC.sol), [compliance tests](../../../../gl1/vlei-comply/test/VLEIOracleComplianceTest.t.sol), and [pending-request tests](../../../../gl1/vlei-comply/test/ComplianceTest.t.sol).

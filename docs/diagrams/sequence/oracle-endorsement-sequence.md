@@ -2,7 +2,7 @@
 
 Proposed workflow for one verified association. The verifier has completed cryptographic verification. The oracle now decides whether that result may grant authority in its configured deployment.
 
-[Open the rendered chart](oracle-endorsement-sequence.svg) · [Workflow guide](README.md)
+[Open the rendered chart](oracle-endorsement-sequence.svg) · [Workflow guide](../../README.md)
 
 ![Oracle acceptance and on-chain endorsement](oracle-endorsement-sequence.svg)
 
@@ -51,4 +51,4 @@ The oracle derives `wallet` from `extId` and `identityRef = keccak256(issuerAid)
 
 Freshness also gates recovery/rebroadcast. Durable transaction, nonce, cancellation and chain-reorganization handling remain oracle responsibilities behind these simplified arrows. For invalidation of existing authority, see [revocation and status maintenance](revocation-status-sequence.md); for use of an endorsement, see [stablecoin transfers](stablecoin-end-to-end-sequence.md).
 
-Sources: [EOA profile](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/eoa-profile.docx), [methodology and original color theme](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/methodology.docx), [wallet association policy](../../gl1/vlei-comply/src/policies/VLEIWalletAssociationPolicy.sol), [oracle registry](../../gl1/vlei-comply/src/attestation/VLEIOracleRegistry.sol), and [wrapped token](../../gl1/vlei-comply/src/wrappers/wUSDC.sol). Contract behavior is grounded in local `vlei-comply` commit `6220cd7`; the separate verifier and webhook/query boundary are planned.
+Sources: [EOA profile](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/eoa-profile.docx), [methodology and original color theme](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/methodology.docx), [wallet association policy](../../../../gl1/vlei-comply/src/policies/VLEIWalletAssociationPolicy.sol), [oracle registry](../../../../gl1/vlei-comply/src/attestation/VLEIOracleRegistry.sol), and [wrapped token](../../../../gl1/vlei-comply/src/wrappers/wUSDC.sol). Contract behavior is grounded in local `vlei-comply` commit `6220cd7`; the separate verifier and webhook/query boundary are planned.
