@@ -32,6 +32,8 @@ periodic verification/account checks.
 | Module                                   | Responsibility                                                                    |
 | ---------------------------------------- | --------------------------------------------------------------------------------- |
 | `cli`, `serving`                         | Configuration, native stores, shared parser and HIO task/resource ownership.      |
+| `receiving/directing`                    | Receive CESR POST/PUT and schedule shared native parsing and escrows.             |
+| `authing`                                | Authenticate service messages and ACKs; claim durable transport nonces.          |
 | `receiving/grants`                       | Decode authenticated native Grants, replay embeds and create duplicate-safe work. |
 | `basing`                                 | Persist initial-verification progress keyed by association SAID.                  |
 | `verification/coordinating`              | Scan bounded work pages, dispatch one association and apply results.              |

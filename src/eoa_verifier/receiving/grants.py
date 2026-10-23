@@ -44,7 +44,7 @@ class GrantNotificationDoer(doing.Doer):
         """Borrow a work store, Habery, native Notifier and shared inbound parser.
 
         expected_association_schema is the only accepted association schema SAID.
-        The service owns these resources and schedules parser/escrow processing;
+        The outer resource contexts own stores; the service schedules parser/escrows;
         this Doer only consumes notifications and creates work. kwa supplies HIO options.
         """
         self.baser = baser

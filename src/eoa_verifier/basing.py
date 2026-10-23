@@ -109,5 +109,10 @@ class VerifierBaser(dbing.LMDBer):
                 ]
 
     def claim_message(self, peer, nonce, expires):
-        """Insert a peer/nonce replay claim once, after authentication; return False on replay."""
+        """Insert a peer/nonce claim after authentication; return False on replay.
+
+        expires is the authenticated Unix expiry time in seconds, retained as
+        metadata. This method does not prune expired claims or deduplicate
+        application events. Claims survive reopening persistent stores.
+        """
         return self.messages.put(keys=(peer, nonce), val=MessageReceipt(expires))

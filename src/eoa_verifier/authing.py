@@ -207,6 +207,9 @@ class ServiceAuthenticator:
         operation. Never obtain these expected values from signature headers.
         Rejected messages do not reserve nonces. Replay claims survive reopening;
         application retries must be newly signed. No network refresh occurs here.
+        Returns AuthenticatedMessage; invalid context, signature or replay raises
+        AuthenticationError. A successful claim precedes application persistence,
+        so an application failure requires a newly signed delivery attempt.
         """
         lowered, inp, sig = self._read_signature(headers)
         try:

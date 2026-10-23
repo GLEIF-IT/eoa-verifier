@@ -317,7 +317,12 @@ def association_from_challenge(challenge, signature, registry):
 
 @contextmanager
 def verifier_service(config):
-    """Own native stores around a service whose HIO lifetime the caller schedules."""
+    """Yield a service borrowing native stores owned by this fixture.
+
+    The caller must stop its HIO scheduler before leaving this context. Use
+    running_service when explicit scheduling control is unnecessary. Persistent
+    configs retain files for reopening assertions; temporary configs remove them.
+    """
     from keri.app import keeping, configing, notifying
     from keri.db import basing, dbing
     from keri.vdr import viring, credentialing

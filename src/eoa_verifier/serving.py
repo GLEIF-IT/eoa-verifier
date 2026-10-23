@@ -74,7 +74,15 @@ class VerifierService(doing.DoDoer):
     """Own service tasks and sockets while borrowing the caller's open stores."""
 
     def __init__(self, config, *, hby, rgy, baser, noter, **kwa):
-        """Wire native verification and HTTP tasks without owning shared stores."""
+        """Wire native verification and HTTP tasks without owning shared stores.
+
+        config is ServiceConfig; hby/rgy are open native Habery/Regery instances,
+        baser is VerifierBaser, and noter is the native notification store. The
+        caller must keep all of them open until HIO child shutdown completes.
+        Construction pins schemas and creates the configured habitat if absent;
+        inception options apply only to that creation. Native network Doers own
+        their sockets. kwa is passed to HIO DoDoer.
+        """
         self.config = config
         inits = {
             "transferable": True,
@@ -182,12 +190,29 @@ class HealthEnd:
     """Expose process liveness only, without asserting evidence or RPC readiness."""
 
     def on_get(self, req, rep):
-        """Set the Falcon response to {"ok": True}; perform no verification or RPC I/O."""
+        """Handle GET /health without parameters or authentication.
+
+        req is the Falcon request; rep receives HTTP 200 and application/json
+        {"ok": true}. This liveness response performs no verification or RPC I/O
+        and does not imply that dependencies are ready. Returns None.
+        """
         rep.media = {"ok": True}
 
 
 def run_service(config: ServiceConfig, *, expire: float = 0.0):
-    """Own shared stores outside HIO; expire=0 runs without a time limit."""
+    """Run the service inside native store contexts and a real-time HIO scheduler.
+
+    config supplies identity, paths, passcode and network policy. expire is the
+    scheduler limit in seconds; zero runs without a limit. Explicit config.temp
+    controls every store: persistent state remains on disk after shutdown, while
+    temporary contexts remove their files. Supplied Habery/Regery stores are
+    borrowed, so no second store-owning Doer is installed.
+
+    Earlier contexts close if later startup fails. During normal shutdown HIO
+    stops children before the contexts close their stores. Startup and cleanup
+    errors propagate; native contexts govern failures inside an individual open.
+    Returns None after the scheduler stops.
+    """
     options = dict(name=config.name, base=config.base, headDirPath=config.head_dir)
     with (
         keeping.openKS(temp=config.temp, **options) as ks,
