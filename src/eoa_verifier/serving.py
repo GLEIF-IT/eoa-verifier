@@ -4,6 +4,7 @@ import json
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import falcon
 from hio.base import doing
@@ -24,7 +25,10 @@ from keri.peer import exchanging
 from keri.vc import protocoling
 from keri.vdr import credentialing, eventing as veventing, verifying, viring
 
+from .accepting import AcceptanceDoer
 from .basing import VerifierBaser
+from .delivering import WebhookSender
+from .statusing import StatusEnd
 from .receiving.directing import CesrEnd, Receiver
 from .receiving.grants import GrantNotificationDoer
 from .verification.constants import ASSOCIATION_SCHEMA
@@ -61,9 +65,26 @@ class ServiceConfig:
     incept_file: str | None = None
     # Use disposable native stores and remove them on close; intended for tests.
     temp: bool = False
+    # Configure both to enable durable acceptance/outbox for one trusted destination.
+    webhook_url: str | None = None
+    webhook_aid: str | None = None
 
     def __post_init__(self):
         """Reject invalid verification configuration before opening resources."""
+        if bool(self.webhook_url) != bool(self.webhook_aid):
+            raise ValueError("webhook URL and AID must be configured together")
+        if self.webhook_url:
+            target = urlsplit(self.webhook_url)
+            if (
+                target.scheme not in ("http", "https")
+                or not target.netloc
+                or target.fragment
+            ):
+                raise ValueError(
+                    "webhook must be an absolute HTTP URL without a fragment"
+                )
+            if coring.Prefixer(qb64=self.webhook_aid).qb64 != self.webhook_aid:
+                raise ValueError("webhook peer must be a canonical AID")
         if not self.rpc_url or self.chain_id <= 0:
             raise ValueError("verification requires an RPC URL and positive chain ID")
         if coring.Prefixer(qb64=self.trusted_geda_aid).qb64 != self.trusted_geda_aid:
@@ -130,6 +151,7 @@ class VerifierService(doing.DoDoer):
         oobiing.loadEnds(app=app, hby=hby, prefix="/ext")
         app.add_route("/", CesrEnd(rxbs=parser.ims))
         app.add_route("/health", HealthEnd())
+        app.add_route("/v1/associations/{said}/status", StatusEnd(baser))
         server = http.Server(
             host=config.host,
             port=config.http_port,
@@ -162,6 +184,20 @@ class VerifierService(doing.DoDoer):
                 ),
             ),
         ]
+        self.sender = None
+        if config.webhook_url:
+            self.sender = WebhookSender(baser=baser, hab=hab)
+            doers.extend(
+                [
+                    AcceptanceDoer(
+                        baser=baser,
+                        rgy=rgy,
+                        destination=config.webhook_url,
+                        peer_aid=config.webhook_aid,
+                    ),
+                    self.sender,
+                ]
+            )
         self.hby, self.hab, self.rgy, self.baser, self.app = (
             hby,
             hab,

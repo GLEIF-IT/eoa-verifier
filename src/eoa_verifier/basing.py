@@ -1,5 +1,6 @@
-"""Persist unfinished verification and completed results independently of native evidence."""
+"""Persist verification, acceptance and delivery independently of native evidence."""
 
+import json
 from dataclasses import dataclass, field
 from itertools import islice
 
@@ -34,15 +35,56 @@ class MessageReceipt:
     expires: int
 
 
+@dataclass
+class AssociationStatus:
+    """Stored application acceptance and immutable initially verified facts.
+
+    Acceptance is not oracle ownership selection or an Ethereum endorsement.
+    There is no expiry; future verified retirement changes status explicitly.
+    """
+
+    associationSaid: str
+    status: str
+    eventId: str
+    facts: dict
+    observation: dict
+    reason: str = ""
+
+
+@dataclass
+class Delivery:
+    """One immutable event body/target with separately mutable attempt progress."""
+
+    eventId: str
+    associationSaid: str
+    destination: str
+    peerAid: str
+    body: str
+    delivered: bool = False
+    attempts: int = 0
+    error: str = ""
+
+
+@dataclass
+class DestinationSchedule:
+    """Persisted operational scheduling values; automatic retry belongs to PR07.
+
+    nextAttemptAt is UTC Unix seconds, not an association-validity deadline.
+    """
+
+    failures: int = 0
+    nextAttemptAt: float = 0.0
+
+
 class VerifierBaser(dbing.LMDBer):
-    """Own pending/results integrity and transport replay claims; make no verification decisions."""
+    """Own atomic application records and replay claims; make no verification decisions."""
 
     TailDirPath = "eoa-verifier/db"
     AltTailDirPath = ".eoa-verifier/db"
     TempPrefix = "eoa_verifier_db_"
 
     def reopen(self, **kwa):
-        """Open the two verification tables and independent transport replay table."""
+        """Open verification, acceptance/outbox and transport replay tables in one environment."""
         super().reopen(**kwa)
         self.pending = koming.Komer(
             db=self, subkey="pending.", schema=PendingVerification
@@ -51,6 +93,13 @@ class VerifierBaser(dbing.LMDBer):
             db=self, subkey="results.", schema=VerificationResult
         )
         self.messages = koming.Komer(db=self, subkey="message.", schema=MessageReceipt)
+        self.associations = koming.Komer(
+            db=self, subkey="associations.", schema=AssociationStatus
+        )
+        self.outbox = koming.Komer(db=self, subkey="outbox.", schema=Delivery)
+        self.destinations = koming.Komer(
+            db=self, subkey="destinations.", schema=DestinationSchedule
+        )
         return self.env
 
     def enqueue(self, work):
@@ -96,17 +145,7 @@ class VerifierBaser(dbing.LMDBer):
 
     def pending_batch(self, *, after="", limit=32):
         """Copy a bounded page strictly after the SAID; close its cursor before returning."""
-        with self.env.begin(db=self.pending.sdb) as txn:
-            with txn.cursor() as cursor:
-                if not cursor.set_range(after.encode()):
-                    return []
-                if after and cursor.key() == after.encode():
-                    if not cursor.next():
-                        return []
-                return [
-                    self.pending.deserializer(raw)
-                    for _, raw in islice(cursor.iternext(), limit)
-                ]
+        return self._batch(self.pending, after=after, limit=limit)
 
     def claim_message(self, peer, nonce, expires):
         """Insert a peer/nonce claim after authentication; return False on replay.
@@ -116,3 +155,112 @@ class VerifierBaser(dbing.LMDBer):
         application events. Claims survive reopening persistent stores.
         """
         return self.messages.put(keys=(peer, nonce), val=MessageReceipt(expires))
+
+    def result_batch(self, *, after="", limit=32):
+        """Copy a bounded result page; close the read transaction before acceptance."""
+        return self._batch(self.results, after=after, limit=limit)
+
+    def delivery_batch(self, *, after="", limit=32):
+        """Copy a bounded outbox page for initial-attempt discovery after restart."""
+        return self._batch(self.outbox, after=after, limit=limit)
+
+    def _batch(self, table, *, after, limit):
+        """Seek strictly after a key and release the native cursor before returning."""
+        with self.env.begin(db=table.sdb) as txn, txn.cursor() as cursor:
+            if not cursor.set_range(after.encode()):
+                return []
+            if after and cursor.key() == after.encode() and not cursor.next():
+                return []
+            return [
+                table.deserializer(raw) for _, raw in islice(cursor.iternext(), limit)
+            ]
+
+    def accept(self, said, *, facts, destination, peer_aid):
+        """Atomically persist acceptance and one outbox obligation for a verified result.
+
+        The caller supplies native issuance facts; storage does not verify credentials.
+        Repeated acceptance returns the original status without changing its event,
+        body or destination. A failure rolls back all new application records.
+        Native stores are outside this LMDB transaction.
+        """
+        key = said.encode()
+        with self.env.begin(write=True) as txn:
+            previous = txn.get(key, db=self.associations.sdb)
+            if previous is not None:
+                return self.associations.deserializer(previous)
+            raw = txn.get(key, db=self.results.sdb)
+            result = self.results.deserializer(raw) if raw is not None else None
+            if result is None or result.outcome != "verified":
+                raise ValueError("acceptance requires a completed verified result")
+            event_id = f"{said}:1"
+            observation = dict(
+                result.verified["observation"], wallet=result.verified["wallet"]
+            )
+            accepted = AssociationStatus(said, "accepted", event_id, facts, observation)
+            body = json.dumps(
+                {
+                    "version": "1",
+                    "eventId": event_id,
+                    "associationSaid": said,
+                    "revision": 1,
+                    "outcome": "valid",
+                    "association": facts,
+                    "observation": observation,
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            event = Delivery(event_id, said, destination, peer_aid, body)
+            txn.put(
+                key, self.associations.serializer(accepted), db=self.associations.sdb
+            )
+            txn.put(
+                event_id.encode(), self.outbox.serializer(event), db=self.outbox.sdb
+            )
+            txn.put(
+                destination.encode(),
+                self.destinations.serializer(DestinationSchedule()),
+                db=self.destinations.sdb,
+                overwrite=False,
+            )
+            return accepted
+
+    def record_attempt(self, event_id):
+        """Persist an attempt before network work; an interrupted attempt stays pending."""
+        event = self.outbox.get(keys=(event_id,))
+        if event is None:
+            raise ValueError("unknown delivery event")
+        if event.delivered:
+            return event
+        event.attempts += 1
+        event.error = "attempt started; authenticated ACK not recorded"
+        self.outbox.pin(keys=(event_id,), val=event)
+        return event
+
+    def delivery_result(self, event_id, *, error=""):
+        """Record failure or authenticated completion; never discard an undelivered event.
+
+        An empty error means the delivery component validated the full ACK contract.
+        This method enforces persistence, not authentication or delivery policy.
+        """
+        with self.env.begin(write=True) as txn:
+            raw = txn.get(event_id.encode(), db=self.outbox.sdb)
+            if raw is None:
+                raise ValueError("unknown delivery event")
+            event = self.outbox.deserializer(raw)
+            if event.delivered:
+                return
+            event.error = error
+            event.delivered = not error
+            txn.put(
+                event_id.encode(), self.outbox.serializer(event), db=self.outbox.sdb
+            )
+            if event.delivered:
+                raw = txn.get(event.destination.encode(), db=self.destinations.sdb)
+                schedule = self.destinations.deserializer(raw)
+                schedule.failures = 0
+                txn.put(
+                    event.destination.encode(),
+                    self.destinations.serializer(schedule),
+                    db=self.destinations.sdb,
+                )

@@ -3,7 +3,9 @@
 Receives native CESR/IPEX Grants and verifies EOA associations against the trusted
 GEDA, the LE/QVI credential chain, the wallet's EIP-712 signature and a configured
 Ethereum network. Native evidence and initial verification progress survive restart.
-Repeated Grants do not reset that progress. No Ethereum posting key is needed.
+Repeated Grants do not reset that progress. With a webhook configured, verified
+results become durable acceptance and signed delivery events. No Ethereum posting
+key is needed.
 The service uses [HIO structured concurrency](adrs/0003-hio-structured-concurrency.md).
 
 ## Run
@@ -22,20 +24,36 @@ Reuse `--name`, `--base`, `--alias` and `--head-dir` on restart. `--incept-file`
 accepts native inception options for a new identity, including witnesses.
 Send CESR to `/`; `/health` reports liveness. The listener defaults to loopback.
 
-This increment performs initial verification only. Application acceptance,
-public association-status GET, revocation notifications and authenticated webhook
-delivery are not implemented yet. It does not publish Ethereum mappings or run
-periodic verification/account checks.
+Add `--webhook-url https://receiver.example/hook --webhook-aid "$RECEIVER_AID"`
+to enable application acceptance and delivery. Configure both together. The peer's
+current key state must already be natively accepted by this verifier; missing
+keys leave delivery pending. Omitting both retains verification-only operation.
+
+Public `GET /v1/associations/{said}/status` returns stored `pending`, `rejected`,
+`verified` or `accepted` status and any initial account observation. Accepted
+records also expose delivery progress and errors. Unknown SAIDs return 404.
+GET requires no signature and performs no RPC or refresh.
+
+Each new event gets one initial delivery attempt, with one request in flight and
+a 10-second timeout. Only the expected authenticated ACK completes delivery.
+Failures and interrupted attempts stay pending across restart; automatic retries
+and backoff are not implemented yet. An embedding caller can explicitly schedule
+another attempt with `service.sender.request(event_id)`; there is no retry REST
+route. This is not yet unattended delivery. Revocation notifications, the oracle
+receiver and Ethereum publication are later increments. There are no periodic
+verification/account checks.
 
 ## Maintainer orientation
 
 | Module                                   | Responsibility                                                                    |
-| ---------------------------------------- | --------------------------------------------------------------------------------- |
+|------------------------------------------|-----------------------------------------------------------------------------------|
 | `cli`, `serving`                         | Configuration, native stores, shared parser and HIO task/resource ownership.      |
 | `receiving/directing`                    | Receive CESR POST/PUT and schedule shared native parsing and escrows.             |
-| `authing`                                | Authenticate service messages and ACKs; claim durable transport nonces.          |
+| `authing`                                | Authenticate service messages and ACKs; claim durable transport nonces.           |
 | `receiving/grants`                       | Decode authenticated native Grants, replay embeds and create duplicate-safe work. |
-| `basing`                                 | Persist initial-verification progress keyed by association SAID.                  |
+| `basing`                                 | Atomic verification, acceptance/outbox and delivery records.                      |
+| `accepting`, `statusing`                 | Promote verified results using native issuance facts; serve stored status.        |
+| `delivering`                             | Own webhook attempts, ACK validation and delivery completion.                     |
 | `verification/coordinating`              | Scan bounded work pages, dispatch one association and apply results.              |
 | `verification/credentials`               | Check locally accepted ACDC/TEL/KEL evidence and LE/QVI relationships.            |
 | `verification/eoa`, `worker`, `rpc`      | Check the wallet proof and observe the configured Ethereum account.               |
@@ -54,6 +72,14 @@ and removes pending work in one LMDB transaction. Duplicate Grants preserve the
 first Grant and never re-enqueue completed work. Verified results retain the
 wallet and initial account observation; they do not mean application acceptance,
 webhook delivery or Ethereum endorsement. Restart rediscovers pending work.
+
+With a destination configured, `AcceptanceDoer` reads the completed result and
+locally accepted issuance anchor without repeating initial checks. Acceptance,
+immutable facts and an outbox event commit in one application transaction. Restart
+recovers results awaiting acceptance; repeated acceptance preserves the original
+event and destination. Native evidence lives in a separate database and is not
+part of this transaction. Missing evidence or already-known revocation prevents
+first acceptance. Once accepted, observation age does not invalidate the record.
 
 `run_service()` owns shared stores through native KERIpy context managers.
 `VerifierService` borrows those stores and composes the HIO tasks. HIO stops
@@ -74,11 +100,12 @@ stores nonce claims in `VerifierBaser` across restart. Single-key transferable
 Ed25519 service AIDs at threshold one are supported. See the
 [transport profile](protocol/verifier-api-v1/README.md#transport-signature-profile).
 
-These are callable primitives for the later sender/intake integrations; this
-increment adds no authenticated delivery route, retry worker or public status API.
-Authenticated messages do not establish durable application acceptance. The caller
-commits application state before signing an ACK and validates the ACK payload
-before marking delivery complete.
+`WebhookSender` uses these common primitives and owns ACK policy: actual HTTP 200,
+expected peer, exact attempt reference and an accepting payload for the event.
+The receiver must commit its effects before signing an ACK and acknowledge
+redelivery without repeating effects. See [ADR 0002](adrs/0002-verifier-result-object.md)
+for the implemented event and ACK shapes. Authentication alone is not delivery
+completion or Ethereum confirmation.
 
 ## Test
 

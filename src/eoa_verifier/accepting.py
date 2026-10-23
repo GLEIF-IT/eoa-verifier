@@ -1,0 +1,70 @@
+"""Promote completed initial verification to durable acceptance without new RPC work."""
+
+from hio.base import doing
+from keri import kering
+
+
+class AcceptanceDoer(doing.Doer):
+    """Borrow native/results stores and commit acceptance for verified candidates.
+
+    A bounded result scan recovers completion-to-acceptance gaps after restart.
+    Read locally stored issuance evidence; do not repeat cryptographic or account
+    verification. Missing local evidence leaves the completed result available for
+    recovery. Existing accepted status never expires or gets reverified here.
+    """
+
+    def __init__(self, *, baser, rgy, destination, peer_aid, **kwa):
+        self.baser, self.rgy = baser, rgy
+        self.destination, self.peer_aid = destination, peer_aid
+        self.after = ""
+        super().__init__(**kwa)
+
+    def recur(self, tyme):
+        """Inspect one result page per turn, retaining native/application store separation."""
+        page = self.baser.result_batch(after=self.after)
+        if not page:
+            self.after = ""
+        for result in page:
+            self.after = result.associationSaid
+            if result.outcome != "verified" or self.baser.associations.get(
+                keys=(self.after,)
+            ):
+                continue
+            facts = self.issuance_facts(self.after)
+            if facts is not None:
+                self.baser.accept(
+                    self.after,
+                    facts=facts,
+                    destination=self.destination,
+                    peer_aid=self.peer_aid,
+                )
+        return False
+
+    def issuance_facts(self, said):
+        """Read facts from natively accepted evidence for a completed verification.
+
+        Return None when evidence is absent or already revoked; this is a local
+        status guard before first acceptance, not continuing source monitoring.
+        The coordinator already verified signatures, relationships and witnesses.
+        """
+        reger = self.rgy.reger
+        if reger.saved.get(keys=(said,)) is None:
+            return None
+        credential = reger.creds.get(keys=(said,))
+        if credential is None:
+            return None
+        try:
+            state = reger.tevers[credential.regi].vcState(said)
+        except (KeyError, kering.MissingEntryError):
+            return None
+        if state is None or state.et not in ("iss", "bis"):
+            return None
+        return {
+            "issuerAid": credential.issuer,
+            "leSaid": credential.edge["le"]["n"],
+            "extId": credential.attrib["extId"],
+            "issuance": {
+                "sequenceNumber": state.a["s"],
+                "said": state.a["d"],
+            },
+        }
