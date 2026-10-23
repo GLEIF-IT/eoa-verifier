@@ -151,7 +151,6 @@ class VerifierService(doing.DoDoer):
                 hby=hby,
                 notifier=notifier,
                 parser=parser,
-                expected_association_schema=ASSOCIATION_SCHEMA,
             ),
             PresentationVerifierDoer(
                 baser=baser,

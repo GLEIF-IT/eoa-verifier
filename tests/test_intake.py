@@ -202,3 +202,43 @@ def test_notice_pages_advance_past_retained_work(config):
         assert counts == [66, 66, 65]
     finally:
         lifetime.close()
+
+
+def test_wrong_schema_is_coordinator_rejection_without_native_acceptance(config):
+    """A real signed Grant supplies rejection evidence, never native acceptance."""
+    from keri.app import habbing
+    from keri.core import serdering
+
+    from eoa_verifier.verification.constants import LE_SCHEMA
+    from eoa_verifier.verification.coordinating import PresentationVerifierDoer
+
+    with (
+        running_service(config) as runtime,
+        habbing.openHby(name="sender", temp=True) as hby,
+    ):
+        grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
+        coordinator = next(
+            d for d in runtime.doers if isinstance(d, PresentationVerifierDoer)
+        )
+        sad = candidate()
+        sad["s"] = LE_SCHEMA
+        creder = serdering.SerderACDC(sad=sad, makify=True)
+        sender = hby.makeHab(name="sender")
+        grant_said = signed_notice(runtime, grants, sender, creder.sad)
+        attrs = {"d": grant_said}
+        grants.process_grant_notice(attrs)
+        pending = runtime.baser.pending.get(keys=(creder.said,))
+        assert pending is not None
+        assert runtime.baser.results.get(keys=(creder.said,)) is None
+        assert runtime.rgy.reger.creds.get(keys=(creder.said,)) is None
+        assert runtime.rgy.reger.saved.get(keys=(creder.said,)) is None
+        grants.process_grant_notice(attrs)
+        assert runtime.baser.pending.get(keys=(creder.said,)) == pending
+        coordinator.process_ready()
+        result = runtime.baser.results.get(keys=(creder.said,))
+        assert result.outcome == "rejected"
+        assert "unexpected schema" in result.reason
+        assert runtime.baser.pending.get(keys=(creder.said,)) is None
+        grants.process_grant_notice(attrs)
+        assert runtime.baser.results.get(keys=(creder.said,)) == result
+        assert runtime.baser.pending.get(keys=(creder.said,)) is None

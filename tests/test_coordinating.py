@@ -6,6 +6,7 @@ from hio.base import tyming
 from keri.db import dbing
 
 from eoa_verifier.basing import VerifierBaser, PendingVerification, VerificationResult
+from eoa_verifier.verification.constants import ASSOCIATION_SCHEMA
 from eoa_verifier.verification.coordinating import PresentationVerifierDoer
 from eoa_verifier.verification.errors import MissingCredentialArtifactsError
 from eoa_verifier.verification.worker import EoaVerifierDoer
@@ -38,7 +39,11 @@ def test_busy_worker_skips_scan_and_missing_artifacts_wait_fairly():
         clock = tyming.Tymist()
         worker = EoaVerifierDoer(rpc_url="http://unused", chain_id=31337)
         coordinator = PresentationVerifierDoer(
-            baser=baser, rgy=None, trusted_geda_aid="", eoa_verifier=worker
+            baser=baser,
+            rgy=None,
+            trusted_geda_aid="",
+            association_schema=ASSOCIATION_SCHEMA,
+            eoa_verifier=worker,
         )
         coordinator.wind(clock.tymen())
         coordinator.inflight = "busy"
@@ -74,7 +79,11 @@ def test_rpc_retry_and_success_move_only_on_completion():
         baser.enqueue(PendingVerification("a", "first"))
         worker = EoaVerifierDoer(rpc_url="http://unused", chain_id=31337)
         coordinator = PresentationVerifierDoer(
-            baser=baser, rgy=None, trusted_geda_aid="", eoa_verifier=worker
+            baser=baser,
+            rgy=None,
+            trusted_geda_aid="",
+            association_schema=ASSOCIATION_SCHEMA,
+            eoa_verifier=worker,
         )
         coordinator.wind(tyming.Tymist().tymen())
         coordinator.inflight = "a"

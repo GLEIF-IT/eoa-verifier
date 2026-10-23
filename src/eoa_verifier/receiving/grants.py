@@ -11,7 +11,7 @@ from keri import kering
 from keri.core import serdering
 from keri.peer import exchanging
 
-from eoa_verifier.basing import PendingVerification, VerificationResult, VerifierBaser
+from eoa_verifier.basing import PendingVerification, VerifierBaser
 
 
 class GrantNotReadyError(Exception):
@@ -38,12 +38,10 @@ class GrantNotificationDoer(doing.Doer):
         hby,
         notifier,
         parser,
-        expected_association_schema: str,
         **kwa,
     ):
         """Borrow a work store, Habery, native Notifier and shared inbound parser.
 
-        expected_association_schema is the only accepted association schema SAID.
         The outer resource contexts own stores; the service schedules parser/escrows;
         this Doer only consumes notifications and creates work. kwa supplies HIO options.
         """
@@ -51,7 +49,6 @@ class GrantNotificationDoer(doing.Doer):
         self.hby = hby
         self.notifier = notifier
         self.parser = parser
-        self.expected_association_schema = expected_association_schema
         self.scan_after = b""  # Native notice key; scheduling hint only.
         super().__init__(**kwa)
 
@@ -131,12 +128,12 @@ class GrantNotificationDoer(doing.Doer):
             parser.close()
 
     def process_grant_notice(self, attrs: dict[str, Any]) -> None:
-        """Replay a decoded Grant’s embeds and enqueue new work, or record intake rejection.
+        """Replay a decoded Grant’s embeds and enqueue a candidate for verification.
 
         Only supplied embeds with attachments are replayed. Native parsing may escrow
         evidence; creating work does not assert acceptance. Repeated matching Grants
-        preserve pending work and completed results. A different schema records
-        failure. GrantNotReadyError retains incomplete material; InvalidGrantError
+        preserve pending work and completed results. Schema-policy outcomes belong
+        to the coordinator. GrantNotReadyError retains incomplete material; InvalidGrantError
         identifies decoding/native-validation failure. Other errors propagate.
         """
 
@@ -149,19 +146,7 @@ class GrantNotificationDoer(doing.Doer):
             except kering.ValidationError as exc:
                 raise InvalidGrantError(str(exc)) from exc
 
-        acdc = creder.sad
-        association_said = acdc["d"]
-        association_schema = acdc.get("s", "")
-        if not self.baser.enqueue(PendingVerification(association_said, grant_said)):
-            return
-        if association_schema != self.expected_association_schema:
-            self.baser.finish(
-                VerificationResult(
-                    association_said,
-                    "rejected",
-                    f"association schema {association_schema} does not match expected {self.expected_association_schema}",
-                )
-            )
+        self.baser.enqueue(PendingVerification(creder.said, grant_said))
 
     def _read_grant(self, attrs):
         """Return (Grant SAID, native ACDC, replay bytearrays) from notification attributes.

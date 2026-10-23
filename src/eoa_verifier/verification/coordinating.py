@@ -29,8 +29,8 @@ class PresentationVerifierDoer(doing.DoDoer):
         baser: VerifierBaser,
         rgy,
         trusted_geda_aid: str,
-        association_schema: str = "",
-        eoa_verifier=None,
+        association_schema: str,
+        eoa_verifier,
         retry_delay: float = 5.0,
         **kwa,
     ):
@@ -54,8 +54,6 @@ class PresentationVerifierDoer(doing.DoDoer):
         self.retry_at = {}
         self.inflight = None
         self.scan_after = ""
-        if eoa_verifier is None:
-            raise ValueError("association verification requires an EOA worker")
         super().__init__(doers=[eoa_verifier, doing.doify(self.verify_do)], **kwa)
 
     def verify_do(self, tymth, tock=0.0, **opts):
