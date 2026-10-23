@@ -19,10 +19,10 @@ def test_pending_scan_excludes_results_and_bounds_pages():
             baser.enqueue(PendingVerification(f"done-{i}", "first"))
             baser.finish(VerificationResult(f"done-{i}", "verified"))
             baser.enqueue(PendingVerification(f"{i:03}", "first"))
-        page = baser.pending_batch()
+        page = baser.pending_batch(limit=32)
         assert len(page) == 32
         baser.enqueue(PendingVerification("065", "first"))
-        page = baser.pending_batch(after=page[-1].associationSaid)
+        page = baser.pending_batch(after=page[-1].associationSaid, limit=32)
         assert len(page) == 32 and page[-1].associationSaid == "063"
         assert [w.associationSaid for w in baser.pending_batch(after="063")] == [
             "064",

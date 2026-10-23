@@ -38,19 +38,22 @@ def test_duplicates_completion_and_restart(tmp_path):
 
 
 def test_completion_rollback_after_result_write():
-    """An injected exception between writes rolls back both changes, not just pending deletion."""
+    """A failure deleting pending work rolls back the result written in the same transaction."""
     with dbing.openLMDB(cls=VerifierBaser) as baser:
         work = PendingVerification("a", "first")
         baser.enqueue(work)
         real_env = baser.env
 
         class FailingTransaction:
+            """Delegate commit/abort to LMDB, injecting failure only at pending deletion."""
+
             def __enter__(self):
                 self.txn = real_env.begin(write=True)
+                self.txn.__enter__()
                 return self
 
             def __exit__(self, *args):
-                self.txn.abort()
+                return self.txn.__exit__(*args)
 
             def get(self, *args, **kwa):
                 return self.txn.get(*args, **kwa)
@@ -62,6 +65,8 @@ def test_completion_rollback_after_result_write():
                 raise RuntimeError("between writes")
 
         class FailingEnvironment:
+            """Supply the transaction fault without changing native commit semantics."""
+
             def begin(self, **kwa):
                 return FailingTransaction()
 

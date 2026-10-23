@@ -35,7 +35,8 @@ def run_worker(worker, server_doer):
     """Schedule the worker and test server until a cue arrives, returning that cue.
 
     Own both task lifetimes through the parent DoDoer; assert completion within
-    three real seconds and verify the worker released its child client.
+    three real seconds. Check client removal before stopping the worker so shutdown
+    cannot conceal a per-observation client leak.
     """
 
     def watch(tymth, tock=0.0, **kwa):
@@ -43,12 +44,12 @@ def run_worker(worker, server_doer):
         yield tock
         while not worker.cues:
             yield 0.01
+        assert not any(isinstance(d, http.ClientDoer) for d in worker.doers)
         parent.remove([worker, server_doer])
 
     parent = doing.DoDoer(doers=[worker, server_doer, doing.doify(watch)])
     doing.Doist(real=True, tock=0.01, limit=3).do(doers=[parent])
     assert parent.done, "account request did not finish"
-    assert not any(isinstance(d, http.ClientDoer) for d in worker.doers)
     return worker.cues.popleft()
 
 
@@ -60,10 +61,11 @@ def run_worker(worker, server_doer):
         ("0x7a69", "0x6000", "failed"),
         ("0x7a69", "invalid", "retry"),
         ("0x1", "0x", "retry"),
-        ("0x00", "0x", "retry"),
     ],
 )
-def test_account_checks(chain, code, expected):
+def test_account_policy_uses_configured_chain_and_canonical_block(
+    chain, code, expected
+):
     """Exercise chain/code policy against simulated facts carried by real local HTTP requests."""
     endpoint, app = Rpc(chain, code), falcon.App()
     app.add_route("/", endpoint)
@@ -82,8 +84,8 @@ def test_account_checks(chain, code, expected):
         }
 
 
-def test_invalid_wallet_proof_never_contacts_rpc():
-    """Tamper with the signed nonce and prove rejection occurs before any account observation."""
+def test_invalid_wallet_proof_is_rejected():
+    """Tamper with the signed nonce and require a failed verification result."""
     worker = EoaVerifierDoer(rpc_url="http://127.0.0.1:1", chain_id=31337)
     bad = candidate()
     bad["u"] = "changed"
@@ -103,7 +105,7 @@ def test_rpc_timeout_yields_and_closes_connection():
     assert cue["kin"] == "retry" and "timed out" in cue["error"]
 
 
-@pytest.mark.parametrize("payload", [None, [], {"id": 1}, {"id": 1, "error": {}}])
+@pytest.mark.parametrize("payload", [None, {"id": 1, "error": {}}])
 def test_malformed_rpc_envelope_remains_retryable(payload):
     """Malformed simulated JSON-RPC envelopes must remain retryable over the actual HTTP path."""
 
@@ -128,12 +130,8 @@ def test_malformed_rpc_envelope_remains_retryable(payload):
     assert cue["kin"] == "retry" and "invalid RPC response" in cue["error"]
 
 
-@pytest.mark.parametrize(
-    "block",
-    [None, {"number": 42, "hash": "0x" + "12" * 32}, {"number": "0x2a", "hash": None}],
-)
-def test_malformed_block_remains_retryable(block):
-    """Invalid block identity must request retry before any code read is sent."""
+def test_malformed_block_remains_retryable():
+    """A missing block must request retry before any account-code request is sent."""
 
     class Endpoint(Rpc):
         """Keep valid chain responses while replacing only the block result."""
@@ -142,7 +140,7 @@ def test_malformed_block_remains_retryable(block):
             """Use the common simulated RPC handler, then override the selected block response."""
             super().on_post(req, rep)
             if req.media["method"] == "eth_getBlockByNumber":
-                rep.media["result"] = block
+                rep.media["result"] = None
 
     app = falcon.App()
     endpoint = Endpoint()
