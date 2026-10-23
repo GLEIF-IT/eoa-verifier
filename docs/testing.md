@@ -6,16 +6,18 @@ CI builds a wheel and tests it outside the source checkout on Python 3.12.
 
 Read the suite in this order:
 
-| File | Contract protected |
-| --- | --- |
-| `test_native.py` | Real witnessed issuance, verification, restart and critical rejection paths over POST and PUT. |
-| `test_account.py` | Wallet/account outcomes, canonical-block RPC observation and client lifetime. |
-| `test_authing.py` | Native signatures, covered HTTP context, rotation and durable replay protection. |
-| `test_intake.py` | Decode/replay/enqueue boundaries, malformed-input containment and coordinator-owned rejection. |
-| `test_coordinating.py` | Bounded work discovery, retry pacing and completion. |
-| `test_basing.py` | Duplicate-safe records and atomic completion. |
-| `test_directing.py` | CESR HTTP framing and direct receiver wiring. |
-| `test_runtime.py` | Store/task lifetime and CLI configuration. |
+| File                   | Contract protected                                                                             |
+|------------------------|------------------------------------------------------------------------------------------------|
+| `test_native.py`       | Real witnessed issuance, verification, restart and critical rejection paths over POST and PUT. |
+| `test_account.py`      | Wallet/account outcomes, canonical-block RPC observation and client lifetime.                  |
+| `test_authing.py`      | Native signatures, covered HTTP context, rotation and durable replay protection.               |
+| `test_intake.py`       | Decode/replay/enqueue boundaries, malformed-input containment and coordinator-owned rejection. |
+| `test_coordinating.py` | Bounded work discovery, retry pacing and completion.                                           |
+| `test_basing.py`       | Duplicate-safe records and atomic completion.                                                  |
+| `test_accepting.py`    | Atomic acceptance/outbox, reopen, delivery progress and public stored status.                  |
+| `test_delivering.py`   | Real signed HTTP/ACK success, critical failed attempts and no automatic retry after reopen.    |
+| `test_directing.py`    | CESR HTTP framing and direct receiver wiring.                                                  |
+| `test_runtime.py`      | Store/task lifetime and CLI configuration.                                                     |
 
 `native_helpers.py` constructs real issuer evidence and owns test resource contexts.
 Its `entered_service` fixture enters HIO tasks but does not advance the scheduler.
@@ -31,8 +33,7 @@ we can imagine another possible failure.
 
 ## Future tests, when the feature arrives
 
-- Acceptance/outbox and webhook delivery: commit/restart, authenticated ACK,
-  duplicate delivery and lost acknowledgement.
+- Real oracle intake: durable duplicate handling and redelivery after a lost ACK.
 - Automatic retry: controlled clock/random tests for pacing, backoff and restart.
 - Retirement and selection: native revocation, replacement and exact-SAID withdrawal.
 

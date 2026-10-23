@@ -3,8 +3,8 @@
 `eoa-verifier` verifies EOA associations and delivers their status to a configured
 webhook. `vlei-oracle` uses that authenticated status to publish or withdraw
 Ethereum mappings. This document describes the intended service contract; see
-the [README](../../README.md) for the implemented scope. [ADR 0002](../../adrs/0002-verifier-result-object.md) illustrates
-a provisional result object.
+the [README](../../README.md) for the implemented scope. [ADR 0002](../../adrs/0002-verifier-result-object.md) records
+the initial delivery object and ACK shape.
 
 ## Responsibilities
 
@@ -44,6 +44,12 @@ reassessments. Initial source-chain validation remains mandatory.
 
 ## Delivery and revocation
 
+The current sender discovers never-attempted events and makes one attempt each.
+It validates HTTP success, the signed request reference and the accepting event
+payload before recording completion. Failed attempts remain visible and pending;
+explicit redelivery uses the same body with a new signature. Automatic retry/pacing
+and native revocation notifications below describe subsequent increments.
+
 Persist acceptance and its webhook obligation together. Deliver after commit;
 the receiver durably stores the status before acknowledging. Retry unacknowledged
 events across restart, preserving event identity and duplicate-safe processing.
@@ -79,8 +85,9 @@ status route below is outside this authenticated service protocol.
 
 PR 03 implements `ServiceAuthenticator` with the pinned KERIpy native
 `Signature-Input` and CESR `Signature` primitives. This is their native signing
-format, not a general RFC 9421 implementation. It does not add the delivery worker
-or receiver endpoint. The caller supplies exact body bytes, actual HTTP method
+format, not a general RFC 9421 implementation. The webhook sender uses these
+primitives; the durable receiver endpoint is a separate increment. The caller
+supplies exact body bytes, actual HTTP method
 and absolute target URL (including query), matched to its configured destination.
 Expected action and peer trust come from configuration/operation, not incoming headers.
 

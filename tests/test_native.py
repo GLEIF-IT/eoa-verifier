@@ -43,7 +43,8 @@ def test_native_grant_verification_and_restart(tmp_path, method):
 
     Own isolated native stores/processes with ExitStack and all network tasks with
     HIO. Missing Anvil fails rather than skips. Test delayed evidence across restart,
-    duplicate delivery, revocation during initial RPC, and invalid proof/relationships.
+    acceptance with native issuance facts, duplicate delivery, revocation during
+    initial RPC, and invalid proof/relationships.
     """
     anvil_path = shutil.which("anvil")
     assert anvil_path, "Anvil is required for native integration; install Foundry"
@@ -89,6 +90,8 @@ def test_native_grant_verification_and_restart(tmp_path, method):
             rpc_url=f"http://127.0.0.1:{rpc_port}",
             head_dir=str(tmp_path),
             http_port=port,
+            webhook_url="http://127.0.0.1:1/hook",
+            webhook_aid=geda.pre,
         )
         service_stores = stack.enter_context(ExitStack())
         runtime = service_stores.enter_context(verifier_service(config))
@@ -251,6 +254,23 @@ def test_native_grant_verification_and_restart(tmp_path, method):
                 streams["geda"] + streams["qvi"], creder.said, "verified"
             )
             assert runtime.rgy.reger.saved.get(keys=(creder.said,))
+            # Capture native issuance facts after verification, without another RPC pass.
+            deadline = workflow.tyme + 5
+            while (
+                accepted := runtime.baser.associations.get(keys=(creder.said,))
+            ) is None:
+                assert workflow.tyme < deadline, (
+                    "acceptance did not follow verification"
+                )
+                yield 0.01
+            assert accepted.facts["issuerAid"] == le.pre
+            assert accepted.facts["leSaid"] == credentials["qvi"].said
+            assert accepted.facts["issuance"] == {
+                "sequenceNumber": le.kever.sn,
+                "said": le.kever.serder.said,
+            }
+            assert accepted.observation["chainId"] == 31337
+            assert runtime.baser.outbox.get(keys=(accepted.eventId,)) is not None
             # Replaying the same Grant must retain the completed work record.
             original = runtime.baser.results.get(keys=(creder.said,))
             # EXN deduplication may suppress a new notice entirely. Test application
@@ -269,6 +289,7 @@ def test_native_grant_verification_and_restart(tmp_path, method):
             else:
                 raise AssertionError("accepted Grant not found")
             assert runtime.baser.results.get(keys=(creder.said,)) == original
+            assert runtime.baser.associations.get(keys=(creder.said,)) == accepted
 
             # Hold completion after a real RPC observation, then deliver native
             # revocation before applying the result. The final native recheck
