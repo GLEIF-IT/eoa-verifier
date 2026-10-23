@@ -95,11 +95,21 @@ class VerifierService(doing.DoDoer):
 
     def exit(self, deeds=None):
         """Always unwind children first; child removal alone must not close shared stores."""
-        try:
-            super().exit(deeds=deeds)
-        finally:
-            if deeds is None:
+        remaining = self.deeds if deeds is None else deeds
+        errors = []
+        while remaining:
+            try:
+                super().exit(deeds=remaining)
+            except BaseException as error:
+                # HIO pops a child before closing it; resume with its siblings.
+                errors.append(error)
+        if deeds is None:
+            try:
                 self._resources.close()
+            except BaseException as error:
+                errors.append(error)
+        if errors:
+            raise BaseExceptionGroup("Service cleanup failed", errors)
 
     def _open(self):
         """Compose native resources, using a private stack for partial setup failure."""

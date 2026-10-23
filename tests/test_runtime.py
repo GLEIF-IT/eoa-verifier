@@ -129,3 +129,59 @@ def test_service_owns_children_before_stores(config, mode):
     assert service.server.close.call_count == 1
     with running_service(config) as reopened:
         assert reopened.hab.pre == service.hab.pre
+
+
+@pytest.mark.parametrize("mode", ["cancel", "partial-enter", "remove"])
+def test_cleanup_failure_still_stops_siblings_before_stores(config, mode):
+    """A failed child finalizer cannot strand siblings or close their stores early."""
+    from hio.base import doing
+    from eoa_verifier.serving import VerifierService
+
+    stopped = []
+
+    class Borrower(doing.Doer):
+        def exit(self):
+            assert service.baser.opened and service.hby.db.opened
+            stopped.append("borrower")
+
+    class Broken(doing.Doer):
+        def exit(self):
+            assert service.baser.opened
+            stopped.append("broken")
+            raise RuntimeError("cleanup failure")
+
+    class BrokenEntry(doing.Doer):
+        def enter(self, *, temp=None):
+            raise ValueError("entry failure")
+
+    borrower, broken = Borrower(), Broken()
+
+    class Service(VerifierService):
+        def _open(self):
+            super()._open()
+            self.doers.extend([borrower, broken])
+            if mode == "partial-enter":
+                self.doers.append(BrokenEntry())
+
+    service = Service(config)
+    scheduler = doing.Doist(doers=[service], tock=0.01, limit=0.02)
+    try:
+        with pytest.raises(ExceptionGroup, match="Service cleanup failed") as caught:
+            if mode == "remove":
+                scheduler.enter()
+                try:
+                    service.remove([borrower, broken])
+                finally:
+                    assert service.baser.opened and service.hby.db.opened
+            else:
+                scheduler.do()
+        assert len(caught.value.exceptions) == 1
+        assert str(caught.value.exceptions[0]) == "cleanup failure"
+        if mode == "partial-enter":
+            assert str(caught.value.__context__) == "entry failure"
+    finally:
+        scheduler.exit()
+    assert stopped == ["broken", "borrower"]
+    assert not service.baser.opened and not service.hby.db.opened
+    with running_service(config) as reopened:
+        assert reopened.hab.pre == service.hab.pre
