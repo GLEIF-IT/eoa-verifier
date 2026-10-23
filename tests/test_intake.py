@@ -52,7 +52,7 @@ def test_internal_failure_preserves_notification(config, boundary, error):
         notice, _ = grants.notifier.noter.getNotes()[0]
         association = candidate()
         target, method = (
-            (grants.parser, "parseOne")
+            (grants.parser, "onceParsator")
             if boundary == "parser"
             else (runtime.baser, "start_verification")
         )
@@ -84,5 +84,114 @@ def test_missing_grant_retains_notification_until_available(config):
         notice, _ = grants.notifier.noter.getNotes()[0]
         grants.process_notes()
         assert grants.notifier.noter.get(notice.rid)[0].raw == notice.raw
+    finally:
+        runtime.close()
+
+
+def signed_notice(runtime, grants, sender, embedded, attachments=b""):
+    """Deliver an actual signed opening Grant through native EXN authentication."""
+    from keri.core import coring, parsing, serdering
+    from keri.peer import exchanging
+    from keri.vc import protocoling
+
+    exn, _ = exchanging.exchange(
+        route="/ipex/grant",
+        sender=sender.pre,
+        recipient=runtime.hab.pre,
+        payload={"m": "intake regression"},
+    )
+    sad = dict(exn.sad)
+    sad["e"] = coring.Saider.saidify(sad={"d": "", "acdc": embedded})[1]
+    exn = serdering.SerderKERI(sad=sad, makify=True)
+    stream = sender.endorse(exn, last=False, pipelined=False)
+    if attachments:
+        from keri import core, kering
+
+        pathed = coring.Pather(path=["e", "acdc"]).qb64b + attachments
+        stream += (
+            core.Counter(
+                core.Codens.PathedMaterialGroup,
+                count=len(pathed) // 4,
+                gvrsn=kering.Vrsn_1_0,
+            ).qb64b
+            + pathed
+        )
+    exc = exchanging.Exchanger(hby=runtime.hby, handlers=[])
+    protocoling.loadHandlers(hby=runtime.hby, exc=exc, notifier=grants.notifier)
+    runtime.hby.psr.parse(ims=bytearray(sender.makeOwnEvent(sn=0)))
+    parsing.Parser(kvy=runtime.hby.kvy, exc=exc).parse(ims=bytearray(stream))
+    assert any(n.attrs["d"] == exn.said for n, _ in grants.notifier.noter.getNotes())
+    return exn.said
+
+
+@pytest.mark.parametrize("bad", ["empty", "version", "kind", "truncated"])
+def test_signed_bad_embed_is_consumed_and_valid_work_progresses(config, bad):
+    """Native signed bad inputs cannot poison later turns or persist across reopen."""
+    from keri.app import habbing
+
+    runtime = setup_service(config)
+    try:
+        grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
+        embedded = candidate()
+        attachments = b""
+        if bad == "empty":
+            embedded = {}
+        elif bad == "version":
+            embedded["v"] = "ACDC99JSON000000_"
+        elif bad == "kind":
+            embedded["v"] = "ACDC10XXXX000000_"
+        else:
+            attachments = b"-IAB"
+        with habbing.openHby(name="sender", temp=True) as hby:
+            sender = hby.makeHab(name="sender")
+            signed_notice(runtime, grants, sender, embedded, attachments)
+            # A real HIO sibling must get its turn after intake returns.
+            from hio.base import doing
+
+            ticks = []
+
+            class Heartbeat(doing.Doer):
+                def recur(self, tyme):
+                    ticks.append(tyme)
+                    return True
+
+            scheduler = doing.Doist(tock=0.01, limit=0.02)
+            scheduler.do(doers=[grants, Heartbeat()])
+            assert ticks and grants.notifier.noter.getNotes() == []
+            good = candidate()
+            signed_notice(runtime, grants, sender, good)
+            grants.process_notes()
+            assert runtime.baser.get_verification(good["d"]) is not None
+        runtime.close()
+        runtime = setup_service(config)
+        grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
+        assert grants.notifier.noter.getNotes() == []
+    finally:
+        runtime.close()
+
+
+def test_notice_pages_advance_past_retained_work(config):
+    """Real native storage retains early notices without starving later work or siblings."""
+    from hio.base import doing
+
+    runtime = setup_service(config)
+    try:
+        grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
+        for i in range(65):
+            grants.notifier.add({"r": "/exn/ipex/grant", "d": f"missing-{i}"})
+        grants.notifier.add({"r": "/unrelated", "d": "last"})
+        counts = []
+
+        class Heartbeat(doing.Doer):
+            def recur(self, tyme):
+                counts.append(grants.notifier.noter.getNoteCnt())
+                return len(counts) == 3
+
+        with patch.object(
+            grants, "process_grant_notice", wraps=grants.process_grant_notice
+        ) as process:
+            doing.Doist(tock=0.01, limit=0.03).do(doers=[grants, Heartbeat()])
+            assert process.call_count == 65
+        assert counts == [66, 66, 65]
     finally:
         runtime.close()
