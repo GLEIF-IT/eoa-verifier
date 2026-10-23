@@ -81,17 +81,14 @@ class VerifierService(doing.DoDoer):
         """Compose once per service entry; preserve native extension of child tasks."""
         if doers is not None:
             return super().enter(doers=doers, temp=temp)
-        try:
-            self._open()
-            deeds = super().enter(temp=temp)
-            print(
-                f"eoa-verifier serving {self.hab.pre} on {self.config.host}:{self.config.http_port}",
-                flush=True,
-            )
-            return deeds
-        except BaseException:
-            self.exit()
-            raise
+        # HIO calls exit even when entry fails.
+        self._open()
+        deeds = super().enter(temp=temp)
+        print(
+            f"eoa-verifier serving {self.hab.pre} on {self.config.host}:{self.config.http_port}",
+            flush=True,
+        )
+        return deeds
 
     def exit(self, deeds=None):
         """Always unwind children first; child removal alone must not close shared stores."""
@@ -112,7 +109,7 @@ class VerifierService(doing.DoDoer):
             raise BaseExceptionGroup("Service cleanup failed", errors)
 
     def _open(self):
-        """Compose native resources, using a private stack for partial setup failure."""
+        """Register shared stores with this service; native Doers own sockets."""
         config = self.config
         if not config.rpc_url or config.chain_id <= 0:
             raise ValueError("verification requires an RPC URL and positive chain ID")
@@ -136,121 +133,113 @@ class VerifierService(doing.DoDoer):
                 raise ValueError("incept file must contain a JSON object")
             inits.update(extra)
 
-        with ExitStack() as resources:
-            # Register each store before opening it, including Habery dependencies.
-            # A later setup failure therefore cannot leak earlier LMDB handles.
-            def store(cls, **extra):
-                """Open a native store in the configured namespace and register its cleanup first.
-
-                Return the store. Even a failed reopen leaves a registered close callback;
-                temp selects disposable state whose cleanup removes its files.
-                """
-                obj = cls(
-                    name=config.name,
-                    base=config.base,
-                    temp=config.temp,
-                    headDirPath=config.head_dir,
-                    reopen=False,
-                    **extra,
-                )
-                resources.callback(obj.close, clear=config.temp)
-                obj.reopen()
-                return obj
-
-            ks, db, cf = (
-                store(keeping.Keeper),
-                store(basing.Baser),
-                store(configing.Configer),
-            )
-            hby = habbing.Habery(
+        def store(cls, **extra):
+            """Register cleanup before opening; only temporary stores are deleted."""
+            obj = cls(
                 name=config.name,
                 base=config.base,
                 temp=config.temp,
-                ks=ks,
-                db=db,
-                cf=cf,
-                bran=config.passcode,
+                headDirPath=config.head_dir,
+                reopen=False,
+                **extra,
             )
-            pin_accepted_schemas(hby)
-            hab = hby.habByName(config.alias) or hby.makeHab(name=config.alias, **inits)
-            reger = store(viring.Reger, db=hby.db)
-            rgy = credentialing.Regery(
+            self._resources.callback(obj.close, clear=config.temp)
+            obj.reopen()
+            return obj
+
+        ks, db, cf = (
+            store(keeping.Keeper),
+            store(basing.Baser),
+            store(configing.Configer),
+        )
+        hby = habbing.Habery(
+            name=config.name,
+            base=config.base,
+            temp=config.temp,
+            ks=ks,
+            db=db,
+            cf=cf,
+            bran=config.passcode,
+        )
+        pin_accepted_schemas(hby)
+        hab = hby.habByName(config.alias) or hby.makeHab(name=config.alias, **inits)
+        reger = store(viring.Reger, db=hby.db)
+        rgy = credentialing.Regery(
+            hby=hby,
+            name=config.name,
+            base=config.base,
+            temp=config.temp,
+            reger=reger,
+        )
+        baser = store(VerifierBaser)
+        noter, mbx = store(notifying.Noter), store(storing.Mailboxer)
+        notifier = notifying.Notifier(hby=hby, noter=noter)
+        exc = exchanging.Exchanger(hby=hby, handlers=[])
+        protocoling.loadHandlers(hby=hby, exc=exc, notifier=notifier)
+        verifier = verifying.Verifier(hby=hby, reger=reger)
+        rep = storing.Respondant(hby=hby, mbx=mbx)
+        director = indirecting.MailboxDirector(
+            hby=hby,
+            topics=[
+                "/receipt",
+                "/replay",
+                "/credential",
+                "/delegate",
+                "/challenge",
+            ],
+            verifier=verifier,
+            exc=exc,
+            rep=rep,
+        )
+        # Direct HTTP, mailbox delivery and Grant embeds share this parser.
+        # MailboxDirector alone schedules inbound parsing and escrow processing.
+        app = falcon.App()
+        ending.loadEnds(app=app, hby=hby, default=hab.pre)
+        oobiing.loadEnds(app=app, hby=hby, prefix="/ext")
+        app.add_route("/", indirecting.HttpEnd(rxbs=director.ims, mbx=mbx))
+        app.add_route("/health", HealthEnd())
+        server = http.Server(
+            host=config.host,
+            port=config.http_port,
+            app=app,
+            # Explicit TCP address preserves port zero; retain HTTP’s timeout.
+            servant=tcp.Server(
+                ha=(config.host, config.http_port),
+                tymeout=http.Server.Tymeout,
+                bufsize=8096,
+            ),
+        )
+        oobiery = oobiing.Oobiery(hby=hby, clienter=httping.Clienter())
+        doers = [
+            *oobiery.doers,
+            rep,
+            director,
+            http.ServerDoer(server=server),
+            GrantNotificationDoer(
+                baser=baser,
                 hby=hby,
-                name=config.name,
-                base=config.base,
-                temp=config.temp,
-                reger=reger,
-            )
-            baser = store(VerifierBaser)
-            noter, mbx = store(notifying.Noter), store(storing.Mailboxer)
-            notifier = notifying.Notifier(hby=hby, noter=noter)
-            exc = exchanging.Exchanger(hby=hby, handlers=[])
-            protocoling.loadHandlers(hby=hby, exc=exc, notifier=notifier)
-            verifier = verifying.Verifier(hby=hby, reger=reger)
-            rep = storing.Respondant(hby=hby, mbx=mbx)
-            director = indirecting.MailboxDirector(
-                hby=hby,
-                topics=[
-                    "/receipt",
-                    "/replay",
-                    "/credential",
-                    "/delegate",
-                    "/challenge",
-                ],
-                verifier=verifier,
-                exc=exc,
-                rep=rep,
-            )
-            # Direct HTTP, mailbox delivery and Grant embeds share this parser.
-            # MailboxDirector alone schedules inbound parsing and escrow processing.
-            app = falcon.App()
-            ending.loadEnds(app=app, hby=hby, default=hab.pre)
-            oobiing.loadEnds(app=app, hby=hby, prefix="/ext")
-            app.add_route("/", indirecting.HttpEnd(rxbs=director.ims, mbx=mbx))
-            app.add_route("/health", HealthEnd())
-            server = http.Server(
-                host=config.host,
-                port=config.http_port,
-                app=app,
-                # Explicit TCP address preserves port zero; retain HTTP’s timeout.
-                servant=tcp.Server(
-                    ha=(config.host, config.http_port),
-                    tymeout=http.Server.Tymeout,
-                    bufsize=8096,
+                notifier=notifier,
+                parser=director.parser,
+                expected_association_schema=ASSOCIATION_SCHEMA,
+            ),
+            PresentationVerifierDoer(
+                baser=baser,
+                rgy=rgy,
+                trusted_geda_aid=config.trusted_geda_aid,
+                association_schema=ASSOCIATION_SCHEMA,
+                eoa_verifier=EoaVerifierDoer(
+                    rpc_url=config.rpc_url, chain_id=config.chain_id
                 ),
-            )
-            oobiery = oobiing.Oobiery(hby=hby, clienter=httping.Clienter())
-            doers = [
-                *oobiery.doers,
-                rep,
-                director,
-                http.ServerDoer(server=server),
-                GrantNotificationDoer(
-                    baser=baser,
-                    hby=hby,
-                    notifier=notifier,
-                    parser=director.parser,
-                    expected_association_schema=ASSOCIATION_SCHEMA,
-                ),
-                PresentationVerifierDoer(
-                    baser=baser,
-                    rgy=rgy,
-                    trusted_geda_aid=config.trusted_geda_aid,
-                    association_schema=ASSOCIATION_SCHEMA,
-                    eoa_verifier=EoaVerifierDoer(
-                        rpc_url=config.rpc_url, chain_id=config.chain_id
-                    ),
-                ),
-            ]
-            self.hby, self.hab, self.rgy, self.baser, self.app = (
-                hby,
-                hab,
-                rgy,
-                baser,
-                app,
-            )
-            self.doers = doers
-            self._resources = resources.pop_all()
+            ),
+        ]
+        self.hby, self.hab, self.rgy, self.baser, self.app = (
+            hby,
+            hab,
+            rgy,
+            baser,
+            app,
+        )
+        self.doers = doers
 
 
 class HealthEnd:
