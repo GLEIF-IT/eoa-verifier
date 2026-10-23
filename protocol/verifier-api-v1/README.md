@@ -91,7 +91,11 @@ Signature label `sig0` covers, in order: `@method`, `@path`, `content-digest`,
 Action identifies the expected operation. Requests use an empty request reference
 and status `0`; ACKs use action `ack`, HTTP status `200` and the original
 `nonce:Content-Digest` reference. The actual response status must also be `200`.
-Application ACK payload validation belongs to the delivery integration.
+ACK policy belongs to the webhook delivery components, which use the common
+`sign()` and `verify()` operations. The webhook receiver signs after durable
+acceptance; the sender validates response status, request/event correlation and
+application ACK payload before completing delivery. Authentication alone can
+succeed for a signed error response and does not imply delivery success.
 
 Native signature parameters include the sender AID as key ID, context
 `eoa-verifier/v1`, algorithm `ed25519`, a random 128-bit hexadecimal attempt nonce,

@@ -252,38 +252,3 @@ class ServiceAuthenticator:
         )
         lines.append(f'"@signature-params: {params}"')
         return "\n".join(lines).encode()
-
-    def sign_ack(self, received, *, method, target, body):
-        """Sign an HTTP 200 ACK after the caller durably accepts the application event.
-
-        received must be the authenticated request identity returned by verify.
-        This helper does not commit that event or create its application payload.
-        """
-        if received.peer != self.peer_aid:
-            raise AuthenticationError("ACK request is not from the configured peer")
-        return self.sign(
-            method=method,
-            target=target,
-            action="ack",
-            body=body,
-            request=received.reference,
-            status=200,
-        )
-
-    def verify_ack(self, sent, *, method, target, body, headers, status):
-        """Authenticate a successful ACK for this exact sent attempt/body.
-
-        Reject even signed non-200 responses. The future delivery worker remains
-        responsible for validating the application ACK payload before completion.
-        """
-        if status != 200 or sent.peer != self.hab.pre:
-            raise AuthenticationError("not a successful ACK for this sender")
-        return self.verify(
-            method=method,
-            target=target,
-            action="ack",
-            body=body,
-            headers=headers,
-            request=sent.reference,
-            status=status,
-        )

@@ -129,18 +129,25 @@ def test_expiry_and_unknown_peer(peers):
         receiver.verify(**context, headers=headers)
 
 
-def test_ack_helpers_reject_signed_failure(peers):
-    """A valid error signature is not a delivery ACK; a bound HTTP 200 can authenticate."""
+def test_signed_error_response_authenticates_without_implying_delivery(peers):
+    """Authentication covers the actual status; delivery policy decides success."""
     sender, receiver = peers
     context = message()
     headers, sent = sender.sign(**context)
     received = receiver.verify(**context, headers=headers)
-    ack = {k: context[k] for k in ("method", "target", "body")}
-    bad, _ = receiver.sign(**ack, action="ack", request=sent.reference, status=500)
-    with pytest.raises(AuthenticationError, match="successful ACK"):
-        sender.verify_ack(sent, **ack, headers=bad, status=500)
-    good, _ = receiver.sign_ack(received, **ack)
-    sender.verify_ack(sent, **ack, headers=good, status=200)
+    response = {
+        "method": context["method"],
+        "target": context["target"],
+        "action": "ack",
+        "body": b'{"error":"unavailable"}',
+        "request": received.reference,
+        "status": 500,
+    }
+    headers, _ = receiver.sign(**response)
+    with pytest.raises(AuthenticationError, match="mismatch"):
+        sender.verify(**dict(response, status=200), headers=headers)
+    assert received.reference == sent.reference
+    assert sender.verify(**response, headers=headers).peer == receiver.hab.pre
 
 
 @pytest.mark.parametrize(
@@ -221,8 +228,13 @@ def test_signed_http_request_and_ack(peers):
                 headers=req.headers,
             )
             body = b'{"ack":"one"}'
-            headers, _ = receiver.sign_ack(
-                received, method=req.method, target=target, body=body
+            headers, _ = receiver.sign(
+                method=req.method,
+                target=target,
+                body=body,
+                action="ack",
+                request=received.reference,
+                status=200,
             )
             rep.data = body
             rep.set_headers(headers)
@@ -234,8 +246,9 @@ def test_signed_http_request_and_ack(peers):
         "/hook?chain=1", headers=headers, body=context["body"]
     )
     assert response.status_code == 200
-    sender.verify_ack(
-        sent,
+    sender.verify(
+        action="ack",
+        request=sent.reference,
         method=context["method"],
         target=context["target"],
         body=response.content,
