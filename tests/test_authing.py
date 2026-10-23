@@ -165,7 +165,8 @@ def test_malformed_or_changed_headers_fail_closed(peers, header, value):
 def test_rotated_peer_state_survives_service_restart(tmp_path):
     """Reopen actual service stores and authenticate with persisted rotated peer key state."""
     from keri import core
-    from eoa_verifier.serving import ServiceConfig, setup_service
+    from eoa_verifier.serving import ServiceConfig
+    from native_helpers import running_service
 
     config = ServiceConfig(
         trusted_geda_aid=core.Signer().verfer.qb64,
@@ -174,7 +175,8 @@ def test_rotated_peer_state_survives_service_restart(tmp_path):
         head_dir=str(tmp_path),
         http_port=0,
     )
-    runtime = setup_service(config)
+    lifetime = ExitStack()
+    runtime = lifetime.enter_context(running_service(config))
     try:
         with habbing.openHby(name="remote", temp=True) as hby:
             remote = hby.makeHab(name="remote")
@@ -185,15 +187,16 @@ def test_rotated_peer_state_survives_service_restart(tmp_path):
             )
             headers, _ = sender.sign(**message())
             aid = runtime.hab.pre
-            runtime.close()
-            runtime = setup_service(config)
+            lifetime.close()
+            lifetime = ExitStack()
+            runtime = lifetime.enter_context(running_service(config))
             assert runtime.hab.pre == aid
             receiver = ServiceAuthenticator(
                 hab=runtime.hab, baser=runtime.baser, peer_aid=remote.pre
             )
             receiver.verify(**message(), headers=headers)
     finally:
-        runtime.close()
+        lifetime.close()
 
 
 def test_signed_http_request_and_ack(peers):

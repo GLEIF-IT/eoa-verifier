@@ -41,7 +41,7 @@ periodic verification/account checks.
 
 Initial flow: native Grant acceptance → embed replay and durable work → native
 credential checks → wallet proof and chain/block/code observation → final local
-native-state check after the RPC wait → terminal work status. Missing artifacts
+native-state check after the RPC wait → a completed result. Missing artifacts
 or unusable RPC responses leave unfinished work for retry. Native acceptance is
 separate from receipt of bytes; KELs, TELs, credentials and schemas live in the
 native Habery/Reger stores, not in the work record.
@@ -52,6 +52,12 @@ and removes pending work in one LMDB transaction. Duplicate Grants preserve the
 first Grant and never re-enqueue completed work. Verified results retain the
 wallet and initial account observation; they do not mean application acceptance,
 webhook delivery or Ethereum endorsement. Restart rediscovers pending work.
+
+`VerifierService` is the service-level HIO DoDoer. Schedule it under a Doist;
+its entry opens shared stores and starts children, and its exit stops children
+before closing stores. Native HTTP client/server Doers own their sockets. There
+is no separate setup/close contract for callers. Partial entry failures unwind
+the same ownership chain.
 
 ## Service authentication primitives
 

@@ -1,19 +1,21 @@
 """Notification lifecycle using native storage and targeted failure injection."""
 
 from types import SimpleNamespace
+from contextlib import ExitStack
 from unittest.mock import patch
 
 import pytest
 from native_helpers import candidate
 
 from eoa_verifier.receiving.grants import GrantNotificationDoer
-from eoa_verifier.serving import setup_service
+from native_helpers import running_service
 
 
 @pytest.mark.parametrize("kind", ["accepted", "malformed", "unrelated"])
 def test_consumed_notification_removes_all_native_records(config, kind):
     """Use real Noter storage to prove success, bad input and unrelated notices clean all records."""
-    runtime = setup_service(config)
+    lifetime = ExitStack()
+    runtime = lifetime.enter_context(running_service(config))
     try:
         grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
         attrs = {"r": "/exn/ipex/grant", "d": "grant"}
@@ -38,14 +40,15 @@ def test_consumed_notification_removes_all_native_records(config, kind):
             kind == "accepted"
         )
     finally:
-        runtime.close()
+        lifetime.close()
 
 
 @pytest.mark.parametrize("boundary", ["parser", "storage"])
 @pytest.mark.parametrize("error", [ValueError, KeyError, TypeError])
 def test_internal_failure_preserves_notification(config, boundary, error):
     """Inject parser/storage errors after valid decoding and prove the native notice remains retryable."""
-    runtime = setup_service(config)
+    lifetime = ExitStack()
+    runtime = lifetime.enter_context(running_service(config))
     try:
         grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
         grants.notifier.add({"r": "/exn/ipex/grant", "d": "grant"})
@@ -72,12 +75,13 @@ def test_internal_failure_preserves_notification(config, boundary, error):
         assert grants.notifier.noter.get(notice.rid)[0].raw == notice.raw
         assert runtime.baser.pending.get(keys=(association["d"],)) is None
     finally:
-        runtime.close()
+        lifetime.close()
 
 
 def test_missing_grant_retains_notification_until_available(config):
     """An actual absent EXN leaves its persisted notification untouched for later native delivery."""
-    runtime = setup_service(config)
+    lifetime = ExitStack()
+    runtime = lifetime.enter_context(running_service(config))
     try:
         grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
         grants.notifier.add({"r": "/exn/ipex/grant", "d": "missing"})
@@ -85,7 +89,7 @@ def test_missing_grant_retains_notification_until_available(config):
         grants.process_notes()
         assert grants.notifier.noter.get(notice.rid)[0].raw == notice.raw
     finally:
-        runtime.close()
+        lifetime.close()
 
 
 def signed_notice(runtime, grants, sender, embedded, attachments=b""):
@@ -129,7 +133,8 @@ def test_signed_bad_embed_is_consumed_and_valid_work_progresses(config, bad):
     """Native signed bad inputs cannot poison later turns or persist across reopen."""
     from keri.app import habbing
 
-    runtime = setup_service(config)
+    lifetime = ExitStack()
+    runtime = lifetime.enter_context(running_service(config))
     try:
         grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
         embedded = candidate()
@@ -162,19 +167,21 @@ def test_signed_bad_embed_is_consumed_and_valid_work_progresses(config, bad):
             signed_notice(runtime, grants, sender, good)
             grants.process_notes()
             assert runtime.baser.pending.get(keys=(good["d"],)) is not None
-        runtime.close()
-        runtime = setup_service(config)
+        lifetime.close()
+        lifetime = ExitStack()
+        runtime = lifetime.enter_context(running_service(config))
         grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
         assert grants.notifier.noter.getNotes() == []
     finally:
-        runtime.close()
+        lifetime.close()
 
 
 def test_notice_pages_advance_past_retained_work(config):
     """Real native storage retains early notices without starving later work or siblings."""
     from hio.base import doing
 
-    runtime = setup_service(config)
+    lifetime = ExitStack()
+    runtime = lifetime.enter_context(running_service(config))
     try:
         grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
         for i in range(65):
@@ -194,4 +201,4 @@ def test_notice_pages_advance_past_retained_work(config):
             assert process.call_count == 65
         assert counts == [66, 66, 65]
     finally:
-        runtime.close()
+        lifetime.close()

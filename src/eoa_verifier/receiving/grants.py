@@ -135,7 +135,7 @@ class GrantNotificationDoer(doing.Doer):
 
         Only supplied embeds with attachments are replayed. Native parsing may escrow
         evidence; creating work does not assert acceptance. Repeated matching Grants
-        retain existing work, including terminal status. A different schema records
+        preserve pending work and completed results. A different schema records
         failure. GrantNotReadyError retains incomplete material; InvalidGrantError
         identifies decoding/native-validation failure. Other errors propagate.
         """

@@ -4,6 +4,7 @@ The verifier library receives and verifies; these helpers own test controllers,
 credential issuance setup, and supporting evidence transport.
 """
 
+from contextlib import contextmanager
 import socket
 
 from eth_account import Account
@@ -312,3 +313,17 @@ def association_from_challenge(challenge, signature, registry):
         },
         makify=True,
     )
+
+
+@contextmanager
+def running_service(config):
+    """Enter the service through HIO and force task exit when a focused test finishes."""
+    from eoa_verifier.serving import VerifierService
+
+    runtime = VerifierService(config)
+    scheduler = doing.Doist(doers=[runtime])
+    try:
+        scheduler.enter()
+        yield runtime
+    finally:
+        scheduler.exit()

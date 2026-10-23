@@ -4,11 +4,10 @@ import json
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import falcon
 from hio.base import doing
-from hio.core import http
+from hio.core import http, tcp
 from keri.app import (
     configing,
     habbing,
@@ -64,156 +63,184 @@ class ServiceConfig:
     temp: bool = False
 
 
-@dataclass
-class ServiceRuntime:
-    """Composed service resources and tasks, not a running scheduler.
+class VerifierService(doing.DoDoer):
+    """Own service tasks and shared stores for one HIO lifetime.
 
-    The caller schedules doers under HIO and unschedules them before close().
-    The resources stack owns store/server cleanup; native collaborators borrow
-    those stores. Returned attributes also support embedding and integration tests.
+    Construction opens nothing. enter opens stores and starts children; exit stops
+    children before closing their borrowed stores. Native network Doers alone own
+    sockets. Exposed hby/hab/rgy/baser/app are valid only during this lifetime.
     """
 
-    # Habery providing service identity, KEL and schemas over stack-owned stores.
-    hby: Any
-    # Created or reopened service habitat inside hby.
-    hab: Any
-    # Native Regery holding credential/TEL state over the stack-owned Reger.
-    rgy: Any
-    # Owned application store for initial progress and transport replay claims.
-    baser: VerifierBaser
-    # Falcon app wired to CESR, native discovery and liveness routes.
-    app: falcon.App
-    # Unscheduled service tasks; caller owns their scheduler lifetime.
-    doers: list
-    # ExitStack owning reverse-order native store and server closure.
-    resources: ExitStack = field(repr=False)
+    def __init__(self, config, **kwa):
+        """Retain configuration and an empty resource stack until HIO enters."""
+        self.config = config
+        self._resources = ExitStack()
+        super().__init__(doers=[], **kwa)
 
-    def close(self):
-        """Close owned stores and the server; return None, including on repeated calls.
+    def enter(self, doers=None, *, temp=None):
+        """Compose once per service entry; preserve native extension of child tasks."""
+        if doers is not None:
+            return super().enter(doers=doers, temp=temp)
+        try:
+            self._open()
+            deeds = super().enter(temp=temp)
+            print(
+                f"eoa-verifier serving {self.hab.pre} on {self.config.host}:{self.config.http_port}",
+                flush=True,
+            )
+            return deeds
+        except BaseException:
+            self.exit()
+            raise
 
-        The caller must first unschedule all doers. This method does not stop tasks or
-        close worker clients; HIO task exit handles those clients before stores close.
-        """
-        self.resources.close()
+    def exit(self, deeds=None):
+        """Always unwind children first; child removal alone must not close shared stores."""
+        try:
+            super().exit(deeds=deeds)
+        finally:
+            if deeds is None:
+                self._resources.close()
 
+    def _open(self):
+        """Compose native resources, using a private stack for partial setup failure."""
+        config = self.config
+        if not config.rpc_url or config.chain_id <= 0:
+            raise ValueError("verification requires an RPC URL and positive chain ID")
+        if (
+            coring.Prefixer(qb64=config.trusted_geda_aid).qb64
+            != config.trusted_geda_aid
+        ):
+            raise ValueError("trusted GEDA must be a canonical AID")
+        inits = {
+            "transferable": True,
+            "icount": 1,
+            "isith": "1",
+            "ncount": 1,
+            "nsith": "1",
+            "wits": [],
+            "toad": 0,
+        }
+        if config.incept_file:
+            extra = json.loads(Path(config.incept_file).read_text())
+            if not isinstance(extra, dict):
+                raise ValueError("incept file must contain a JSON object")
+            inits.update(extra)
 
-def setup_service(config: ServiceConfig) -> ServiceRuntime:
-    """Create or reopen a service identity and return an unscheduled runtime.
+        with ExitStack() as resources:
+            # Register each store before opening it, including Habery dependencies.
+            # A later setup failure therefore cannot leak earlier LMDB handles.
+            def store(cls, **extra):
+                """Open a native store in the configured namespace and register its cleanup first.
 
-    Reuse name/base/head_dir and alias to reopen the same stores and habitat.
-    Inception options affect creation only. Pin packaged schemas before intake and
-    share one inbound parser/escrow owner across mailbox and direct HTTP delivery.
-    The exit stack closes previously opened resources if setup raises; success
-    transfers that responsibility to ServiceRuntime. Invalid configuration raises
-    ValueError or native KERI errors; I/O errors propagate.
-    """
-    if not config.rpc_url or config.chain_id <= 0:
-        raise ValueError("verification requires an RPC URL and positive chain ID")
-    if coring.Prefixer(qb64=config.trusted_geda_aid).qb64 != config.trusted_geda_aid:
-        raise ValueError("trusted GEDA must be a canonical AID")
-    inits = {
-        "transferable": True,
-        "icount": 1,
-        "isith": "1",
-        "ncount": 1,
-        "nsith": "1",
-        "wits": [],
-        "toad": 0,
-    }
-    if config.incept_file:
-        extra = json.loads(Path(config.incept_file).read_text())
-        if not isinstance(extra, dict):
-            raise ValueError("incept file must contain a JSON object")
-        inits.update(extra)
+                Return the store. Even a failed reopen leaves a registered close callback;
+                temp selects disposable state whose cleanup removes its files.
+                """
+                obj = cls(
+                    name=config.name,
+                    base=config.base,
+                    temp=config.temp,
+                    headDirPath=config.head_dir,
+                    reopen=False,
+                    **extra,
+                )
+                resources.callback(obj.close, clear=config.temp)
+                obj.reopen()
+                return obj
 
-    with ExitStack() as resources:
-        # Register each store before opening it, including Habery dependencies.
-        # A later setup failure therefore cannot leak earlier LMDB handles.
-        def store(cls, **extra):
-            """Open a native store in the configured namespace and register its cleanup first.
-
-            Return the store. Even a failed reopen leaves a registered close callback;
-            temp selects disposable state whose cleanup removes its files.
-            """
-            obj = cls(
+            ks, db, cf = (
+                store(keeping.Keeper),
+                store(basing.Baser),
+                store(configing.Configer),
+            )
+            hby = habbing.Habery(
                 name=config.name,
                 base=config.base,
                 temp=config.temp,
-                headDirPath=config.head_dir,
-                reopen=False,
-                **extra,
+                ks=ks,
+                db=db,
+                cf=cf,
+                bran=config.passcode,
             )
-            resources.callback(obj.close, clear=config.temp)
-            obj.reopen()
-            return obj
-
-        ks, db, cf = (
-            store(keeping.Keeper),
-            store(basing.Baser),
-            store(configing.Configer),
-        )
-        hby = habbing.Habery(
-            name=config.name,
-            base=config.base,
-            temp=config.temp,
-            ks=ks,
-            db=db,
-            cf=cf,
-            bran=config.passcode,
-        )
-        pin_accepted_schemas(hby)
-        hab = hby.habByName(config.alias) or hby.makeHab(name=config.alias, **inits)
-        reger = store(viring.Reger, db=hby.db)
-        rgy = credentialing.Regery(
-            hby=hby, name=config.name, base=config.base, temp=config.temp, reger=reger
-        )
-        baser = store(VerifierBaser)
-        noter, mbx = store(notifying.Noter), store(storing.Mailboxer)
-        notifier = notifying.Notifier(hby=hby, noter=noter)
-        exc = exchanging.Exchanger(hby=hby, handlers=[])
-        protocoling.loadHandlers(hby=hby, exc=exc, notifier=notifier)
-        verifier = verifying.Verifier(hby=hby, reger=reger)
-        rep = storing.Respondant(hby=hby, mbx=mbx)
-        director = indirecting.MailboxDirector(
-            hby=hby,
-            topics=["/receipt", "/replay", "/credential", "/delegate", "/challenge"],
-            verifier=verifier,
-            exc=exc,
-            rep=rep,
-        )
-        # Direct HTTP, mailbox delivery and Grant embeds share this parser.
-        # MailboxDirector alone schedules inbound parsing and escrow processing.
-        app = falcon.App()
-        ending.loadEnds(app=app, hby=hby, default=hab.pre)
-        oobiing.loadEnds(app=app, hby=hby, prefix="/ext")
-        app.add_route("/", indirecting.HttpEnd(rxbs=director.ims, mbx=mbx))
-        app.add_route("/health", HealthEnd())
-        server = http.Server(host=config.host, port=config.http_port, app=app)
-        resources.callback(server.close)
-        oobiery = oobiing.Oobiery(hby=hby, clienter=httping.Clienter())
-        doers = [
-            *oobiery.doers,
-            rep,
-            director,
-            http.ServerDoer(server=server),
-            GrantNotificationDoer(
-                baser=baser,
+            pin_accepted_schemas(hby)
+            hab = hby.habByName(config.alias) or hby.makeHab(name=config.alias, **inits)
+            reger = store(viring.Reger, db=hby.db)
+            rgy = credentialing.Regery(
                 hby=hby,
-                notifier=notifier,
-                parser=director.parser,
-                expected_association_schema=ASSOCIATION_SCHEMA,
-            ),
-            PresentationVerifierDoer(
-                baser=baser,
-                rgy=rgy,
-                trusted_geda_aid=config.trusted_geda_aid,
-                association_schema=ASSOCIATION_SCHEMA,
-                eoa_verifier=EoaVerifierDoer(
-                    rpc_url=config.rpc_url, chain_id=config.chain_id
+                name=config.name,
+                base=config.base,
+                temp=config.temp,
+                reger=reger,
+            )
+            baser = store(VerifierBaser)
+            noter, mbx = store(notifying.Noter), store(storing.Mailboxer)
+            notifier = notifying.Notifier(hby=hby, noter=noter)
+            exc = exchanging.Exchanger(hby=hby, handlers=[])
+            protocoling.loadHandlers(hby=hby, exc=exc, notifier=notifier)
+            verifier = verifying.Verifier(hby=hby, reger=reger)
+            rep = storing.Respondant(hby=hby, mbx=mbx)
+            director = indirecting.MailboxDirector(
+                hby=hby,
+                topics=[
+                    "/receipt",
+                    "/replay",
+                    "/credential",
+                    "/delegate",
+                    "/challenge",
+                ],
+                verifier=verifier,
+                exc=exc,
+                rep=rep,
+            )
+            # Direct HTTP, mailbox delivery and Grant embeds share this parser.
+            # MailboxDirector alone schedules inbound parsing and escrow processing.
+            app = falcon.App()
+            ending.loadEnds(app=app, hby=hby, default=hab.pre)
+            oobiing.loadEnds(app=app, hby=hby, prefix="/ext")
+            app.add_route("/", indirecting.HttpEnd(rxbs=director.ims, mbx=mbx))
+            app.add_route("/health", HealthEnd())
+            server = http.Server(
+                host=config.host,
+                port=config.http_port,
+                app=app,
+                # Explicit TCP address preserves port zero; retain HTTP’s timeout.
+                servant=tcp.Server(
+                    ha=(config.host, config.http_port),
+                    tymeout=http.Server.Tymeout,
+                    bufsize=8096,
                 ),
-            ),
-        ]
-        return ServiceRuntime(hby, hab, rgy, baser, app, doers, resources.pop_all())
+            )
+            oobiery = oobiing.Oobiery(hby=hby, clienter=httping.Clienter())
+            doers = [
+                *oobiery.doers,
+                rep,
+                director,
+                http.ServerDoer(server=server),
+                GrantNotificationDoer(
+                    baser=baser,
+                    hby=hby,
+                    notifier=notifier,
+                    parser=director.parser,
+                    expected_association_schema=ASSOCIATION_SCHEMA,
+                ),
+                PresentationVerifierDoer(
+                    baser=baser,
+                    rgy=rgy,
+                    trusted_geda_aid=config.trusted_geda_aid,
+                    association_schema=ASSOCIATION_SCHEMA,
+                    eoa_verifier=EoaVerifierDoer(
+                        rpc_url=config.rpc_url, chain_id=config.chain_id
+                    ),
+                ),
+            ]
+            self.hby, self.hab, self.rgy, self.baser, self.app = (
+                hby,
+                hab,
+                rgy,
+                baser,
+                app,
+            )
+            self.doers = doers
+            self._resources = resources.pop_all()
 
 
 class HealthEnd:
@@ -228,15 +255,8 @@ def run_service(config: ServiceConfig, *, expire: float = 0.0):
     """Run the composed doers on a real-time HIO scheduler, then close resources.
 
     expire is the scheduler limit in seconds; zero means no time limit. Normal
-    completion returns None. Errors propagate after cleanup. Doist task exit
-    unwinds clients before the finally block closes stores and the HTTP server.
+    completion returns None. HIO exits children before closing shared stores
+    on completion, cancellation or exceptions.
     """
-    runtime = setup_service(config)
-    try:
-        print(
-            f"eoa-verifier serving {runtime.hab.pre} on {config.host}:{config.http_port}",
-            flush=True,
-        )
-        doing.Doist(limit=expire, tock=0.03125, real=True).do(doers=runtime.doers)
-    finally:
-        runtime.close()
+    service = VerifierService(config)
+    doing.Doist(limit=expire, tock=0.03125, real=True).do(doers=[service])

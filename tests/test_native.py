@@ -30,7 +30,7 @@ from native_helpers import (
     rules,
 )
 
-from eoa_verifier.serving import ServiceConfig, setup_service
+from eoa_verifier.serving import ServiceConfig, VerifierService
 from eoa_verifier.verification.constants import LE_SCHEMA, QVI_SCHEMA
 from eoa_verifier.verification.eoa import build_challenge
 
@@ -87,8 +87,7 @@ def test_native_grant_verification_and_restart(tmp_path):
             head_dir=str(tmp_path),
             http_port=port,
         )
-        runtime = setup_service(config)
-        stack.callback(runtime.close)
+        runtime = VerifierService(config)
         client = http.Client(hostname="127.0.0.1", port=port)
         client_doer = http.ClientDoer(client=client)
         doers = [
@@ -96,7 +95,7 @@ def test_native_grant_verification_and_restart(tmp_path):
             *(d for r in resolvers for d in r.doers),
             *(d for i in issuers.values() for d in (i.registrar, i)),
             IssuerEscrows(list(issuers.values())),
-            *runtime.doers,
+            runtime,
             client_doer,
         ]
         finished = []
@@ -118,12 +117,12 @@ def test_native_grant_verification_and_restart(tmp_path):
             while True:
                 store = (
                     runtime.baser.pending
-                    if expected == "awaiting_artifacts"
+                    if expected == "pending"
                     else runtime.baser.results
                 )
                 work = store.get(keys=(said,))
                 if work is not None and (
-                    expected == "awaiting_artifacts" or work.outcome == expected
+                    expected == "pending" or work.outcome == expected
                 ):
                     return work
                 assert workflow.tyme < deadline, (expected, work)
@@ -229,17 +228,15 @@ def test_native_grant_verification_and_restart(tmp_path):
 
             # Deliver the association first, then reopen with its sources still absent.
             creder, evidence = yield from issue_association("delayed")
-            yield from deliver(evidence, creder.said, "awaiting_artifacts")
+            yield from deliver(evidence, creder.said, "pending")
             aid = runtime.hab.pre
-            workflow.remove([*runtime.doers, client_doer])
-            runtime.close()
-            runtime = setup_service(config)
-            stack.callback(runtime.close)
-            assert runtime.hab.pre == aid
-            assert runtime.baser.pending.get(keys=(creder.said,)) is not None
+            workflow.remove([runtime, client_doer])
+            runtime = VerifierService(config)
             client = http.Client(hostname="127.0.0.1", port=port)
             client_doer = http.ClientDoer(client=client)
-            workflow.extend([*runtime.doers, client_doer])
+            workflow.extend([runtime, client_doer])
+            assert runtime.hab.pre == aid
+            assert runtime.baser.pending.get(keys=(creder.said,)) is not None
             # Supporting evidence alone resumes persisted work; no new Grant required.
             yield from deliver(
                 streams["geda"] + streams["qvi"], creder.said, "verified"
