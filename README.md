@@ -53,6 +53,21 @@ duplicate Grants do not reset them. `verified` does not mean application
 acceptance, webhook delivery or Ethereum endorsement. The worker emits an account
 observation, but this increment does not persist it in `VerificationWork`.
 
+## Service authentication primitives
+
+`authing.ServiceAuthenticator` signs and authenticates exact HTTP body bytes with
+the native service habitat and one configured peer AID. It uses the pinned KERI
+`Signature-Input`/`Signature` format, checks locally accepted current keys, and
+stores nonce claims in `VerifierBaser` across restart. Single-key transferable
+Ed25519 service AIDs at threshold one are supported. See the
+[transport profile](protocol/verifier-api-v1/README.md#transport-signature-profile).
+
+These are callable primitives for the later sender/intake integrations; this
+increment adds no authenticated delivery route, retry worker or public status API.
+Authenticated messages do not establish durable application acceptance. The caller
+commits application state before signing an ACK and validates the ACK payload
+before marking delivery complete.
+
 ## Test
 
 Install `python -m pip install '.[test]'` and run `python -m pytest -q`.

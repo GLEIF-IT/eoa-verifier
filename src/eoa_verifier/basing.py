@@ -34,8 +34,15 @@ class VerificationWork:
     failureReason: str = ""
 
 
+@dataclass
+class MessageReceipt:
+    """Durable transport nonce claim, independent of application-event deduplication."""
+
+    expires: int  # Signed UTC expiry; a claim does not establish application success.
+
+
 class VerifierBaser(dbing.LMDBer):
-    """Own the verification work table alongside, not inside, native KERI stores.
+    """Own initial work and transport replay records alongside native KERI stores.
 
     Rows survive restart and are rediscovered by the coordinator. Except for the
     completion guard, transition methods trust their caller's selection of work;
@@ -56,6 +63,8 @@ class VerifierBaser(dbing.LMDBer):
         self.verifications = koming.Komer(
             db=self, subkey="verification.", schema=VerificationWork
         )
+        # Insert-only peer/attempt claims; independent of event acceptance.
+        self.messages = koming.Komer(db=self, subkey="message.", schema=MessageReceipt)
         return self.env
 
     def get_verification(self, said):
@@ -134,3 +143,11 @@ class VerifierBaser(dbing.LMDBer):
                     self.verifications.deserializer(raw)
                     for _, raw in islice(cursor.iternext(), limit)
                 ]
+
+    def claim_message(self, peer, nonce, expires):
+        """Insert a peer/nonce replay claim once; return False if already recorded.
+
+        Call only after authentication. Native put is insert-only and persists
+        across restart. Application retries use fresh nonces and stable event IDs.
+        """
+        return self.messages.put(keys=(peer, nonce), val=MessageReceipt(expires))

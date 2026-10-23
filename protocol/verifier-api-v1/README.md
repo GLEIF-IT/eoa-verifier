@@ -75,6 +75,38 @@ Initially support single-key transferable service AIDs with threshold one.
 Transport-message expiry does not expire an accepted association. The public
 status route below is outside this authenticated service protocol.
 
+## Transport signature profile
+
+PR 03 implements `ServiceAuthenticator` with the pinned KERIpy native
+`Signature-Input` and CESR `Signature` primitives. This is their native signing
+format, not a general RFC 9421 implementation. It does not add the delivery worker
+or receiver endpoint. The caller supplies exact body bytes, actual HTTP method
+and absolute target URL (including query), matched to its configured destination.
+Expected action and peer trust come from configuration/operation, not incoming headers.
+
+Signature label `sig0` covers, in order: `@method`, `@path`, `content-digest`,
+`content-type`, `eoa-target`, `eoa-audience`, `eoa-action`, `eoa-request`,
+`eoa-status`. The digest is SHA-256 over the exact bytes; content type is
+`application/json`. Target is the full URL; audience is the receiving AID.
+Action identifies the expected operation. Requests use an empty request reference
+and status `0`; ACKs use action `ack`, HTTP status `200` and the original
+`nonce:Content-Digest` reference. The actual response status must also be `200`.
+Application ACK payload validation belongs to the delivery integration.
+
+Native signature parameters include the sender AID as key ID, context
+`eoa-verifier/v1`, algorithm `ed25519`, a random 128-bit hexadecimal attempt nonce,
+and created/expiry UTC seconds. The configurable maximum lifetime defaults to
+60 seconds, with no clock-skew allowance. Expired or future-created messages fail;
+transport expiry has no effect on association validity.
+
+Verify only the configured peer's locally accepted current key. Rotation needs
+native event acceptance; after rotation, old-key attempts fail and a retry signs
+anew. There is no network key refresh in this helper. After authentication, an
+insert-only peer/nonce claim rejects replay across restart. Claims are retained
+in this increment. A lost ACK is retried with a fresh nonce and the same immutable
+application event; event deduplication remains separate. Missing keys or invalid
+signatures never consume a nonce or establish application acceptance.
+
 ## Ownership and Ethereum mappings
 
 Follow [ADR 0001](../../adrs/0001-eoa-association-ownership-and-replacement.md):

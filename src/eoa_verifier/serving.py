@@ -79,7 +79,7 @@ class ServiceRuntime:
     hab: Any
     # Native Regery holding credential/TEL state over the stack-owned Reger.
     rgy: Any
-    # Owned application store for initial-verification progress only.
+    # Owned application store for initial progress and transport replay claims.
     baser: VerifierBaser
     # Falcon app wired to CESR, native discovery and liveness routes.
     app: falcon.App
