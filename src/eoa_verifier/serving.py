@@ -1,7 +1,7 @@
 """Compose one native receiver and the initial association verifier."""
 
 import json
-from contextlib import ExitStack
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -19,7 +19,7 @@ from keri.app import (
     storing,
 )
 from keri.core import coring
-from keri.db import basing
+from keri.db import basing, dbing
 from keri.end import ending
 from keri.peer import exchanging
 from keri.vc import protocoling
@@ -62,62 +62,20 @@ class ServiceConfig:
     # Use disposable native stores and remove them on close; intended for tests.
     temp: bool = False
 
+    def __post_init__(self):
+        """Reject invalid verification configuration before opening resources."""
+        if not self.rpc_url or self.chain_id <= 0:
+            raise ValueError("verification requires an RPC URL and positive chain ID")
+        if coring.Prefixer(qb64=self.trusted_geda_aid).qb64 != self.trusted_geda_aid:
+            raise ValueError("trusted GEDA must be a canonical AID")
+
 
 class VerifierService(doing.DoDoer):
-    """Own service tasks and shared stores for one HIO lifetime.
+    """Own service tasks and sockets while borrowing the caller's open stores."""
 
-    Construction opens nothing. enter opens stores and starts children; exit stops
-    children before closing their borrowed stores. Native network Doers alone own
-    sockets. Exposed hby/hab/rgy/baser/app are valid only during this lifetime.
-    """
-
-    def __init__(self, config, **kwa):
-        """Retain configuration and an empty resource stack until HIO enters."""
+    def __init__(self, config, *, hby, rgy, baser, noter, mbx, **kwa):
+        """Wire native verification and HTTP tasks without owning shared stores."""
         self.config = config
-        self._resources = ExitStack()
-        super().__init__(doers=[], **kwa)
-
-    def enter(self, doers=None, *, temp=None):
-        """Compose once per service entry; preserve native extension of child tasks."""
-        if doers is not None:
-            return super().enter(doers=doers, temp=temp)
-        # HIO calls exit even when entry fails.
-        self._open()
-        deeds = super().enter(temp=temp)
-        print(
-            f"eoa-verifier serving {self.hab.pre} on {self.config.host}:{self.config.http_port}",
-            flush=True,
-        )
-        return deeds
-
-    def exit(self, deeds=None):
-        """Always unwind children first; child removal alone must not close shared stores."""
-        remaining = self.deeds if deeds is None else deeds
-        errors = []
-        while remaining:
-            try:
-                super().exit(deeds=remaining)
-            except BaseException as error:
-                # HIO pops a child before closing it; resume with its siblings.
-                errors.append(error)
-        if deeds is None:
-            try:
-                self._resources.close()
-            except BaseException as error:
-                errors.append(error)
-        if errors:
-            raise BaseExceptionGroup("Service cleanup failed", errors)
-
-    def _open(self):
-        """Register shared stores with this service; native Doers own sockets."""
-        config = self.config
-        if not config.rpc_url or config.chain_id <= 0:
-            raise ValueError("verification requires an RPC URL and positive chain ID")
-        if (
-            coring.Prefixer(qb64=config.trusted_geda_aid).qb64
-            != config.trusted_geda_aid
-        ):
-            raise ValueError("trusted GEDA must be a canonical AID")
         inits = {
             "transferable": True,
             "icount": 1,
@@ -133,50 +91,12 @@ class VerifierService(doing.DoDoer):
                 raise ValueError("incept file must contain a JSON object")
             inits.update(extra)
 
-        def store(cls, **extra):
-            """Register cleanup before opening; only temporary stores are deleted."""
-            obj = cls(
-                name=config.name,
-                base=config.base,
-                temp=config.temp,
-                headDirPath=config.head_dir,
-                reopen=False,
-                **extra,
-            )
-            self._resources.callback(obj.close, clear=config.temp)
-            obj.reopen()
-            return obj
-
-        ks, db, cf = (
-            store(keeping.Keeper),
-            store(basing.Baser),
-            store(configing.Configer),
-        )
-        hby = habbing.Habery(
-            name=config.name,
-            base=config.base,
-            temp=config.temp,
-            ks=ks,
-            db=db,
-            cf=cf,
-            bran=config.passcode,
-        )
         pin_accepted_schemas(hby)
         hab = hby.habByName(config.alias) or hby.makeHab(name=config.alias, **inits)
-        reger = store(viring.Reger, db=hby.db)
-        rgy = credentialing.Regery(
-            hby=hby,
-            name=config.name,
-            base=config.base,
-            temp=config.temp,
-            reger=reger,
-        )
-        baser = store(VerifierBaser)
-        noter, mbx = store(notifying.Noter), store(storing.Mailboxer)
         notifier = notifying.Notifier(hby=hby, noter=noter)
         exc = exchanging.Exchanger(hby=hby, handlers=[])
         protocoling.loadHandlers(hby=hby, exc=exc, notifier=notifier)
-        verifier = verifying.Verifier(hby=hby, reger=reger)
+        verifier = verifying.Verifier(hby=hby, reger=rgy.reger)
         rep = storing.Respondant(hby=hby, mbx=mbx)
         director = indirecting.MailboxDirector(
             hby=hby,
@@ -239,7 +159,20 @@ class VerifierService(doing.DoDoer):
             baser,
             app,
         )
-        self.doers = doers
+        super().__init__(doers=doers, **kwa)
+
+    def exit(self, deeds: deque | None = None):
+        """Attempt every child cleanup and propagate failures; stores belong to the caller."""
+        remaining = self.deeds if deeds is None else deeds
+        errors = []
+        while remaining:
+            try:
+                super().exit(deeds=remaining)
+            except BaseException as error:
+                # HIO pops a child before closing it; resume with its siblings.
+                errors.append(error)
+        if errors:
+            raise BaseExceptionGroup("Service cleanup failed", errors)
 
 
 class HealthEnd:
@@ -251,11 +184,35 @@ class HealthEnd:
 
 
 def run_service(config: ServiceConfig, *, expire: float = 0.0):
-    """Run the composed doers on a real-time HIO scheduler, then close resources.
-
-    expire is the scheduler limit in seconds; zero means no time limit. Normal
-    completion returns None. HIO exits children before closing shared stores
-    on completion, cancellation or exceptions.
-    """
-    service = VerifierService(config)
-    doing.Doist(limit=expire, tock=0.03125, real=True).do(doers=[service])
+    """Own shared stores outside HIO; expire=0 runs without a time limit."""
+    options = dict(name=config.name, base=config.base, headDirPath=config.head_dir)
+    with (
+        keeping.openKS(temp=config.temp, **options) as ks,
+        basing.openDB(temp=config.temp, **options) as db,
+        configing.openCF(temp=config.temp, **options) as cf,
+        viring.openReger(temp=config.temp, db=db, **options) as reger,
+        dbing.openLMDB(cls=VerifierBaser, temp=config.temp, **options) as baser,
+        dbing.openLMDB(cls=notifying.Noter, temp=config.temp, **options) as noter,
+        dbing.openLMDB(cls=storing.Mailboxer, temp=config.temp, **options) as mbx,
+    ):
+        hby = habbing.Habery(
+            name=config.name,
+            base=config.base,
+            temp=config.temp,
+            ks=ks,
+            db=db,
+            cf=cf,
+            bran=config.passcode,
+            free=False,
+        )
+        rgy = credentialing.Regery(
+            hby=hby, name=config.name, base=config.base, temp=config.temp, reger=reger
+        )
+        service = VerifierService(
+            config, hby=hby, rgy=rgy, baser=baser, noter=noter, mbx=mbx
+        )
+        print(
+            f"eoa-verifier serving {service.hab.pre} on {config.host}:{config.http_port}",
+            flush=True,
+        )
+        doing.Doist(limit=expire, tock=0.03125, real=True).do(doers=[service])

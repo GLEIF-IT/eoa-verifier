@@ -7,20 +7,20 @@ import pytest
 
 from eoa_verifier.cli import main
 from eoa_verifier.serving import run_service
-from native_helpers import running_service
+from native_helpers import running_service, verifier_service
 
 
-def test_setup_failure_releases_all_previously_opened_stores(config):
+@pytest.mark.parametrize("failure", ["configing.openCF", "oobiing.Oobiery"])
+def test_setup_failure_releases_all_previously_opened_stores(config, failure):
     """Inject late setup failure; reopening the same paths detects leaked LMDB handles."""
     with (
         patch(
-            "eoa_verifier.serving.oobiing.Oobiery",
+            f"eoa_verifier.serving.{failure}",
             side_effect=RuntimeError("setup failure"),
         ),
         pytest.raises(RuntimeError, match="setup failure"),
     ):
-        with running_service(config):
-            pass
+        run_service(config)
     # A leaked LMDB handle makes this reopen fail in the same process.
     with running_service(config):
         pass
@@ -99,8 +99,8 @@ def test_service_owns_children_before_stores(config, mode):
             raise RuntimeError("entry failure")
 
     class Service(VerifierService):
-        def _open(self):
-            super()._open()
+        def __init__(self, *args, **kwa):
+            super().__init__(*args, **kwa)
             self.server = next(
                 d.server for d in self.doers if isinstance(d, http.ServerDoer)
             )
@@ -116,13 +116,17 @@ def test_service_owns_children_before_stores(config, mode):
                 return True
             return super().recur(tyme)
 
-    service = Service(config)
-    scheduler = doing.Doist(tock=0.01, limit=0.02)
-    if mode in ("exception", "partial-enter"):
-        with pytest.raises(RuntimeError, match="failure"):
+    with (
+        patch("eoa_verifier.serving.VerifierService", Service),
+        verifier_service(config) as service,
+    ):
+        scheduler = doing.Doist(tock=0.01, limit=0.02)
+        if mode in ("exception", "partial-enter"):
+            with pytest.raises(RuntimeError, match="failure"):
+                scheduler.do(doers=[service])
+        else:
             scheduler.do(doers=[service])
-    else:
-        scheduler.do(doers=[service])
+        assert service.baser.opened and service.hby.db.opened
     assert stopped == [True]
     assert not service.baser.opened and not service.hby.db.opened
     assert not service.server.servant.opened

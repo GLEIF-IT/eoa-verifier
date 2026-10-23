@@ -28,9 +28,10 @@ from native_helpers import (
     replay,
     revoke_credential,
     rules,
+    verifier_service,
 )
 
-from eoa_verifier.serving import ServiceConfig, VerifierService
+from eoa_verifier.serving import ServiceConfig
 from eoa_verifier.verification.constants import LE_SCHEMA, QVI_SCHEMA
 from eoa_verifier.verification.eoa import build_challenge
 
@@ -87,7 +88,8 @@ def test_native_grant_verification_and_restart(tmp_path):
             head_dir=str(tmp_path),
             http_port=port,
         )
-        runtime = VerifierService(config)
+        service_stores = stack.enter_context(ExitStack())
+        runtime = service_stores.enter_context(verifier_service(config))
         client = http.Client(hostname="127.0.0.1", port=port)
         client_doer = http.ClientDoer(client=client)
         doers = [
@@ -231,7 +233,8 @@ def test_native_grant_verification_and_restart(tmp_path):
             yield from deliver(evidence, creder.said, "pending")
             aid = runtime.hab.pre
             workflow.remove([runtime, client_doer])
-            runtime = VerifierService(config)
+            service_stores.close()
+            runtime = service_stores.enter_context(verifier_service(config))
             client = http.Client(hostname="127.0.0.1", port=port)
             client_doer = http.ClientDoer(client=client)
             workflow.extend([runtime, client_doer])

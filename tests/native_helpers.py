@@ -316,14 +316,50 @@ def association_from_challenge(challenge, signature, registry):
 
 
 @contextmanager
-def running_service(config):
-    """Enter the service through HIO and force task exit when a focused test finishes."""
+def verifier_service(config):
+    """Own native stores around a service whose HIO lifetime the caller schedules."""
+    from keri.app import keeping, configing, notifying, storing
+    from keri.db import basing, dbing
+    from keri.vdr import viring, credentialing
+    from eoa_verifier.basing import VerifierBaser
     from eoa_verifier.serving import VerifierService
 
-    runtime = VerifierService(config)
-    scheduler = doing.Doist(doers=[runtime])
-    try:
-        scheduler.enter()
-        yield runtime
-    finally:
-        scheduler.exit()
+    options = dict(name=config.name, base=config.base, headDirPath=config.head_dir)
+    with (
+        keeping.openKS(temp=config.temp, **options) as ks,
+        basing.openDB(temp=config.temp, **options) as db,
+        configing.openCF(temp=config.temp, **options) as cf,
+        viring.openReger(temp=config.temp, db=db, **options) as reger,
+        dbing.openLMDB(cls=VerifierBaser, temp=config.temp, **options) as baser,
+        dbing.openLMDB(cls=notifying.Noter, temp=config.temp, **options) as noter,
+        dbing.openLMDB(cls=storing.Mailboxer, temp=config.temp, **options) as mbx,
+    ):
+        hby = habbing.Habery(
+            name=config.name,
+            base=config.base,
+            temp=config.temp,
+            ks=ks,
+            db=db,
+            cf=cf,
+            bran=config.passcode,
+            free=False,
+        )
+        rgy = credentialing.Regery(
+            hby=hby, name=config.name, base=config.base, temp=config.temp, reger=reger
+        )
+        service = VerifierService(
+            config, hby=hby, rgy=rgy, baser=baser, noter=noter, mbx=mbx
+        )
+        yield service
+
+
+@contextmanager
+def running_service(config):
+    """Stop HIO tasks before leaving their borrowed resource contexts."""
+    with verifier_service(config) as runtime:
+        scheduler = doing.Doist(doers=[runtime])
+        try:
+            scheduler.enter()
+            yield runtime
+        finally:
+            scheduler.exit()

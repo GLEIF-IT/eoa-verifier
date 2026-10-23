@@ -53,11 +53,10 @@ first Grant and never re-enqueue completed work. Verified results retain the
 wallet and initial account observation; they do not mean application acceptance,
 webhook delivery or Ethereum endorsement. Restart rediscovers pending work.
 
-`VerifierService` is the service-level HIO DoDoer. Schedule it under a Doist;
-its entry opens shared stores and starts children, and its exit stops children
-before closing stores. Native HTTP client/server Doers own their sockets. There
-is no separate setup/close contract for callers. Partial entry failures unwind
-the same ownership chain.
+`run_service()` owns shared stores through native KERIpy context managers.
+`VerifierService` borrows those stores and composes the HIO tasks. HIO stops
+children before the outer contexts close stores, including startup failure and
+cancellation. Native network Doers own sockets; persistent stores survive shutdown.
 
 ## Service authentication primitives
 
