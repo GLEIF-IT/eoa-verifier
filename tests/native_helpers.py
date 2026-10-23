@@ -4,6 +4,7 @@ The verifier library receives and verifies; these helpers own test controllers,
 credential issuance setup, and supporting evidence transport.
 """
 
+from contextlib import contextmanager
 import socket
 
 from eth_account import Account
@@ -312,3 +313,55 @@ def association_from_challenge(challenge, signature, registry):
         },
         makify=True,
     )
+
+
+@contextmanager
+def verifier_service(config):
+    """Yield a service borrowing native stores owned by this fixture.
+
+    The caller must stop its HIO scheduler before leaving this context. Use
+    running_service when explicit scheduling control is unnecessary. Persistent
+    configs retain files for reopening assertions; temporary configs remove them.
+    """
+    from keri.app import keeping, configing, notifying
+    from keri.db import basing, dbing
+    from keri.vdr import viring, credentialing
+    from eoa_verifier.basing import VerifierBaser
+    from eoa_verifier.serving import VerifierService
+
+    options = dict(name=config.name, base=config.base, headDirPath=config.head_dir)
+    with (
+        keeping.openKS(temp=config.temp, **options) as ks,
+        basing.openDB(temp=config.temp, **options) as db,
+        configing.openCF(temp=config.temp, **options) as cf,
+        viring.openReger(temp=config.temp, db=db, **options) as reger,
+        dbing.openLMDB(cls=VerifierBaser, temp=config.temp, **options) as baser,
+        dbing.openLMDB(cls=notifying.Noter, temp=config.temp, **options) as noter,
+    ):
+        hby = habbing.Habery(
+            name=config.name,
+            base=config.base,
+            temp=config.temp,
+            ks=ks,
+            db=db,
+            cf=cf,
+            bran=config.passcode,
+            free=False,
+        )
+        rgy = credentialing.Regery(
+            hby=hby, name=config.name, base=config.base, temp=config.temp, reger=reger
+        )
+        service = VerifierService(config, hby=hby, rgy=rgy, baser=baser, noter=noter)
+        yield service
+
+
+@contextmanager
+def running_service(config):
+    """Stop HIO tasks before leaving their borrowed resource contexts."""
+    with verifier_service(config) as runtime:
+        scheduler = doing.Doist(doers=[runtime])
+        try:
+            scheduler.enter()
+            yield runtime
+        finally:
+            scheduler.exit()

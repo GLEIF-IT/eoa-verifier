@@ -1,5 +1,6 @@
 """Real witnessed KERI/IPEX verification with isolated stores and local Anvil."""
 
+import pytest
 import shutil
 import subprocess
 from contextlib import ExitStack
@@ -28,14 +29,16 @@ from native_helpers import (
     replay,
     revoke_credential,
     rules,
+    verifier_service,
 )
 
-from eoa_verifier.serving import ServiceConfig, setup_service
+from eoa_verifier.serving import ServiceConfig
 from eoa_verifier.verification.constants import LE_SCHEMA, QVI_SCHEMA
 from eoa_verifier.verification.eoa import build_challenge
 
 
-def test_native_grant_verification_and_restart(tmp_path):
+@pytest.mark.parametrize("method", ["POST", "PUT"])
+def test_native_grant_verification_and_restart(tmp_path, method):
     """Exercise real witnessed GEDA/QVI/LE issuance, IPEX HTTP delivery and local Anvil.
 
     Own isolated native stores/processes with ExitStack and all network tasks with
@@ -87,8 +90,8 @@ def test_native_grant_verification_and_restart(tmp_path):
             head_dir=str(tmp_path),
             http_port=port,
         )
-        runtime = setup_service(config)
-        stack.callback(runtime.close)
+        service_stores = stack.enter_context(ExitStack())
+        runtime = service_stores.enter_context(verifier_service(config))
         client = http.Client(hostname="127.0.0.1", port=port)
         client_doer = http.ClientDoer(client=client)
         doers = [
@@ -96,16 +99,20 @@ def test_native_grant_verification_and_restart(tmp_path):
             *(d for r in resolvers for d in r.doers),
             *(d for i in issuers.values() for d in (i.registrar, i)),
             IssuerEscrows(list(issuers.values())),
-            *runtime.doers,
+            runtime,
             client_doer,
         ]
         finished = []
 
         def send(stream):
             """Yield while sending CESR bytes through the owned HTTP client; assert each transport ACK, return None."""
-            count = httping.streamCESRRequests(
-                client, bytearray(stream), runtime.hab.pre
-            )
+            if method == "POST":
+                count = httping.streamCESRRequests(
+                    client, bytearray(stream), runtime.hab.pre
+                )
+            else:
+                client.request(method="PUT", path="/", body=stream)
+                count = 1
             for _ in range(count):
                 while not client.responses:
                     yield 0.01
@@ -116,8 +123,15 @@ def test_native_grant_verification_and_restart(tmp_path):
             yield from send(stream)
             deadline = workflow.tyme + 10
             while True:
-                work = runtime.baser.get_verification(said)
-                if work is not None and work.state == expected:
+                store = (
+                    runtime.baser.pending
+                    if expected == "pending"
+                    else runtime.baser.results
+                )
+                work = store.get(keys=(said,))
+                if work is not None and (
+                    expected == "pending" or work.outcome == expected
+                ):
                     return work
                 assert workflow.tyme < deadline, (expected, work)
                 yield 0.01
@@ -222,29 +236,25 @@ def test_native_grant_verification_and_restart(tmp_path):
 
             # Deliver the association first, then reopen with its sources still absent.
             creder, evidence = yield from issue_association("delayed")
-            yield from deliver(evidence, creder.said, "awaiting_artifacts")
+            yield from deliver(evidence, creder.said, "pending")
             aid = runtime.hab.pre
-            workflow.remove([*runtime.doers, client_doer])
-            runtime.close()
-            runtime = setup_service(config)
-            stack.callback(runtime.close)
-            assert runtime.hab.pre == aid
-            assert (
-                runtime.baser.get_verification(creder.said).state
-                == "awaiting_artifacts"
-            )
+            workflow.remove([runtime, client_doer])
+            service_stores.close()
+            runtime = service_stores.enter_context(verifier_service(config))
             client = http.Client(hostname="127.0.0.1", port=port)
             client_doer = http.ClientDoer(client=client)
-            workflow.extend([*runtime.doers, client_doer])
+            workflow.extend([runtime, client_doer])
+            assert runtime.hab.pre == aid
+            assert runtime.baser.pending.get(keys=(creder.said,)) is not None
             # Supporting evidence alone resumes persisted work; no new Grant required.
             yield from deliver(
                 streams["geda"] + streams["qvi"], creder.said, "verified"
             )
             assert runtime.rgy.reger.saved.get(keys=(creder.said,))
             # Replaying the same Grant must retain the completed work record.
-            original = runtime.baser.get_verification(creder.said)
+            original = runtime.baser.results.get(keys=(creder.said,))
             yield from deliver(evidence, creder.said, "verified")
-            assert runtime.baser.get_verification(creder.said) == original
+            assert runtime.baser.results.get(keys=(creder.said,)) == original
 
             # Hold completion after a real RPC observation, then deliver native
             # revocation before applying the result. The final native recheck
@@ -260,9 +270,9 @@ def test_native_grant_verification_and_restart(tmp_path):
             coordinator.remove([verifier_loop])
             raced, stream = yield from issue_association("revoked-during-rpc")
             yield from send(stream)
-            while runtime.baser.get_verification(raced.said) is None:
+            while runtime.baser.pending.get(keys=(raced.said,)) is None:
                 yield 0.01
-            while coordinator.pending != raced.said:
+            while coordinator.inflight != raced.said:
                 coordinator.process_ready()
                 yield 0.01
             while not coordinator.eoa_verifier.cues:
@@ -273,8 +283,8 @@ def test_native_grant_verification_and_restart(tmp_path):
             while runtime.rgy.reger.tevers[raced.regi].vcState(raced.said).et != "rev":
                 yield 0.01
             coordinator.process_results()
-            rejected = runtime.baser.get_verification(raced.said)
-            assert rejected.state == "failed" and "revoked" in rejected.failureReason
+            rejected = runtime.baser.results.get(keys=(raced.said,))
+            assert rejected.outcome == "rejected" and "revoked" in rejected.reason
             coordinator.extend([verifier_loop])
 
             for label, options, reason in [
@@ -283,8 +293,8 @@ def test_native_grant_verification_and_restart(tmp_path):
                 ("issuer", {"holder": qvi}, "issuer does not match"),
             ]:
                 candidate, stream = yield from issue_association(label, **options)
-                work = yield from deliver(stream, candidate.said, "failed")
-                assert reason in work.failureReason, work
+                work = yield from deliver(stream, candidate.said, "rejected")
+                assert reason in work.reason, work
             finished.append(True)
             workflow.remove([d for d in workflow.doers if d is not task])
             return True

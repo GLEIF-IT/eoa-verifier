@@ -5,12 +5,7 @@ from __future__ import annotations
 from hio.base import doing
 from keri import kering
 
-from eoa_verifier.basing import (
-    STATE_AWAITING_ARTIFACTS,
-    STATE_VERIFYING,
-    VerificationWork,
-    VerifierBaser,
-)
+from eoa_verifier.basing import PendingVerification, VerificationResult, VerifierBaser
 from eoa_verifier.verification.credentials import grant_candidate, verify_association
 from eoa_verifier.verification.errors import (
     MissingCredentialArtifactsError,
@@ -25,7 +20,7 @@ class PresentationVerifierDoer(doing.DoDoer):
     RPC wait to catch evidence received during that wait. These are local native
     state reads, not periodic verification or network refresh. One association is
     in flight; missing material and RPC failures leave unfinished work retryable.
-    A verified terminal row is initial progress, not application acceptance.
+    A verified result is initial progress, not application acceptance.
     """
 
     def __init__(
@@ -34,8 +29,8 @@ class PresentationVerifierDoer(doing.DoDoer):
         baser: VerifierBaser,
         rgy,
         trusted_geda_aid: str,
-        association_schema: str = "",
-        eoa_verifier=None,
+        association_schema: str,
+        eoa_verifier,
         retry_delay: float = 5.0,
         **kwa,
     ):
@@ -44,7 +39,7 @@ class PresentationVerifierDoer(doing.DoDoer):
         trusted_geda_aid and association_schema define the trust/profile policy.
         eoa_verifier is required and exposes msgs/cues decks. retry_delay is HIO-clock
         seconds between failed initial attempts. retry_at maps SAIDs to eligible times;
-        pending is the dispatched SAID or None; scan_after is the last examined key.
+        inflight is the dispatched SAID or None; scan_after is the last examined key.
         These hints are in memory only: restart rediscovers durable unfinished work
         and may retry sooner. kwa supplies native DoDoer scheduling options.
         """
@@ -57,10 +52,8 @@ class PresentationVerifierDoer(doing.DoDoer):
         # These are scheduling hints only; operation state remains in VerifierBaser.
         # Restart may retry sooner, but cannot lose or falsely complete the work.
         self.retry_at = {}
-        self.pending = None
+        self.inflight = None
         self.scan_after = ""
-        if eoa_verifier is None:
-            raise ValueError("association verification requires an EOA worker")
         super().__init__(doers=[eoa_verifier, doing.doify(self.verify_do)], **kwa)
 
     def verify_do(self, tymth, tock=0.0, **opts):
@@ -78,25 +71,24 @@ class PresentationVerifierDoer(doing.DoDoer):
     def process_results(self) -> None:
         """Consume cues matching pending work and persist their status; return None.
 
-        Ignore unmatched cues or work no longer verifying. RPC failures set a retry
+        Ignore unmatched cues or work no longer pending. RPC failures set a retry
         hint; local invalidity fails the row. Success rechecks locally accepted native
-        state before completing the row. Account observations in the cue are not saved
-        by this increment. Unexpected storage or programming errors propagate.
+        state before completing the row. Store successful account observations with the
+        result. Unexpected storage or programming errors propagate.
         """
         while self.eoa_verifier.cues:
             cue = self.eoa_verifier.cues.popleft()
             said = cue["said"]
-            if said != self.pending:
+            if said != self.inflight:
                 continue
-            self.pending = None
-            op = self.baser.get_verification(said)
-            if op is None or op.state != STATE_VERIFYING:
+            self.inflight = None
+            op = self.baser.pending.get(keys=(said,))
+            if op is None:
                 continue
             if cue["kin"] == "retry":
-                self.baser.mark_verifying(op, cue["error"])
-                self.retry_at[said] = self.tyme + self.retry_delay
+                self._retry(op, cue["error"])
             elif cue["kin"] == "failed":
-                self.baser.mark_failed(op, cue["error"])
+                self._finish(op, "rejected", reason=cue["error"])
             elif cue["kin"] == "verified":
                 try:
                     # A revocation can arrive while the RPC client is waiting.
@@ -107,42 +99,39 @@ class PresentationVerifierDoer(doing.DoDoer):
                         trusted_geda_aid=self.trusted_geda_aid,
                     )
                 except MissingCredentialArtifactsError as exc:
-                    self.retry_at[said] = self.tyme + self.retry_delay
-                    self.baser.mark_awaiting_artifacts(op, str(exc))
+                    self._retry(op, str(exc))
                 except (VerificationError, kering.ValidationError) as exc:
-                    self.baser.mark_failed(op, str(exc))
+                    self._finish(op, "rejected", reason=str(exc))
                 else:
-                    self.baser.complete_verification(op)
+                    self._finish(op, "verified", verified=cue["verified"])
 
     def process_ready(self) -> None:
         """Skip scanning while busy; otherwise inspect at most one 32-record page.
 
-        Advance past terminal/cooling-down rows and attempt at most one association.
+        Advance past cooling-down rows and attempt at most one association.
         An empty page resets the scan for a later turn. No database cursor survives
         this method; mutations and network waits occur outside its read transaction.
         """
 
-        if self.pending is not None:
+        if self.inflight is not None:
             return
-        batch = self.baser.verification_batch(after=self.scan_after)
+        batch = self.baser.pending_batch(after=self.scan_after)
         if not batch:
             self.scan_after = ""
             return
         for op in batch:
             self.scan_after = op.associationSaid
-            if op.state not in (STATE_VERIFYING, STATE_AWAITING_ARTIFACTS):
-                continue
             if self.retry_at.get(op.associationSaid, 0) > self.tyme:
                 continue
             self.verify_operation(op)
             break  # At most one native verification attempt per scheduler turn.
 
-    def verify_operation(self, op: VerificationWork) -> VerificationWork:
-        """Check one unfinished row's native evidence and return its updated work record.
+    def verify_operation(self, op: PendingVerification) -> None:
+        """Check one pending row’s native evidence and dispatch it or record a decision.
 
-        Missing artifacts persist awaiting_artifacts and a retry hint; invalid evidence
-        persists failed. Success persists verifying before queueing the ACDC dictionary
-        and setting pending. Candidate Grant bytes may justify rejection but never
+        Missing artifacts retain pending work and a retry hint; invalid evidence
+        produces a rejected result. Success queues the ACDC dictionary
+        and tracks it as in flight. Candidate Grant bytes may justify rejection but never
         substitute for native acceptance. Persistence/programming errors propagate.
         """
 
@@ -159,16 +148,26 @@ class PresentationVerifierDoer(doing.DoDoer):
                 trusted_geda_aid=self.trusted_geda_aid,
             )
         except MissingCredentialArtifactsError as exc:
-            self.retry_at[op.associationSaid] = self.tyme + self.retry_delay
-            return self.baser.mark_awaiting_artifacts(op, str(exc))
+            self._retry(op, str(exc))
+            return
         except (VerificationError, kering.ValidationError) as exc:
-            self.retry_at.pop(op.associationSaid, None)
-            return self.baser.mark_failed(op, str(exc))
+            self._finish(op, "rejected", reason=str(exc))
+            return
 
         # The database remains the work list. The queue contains only the
         # current dispatch, so restart recovers work without queue persistence.
         self.retry_at.pop(op.associationSaid, None)
-        self.baser.mark_verifying(op, op.failureReason)
-        self.pending = op.associationSaid
+        self.inflight = op.associationSaid
         self.eoa_verifier.msgs.append(association.sad)
-        return op
+
+    def _retry(self, op, reason):
+        """Keep unfinished work durable and pace another attempt on the HIO clock."""
+        self.baser.note_pending(op.associationSaid, reason)
+        self.retry_at[op.associationSaid] = self.tyme + self.retry_delay
+
+    def _finish(self, op, outcome, *, reason="", verified=None):
+        """Persist the workflow decision and release its transient retry hint."""
+        self.baser.finish(
+            VerificationResult(op.associationSaid, outcome, reason, verified or {})
+        )
+        self.retry_at.pop(op.associationSaid, None)

@@ -1,64 +1,29 @@
 """Resource lifetime, store reopening and the standalone CLI boundary."""
 
+from contextlib import ExitStack
 from unittest.mock import patch
 
 import pytest
-from falcon.testing import TestClient
-from keri.app import indirecting
 
 from eoa_verifier.cli import main
-from eoa_verifier.serving import run_service, setup_service
+from eoa_verifier.serving import run_service
+from native_helpers import running_service, verifier_service
 
 
-def test_identity_progress_and_terminal_duplicates_survive_reopen(config):
-    """Reopen real native stores and prove duplicate Grants preserve identity and every work state."""
-    runtime = setup_service(config)
-    aid = runtime.hab.pre
-    try:
-        directors = [
-            d for d in runtime.doers if isinstance(d, indirecting.MailboxDirector)
-        ]
-        assert len(directors) == 1
-        assert TestClient(runtime.app).simulate_get("/health").json == {"ok": True}
-        for state in ("verifying", "awaiting_artifacts", "failed", "verified"):
-            work = runtime.baser.start_verification(
-                association_said=state, grant_said="first"
-            )
-            if state == "verified":
-                runtime.baser.complete_verification(work)
-            else:
-                getattr(runtime.baser, f"mark_{state}")(work, "retained")
-    finally:
-        runtime.close()
-    runtime = setup_service(config)
-    try:
-        assert runtime.hab.pre == aid
-        for state in ("verifying", "awaiting_artifacts", "failed", "verified"):
-            work = runtime.baser.start_verification(
-                association_said=state, grant_said="duplicate"
-            )
-            assert (work.state, work.grantSaid, work.failureReason) == (
-                state,
-                "first",
-                "" if state == "verified" else "retained",
-            )
-    finally:
-        runtime.close()
-
-
-def test_setup_failure_releases_all_previously_opened_stores(config):
+@pytest.mark.parametrize("failure", ["configing.openCF", "oobiing.Oobiery"])
+def test_setup_failure_releases_all_previously_opened_stores(config, failure):
     """Inject late setup failure; reopening the same paths detects leaked LMDB handles."""
     with (
         patch(
-            "eoa_verifier.serving.oobiing.Oobiery",
+            f"eoa_verifier.serving.{failure}",
             side_effect=RuntimeError("setup failure"),
         ),
         pytest.raises(RuntimeError, match="setup failure"),
     ):
-        setup_service(config)
+        run_service(config)
     # A leaked LMDB handle makes this reopen fail in the same process.
-    runtime = setup_service(config)
-    runtime.close()
+    with running_service(config):
+        pass
 
 
 def test_run_unwinds_on_scheduler_failure(config):
@@ -71,8 +36,8 @@ def test_run_unwinds_on_scheduler_failure(config):
         pytest.raises(RuntimeError, match="scheduler failure"),
     ):
         run_service(config)
-    runtime = setup_service(config)
-    runtime.close()
+    with running_service(config):
+        pass
 
 
 def test_cli_has_no_posting_options_and_requires_network(capsys):
@@ -85,20 +50,6 @@ def test_cli_has_no_posting_options_and_requires_network(capsys):
     assert "posting" not in help_text and "registry" not in help_text
 
 
-def test_failed_work_cannot_complete(config):
-    """Prove the completion guard rejects a persisted failed row in real storage."""
-    runtime = setup_service(config)
-    try:
-        work = runtime.baser.start_verification(
-            association_said="test", grant_said="grant"
-        )
-        runtime.baser.mark_failed(work, "invalid")
-        with pytest.raises(ValueError, match="unfinished"):
-            runtime.baser.complete_verification(work)
-    finally:
-        runtime.close()
-
-
 def test_forged_said_cannot_create_verification_work(config):
     """Stub EXN lookup only; native ACDC decoding must reject tampering before persistence."""
     from types import SimpleNamespace
@@ -109,7 +60,8 @@ def test_forged_said_cannot_create_verification_work(config):
 
     association = candidate()
     association["u"] = "tampered after SAID computation"
-    runtime = setup_service(config)
+    lifetime = ExitStack()
+    runtime = lifetime.enter_context(running_service(config))
     try:
         grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
         # Stub envelope lookup only; the production native ACDC validator must
@@ -122,6 +74,86 @@ def test_forged_said_cannot_create_verification_work(config):
             pytest.raises(InvalidGrantError),
         ):
             grants.process_grant_notice({"d": "grant"})
-        assert runtime.baser.get_verification(association["d"]) is None
+        assert runtime.baser.pending.get(keys=(association["d"],)) is None
     finally:
-        runtime.close()
+        lifetime.close()
+
+
+@pytest.mark.parametrize("mode", ["complete", "cancel", "exception", "partial-enter"])
+def test_service_owns_children_before_stores(config, mode):
+    """Every HIO exit path stops children while stores remain open and closes HTTP once."""
+    from hio.base import doing
+    from hio.core import http
+    from unittest.mock import Mock
+    from eoa_verifier.serving import VerifierService
+
+    stopped = []
+
+    class Child(doing.Doer):
+        def exit(self):
+            assert service.baser.opened and service.hby.db.opened
+            stopped.append(True)
+
+    class BrokenEntry(doing.Doer):
+        def enter(self, *, temp=None):
+            raise RuntimeError("entry failure")
+
+    class Service(VerifierService):
+        def __init__(self, *args, **kwa):
+            super().__init__(*args, **kwa)
+            self.server = next(
+                d.server for d in self.doers if isinstance(d, http.ServerDoer)
+            )
+            self.server.close = Mock(wraps=self.server.close)
+            self.doers.append(Child())
+            if mode == "partial-enter":
+                self.doers.append(BrokenEntry())
+
+        def recur(self, tyme):
+            if mode == "exception":
+                raise RuntimeError("child lifetime failure")
+            if mode == "complete":
+                return True
+            return super().recur(tyme)
+
+    with (
+        patch("eoa_verifier.serving.VerifierService", Service),
+        verifier_service(config) as service,
+    ):
+        scheduler = doing.Doist(tock=0.01, limit=0.02)
+        if mode in ("exception", "partial-enter"):
+            with pytest.raises(RuntimeError, match="failure"):
+                scheduler.do(doers=[service])
+        else:
+            scheduler.do(doers=[service])
+        assert service.baser.opened and service.hby.db.opened
+    assert stopped == [True]
+    assert not service.baser.opened and not service.hby.db.opened
+    assert not service.server.servant.opened
+    assert service.server.close.call_count == 1
+    with running_service(config) as reopened:
+        assert reopened.hab.pre == service.hab.pre
+
+
+def test_cleanup_failure_still_stops_siblings_before_stores(config):
+    """A failed finalizer must not strand siblings or close their stores early."""
+    from hio.base import doing
+
+    stopped = []
+
+    class Borrower(doing.Doer):
+        def exit(self):
+            assert service.baser.opened and service.hby.db.opened
+            stopped.append(True)
+
+    class Broken(doing.Doer):
+        def exit(self):
+            raise RuntimeError("cleanup failure")
+
+    with pytest.raises(ExceptionGroup, match="Service cleanup failed") as caught:
+        with running_service(config) as service:
+            service.extend([Borrower(), Broken()])
+
+    assert stopped == [True]
+    assert [str(error) for error in caught.value.exceptions] == ["cleanup failure"]
+    assert not service.baser.opened and not service.hby.db.opened

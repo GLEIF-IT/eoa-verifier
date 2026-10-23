@@ -32,6 +32,8 @@ periodic verification/account checks.
 | Module                                   | Responsibility                                                                    |
 | ---------------------------------------- | --------------------------------------------------------------------------------- |
 | `cli`, `serving`                         | Configuration, native stores, shared parser and HIO task/resource ownership.      |
+| `receiving/directing`                    | Receive CESR POST/PUT and schedule shared native parsing and escrows.             |
+| `authing`                                | Authenticate service messages and ACKs; claim durable transport nonces.          |
 | `receiving/grants`                       | Decode authenticated native Grants, replay embeds and create duplicate-safe work. |
 | `basing`                                 | Persist initial-verification progress keyed by association SAID.                  |
 | `verification/coordinating`              | Scan bounded work pages, dispatch one association and apply results.              |
@@ -41,17 +43,42 @@ periodic verification/account checks.
 
 Initial flow: native Grant acceptance → embed replay and durable work → native
 credential checks → wallet proof and chain/block/code observation → final local
-native-state check after the RPC wait → terminal work status. Missing artifacts
+native-state check after the RPC wait → a completed result. Missing artifacts
 or unusable RPC responses leave unfinished work for retry. Native acceptance is
 separate from receipt of bytes; KELs, TELs, credentials and schemas live in the
 native Habery/Reger stores, not in the work record.
 
-Work states are `verifying` (ready, in flight or awaiting RPC retry),
-`awaiting_artifacts` (missing native evidence), `verified` (initial checks passed)
-and `failed` (initial checks rejected). Restart rediscovers unfinished rows;
-duplicate Grants do not reset them. `verified` does not mean application
-acceptance, webhook delivery or Ethereum endorsement. The worker emits an account
-observation, but this increment does not persist it in `VerificationWork`.
+Unfinished verification lives in `pending`; completed initial checks live in
+`results` with a `verified` or `rejected` outcome. Completion writes the result
+and removes pending work in one LMDB transaction. Duplicate Grants preserve the
+first Grant and never re-enqueue completed work. Verified results retain the
+wallet and initial account observation; they do not mean application acceptance,
+webhook delivery or Ethereum endorsement. Restart rediscovers pending work.
+
+`run_service()` owns shared stores through native KERIpy context managers.
+`VerifierService` borrows those stores and composes the HIO tasks. HIO stops
+children before the outer contexts close stores, including startup failure and
+cancellation. Native network Doers own sockets; persistent stores survive shutdown.
+
+Direct intake uses `CesrEnd` on `/`: native CESR JSON/header POST and raw
+CESR-stream PUT, with 204 acknowledging intake only. Explicit POST queries are
+unsupported; PUT streams are not filtered. `Receiver` schedules the shared native
+parser and escrows. There is no mailbox polling, mailbox store or SSE query service.
+
+## Service authentication primitives
+
+`authing.ServiceAuthenticator` signs and authenticates exact HTTP body bytes with
+the native service habitat and one configured peer AID. It uses the pinned KERI
+`Signature-Input`/`Signature` format, checks locally accepted current keys, and
+stores nonce claims in `VerifierBaser` across restart. Single-key transferable
+Ed25519 service AIDs at threshold one are supported. See the
+[transport profile](protocol/verifier-api-v1/README.md#transport-signature-profile).
+
+These are callable primitives for the later sender/intake integrations; this
+increment adds no authenticated delivery route, retry worker or public status API.
+Authenticated messages do not establish durable application acceptance. The caller
+commits application state before signing an ACK and validates the ACK payload
+before marking delivery complete.
 
 ## Test
 
