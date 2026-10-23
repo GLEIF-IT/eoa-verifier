@@ -34,7 +34,7 @@ def test_consumed_notification_removes_all_native_records(config, kind):
         assert noter.getNotes() == []
         assert noter.nidx.get(keys=(notice.rid,)) is None
         assert noter.ncigs.get(keys=(notice.rid,)) is None
-        assert (runtime.baser.get_verification(association["d"]) is not None) == (
+        assert (runtime.baser.pending.get(keys=(association["d"],)) is not None) == (
             kind == "accepted"
         )
     finally:
@@ -54,7 +54,7 @@ def test_internal_failure_preserves_notification(config, boundary, error):
         target, method = (
             (grants.parser, "onceParsator")
             if boundary == "parser"
-            else (runtime.baser, "start_verification")
+            else (runtime.baser, "enqueue")
         )
         # Include an embed stream only when exercising the parser boundary.
         with (
@@ -70,7 +70,7 @@ def test_internal_failure_preserves_notification(config, boundary, error):
         ):
             grants.process_notes()
         assert grants.notifier.noter.get(notice.rid)[0].raw == notice.raw
-        assert runtime.baser.get_verification(association["d"]) is None
+        assert runtime.baser.pending.get(keys=(association["d"],)) is None
     finally:
         runtime.close()
 
@@ -161,7 +161,7 @@ def test_signed_bad_embed_is_consumed_and_valid_work_progresses(config, bad):
             good = candidate()
             signed_notice(runtime, grants, sender, good)
             grants.process_notes()
-            assert runtime.baser.get_verification(good["d"]) is not None
+            assert runtime.baser.pending.get(keys=(good["d"],)) is not None
         runtime.close()
         runtime = setup_service(config)
         grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))

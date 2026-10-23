@@ -11,7 +11,7 @@ from keri import kering
 from keri.core import serdering
 from keri.peer import exchanging
 
-from eoa_verifier.basing import VerificationWork, VerifierBaser
+from eoa_verifier.basing import PendingVerification, VerificationResult, VerifierBaser
 
 
 class GrantNotReadyError(Exception):
@@ -130,8 +130,8 @@ class GrantNotificationDoer(doing.Doer):
         finally:
             parser.close()
 
-    def process_grant_notice(self, attrs: dict[str, Any]) -> VerificationWork | None:
-        """Replay a decoded Grant's anc/iss/acdc streams and return durable work.
+    def process_grant_notice(self, attrs: dict[str, Any]) -> None:
+        """Replay a decoded Grant’s embeds and enqueue new work, or record intake rejection.
 
         Only supplied embeds with attachments are replayed. Native parsing may escrow
         evidence; creating work does not assert acceptance. Repeated matching Grants
@@ -152,21 +152,16 @@ class GrantNotificationDoer(doing.Doer):
         acdc = creder.sad
         association_said = acdc["d"]
         association_schema = acdc.get("s", "")
+        if not self.baser.enqueue(PendingVerification(association_said, grant_said)):
+            return
         if association_schema != self.expected_association_schema:
-            op = self.baser.start_verification(
-                association_said=association_said,
-                grant_said=grant_said,
+            self.baser.finish(
+                VerificationResult(
+                    association_said,
+                    "rejected",
+                    f"association schema {association_schema} does not match expected {self.expected_association_schema}",
+                )
             )
-            return self.baser.mark_failed(
-                op,
-                f"association schema {association_schema} does not match expected {self.expected_association_schema}",
-            )
-
-        op = self.baser.start_verification(
-            association_said=association_said,
-            grant_said=grant_said,
-        )
-        return op
 
     def _read_grant(self, attrs):
         """Return (Grant SAID, native ACDC, replay bytearrays) from notification attributes.

@@ -116,8 +116,15 @@ def test_native_grant_verification_and_restart(tmp_path):
             yield from send(stream)
             deadline = workflow.tyme + 10
             while True:
-                work = runtime.baser.get_verification(said)
-                if work is not None and work.state == expected:
+                store = (
+                    runtime.baser.pending
+                    if expected == "awaiting_artifacts"
+                    else runtime.baser.results
+                )
+                work = store.get(keys=(said,))
+                if work is not None and (
+                    expected == "awaiting_artifacts" or work.outcome == expected
+                ):
                     return work
                 assert workflow.tyme < deadline, (expected, work)
                 yield 0.01
@@ -229,10 +236,7 @@ def test_native_grant_verification_and_restart(tmp_path):
             runtime = setup_service(config)
             stack.callback(runtime.close)
             assert runtime.hab.pre == aid
-            assert (
-                runtime.baser.get_verification(creder.said).state
-                == "awaiting_artifacts"
-            )
+            assert runtime.baser.pending.get(keys=(creder.said,)) is not None
             client = http.Client(hostname="127.0.0.1", port=port)
             client_doer = http.ClientDoer(client=client)
             workflow.extend([*runtime.doers, client_doer])
@@ -242,9 +246,9 @@ def test_native_grant_verification_and_restart(tmp_path):
             )
             assert runtime.rgy.reger.saved.get(keys=(creder.said,))
             # Replaying the same Grant must retain the completed work record.
-            original = runtime.baser.get_verification(creder.said)
+            original = runtime.baser.results.get(keys=(creder.said,))
             yield from deliver(evidence, creder.said, "verified")
-            assert runtime.baser.get_verification(creder.said) == original
+            assert runtime.baser.results.get(keys=(creder.said,)) == original
 
             # Hold completion after a real RPC observation, then deliver native
             # revocation before applying the result. The final native recheck
@@ -260,9 +264,9 @@ def test_native_grant_verification_and_restart(tmp_path):
             coordinator.remove([verifier_loop])
             raced, stream = yield from issue_association("revoked-during-rpc")
             yield from send(stream)
-            while runtime.baser.get_verification(raced.said) is None:
+            while runtime.baser.pending.get(keys=(raced.said,)) is None:
                 yield 0.01
-            while coordinator.pending != raced.said:
+            while coordinator.inflight != raced.said:
                 coordinator.process_ready()
                 yield 0.01
             while not coordinator.eoa_verifier.cues:
@@ -273,8 +277,8 @@ def test_native_grant_verification_and_restart(tmp_path):
             while runtime.rgy.reger.tevers[raced.regi].vcState(raced.said).et != "rev":
                 yield 0.01
             coordinator.process_results()
-            rejected = runtime.baser.get_verification(raced.said)
-            assert rejected.state == "failed" and "revoked" in rejected.failureReason
+            rejected = runtime.baser.results.get(keys=(raced.said,))
+            assert rejected.outcome == "rejected" and "revoked" in rejected.reason
             coordinator.extend([verifier_loop])
 
             for label, options, reason in [
@@ -283,8 +287,8 @@ def test_native_grant_verification_and_restart(tmp_path):
                 ("issuer", {"holder": qvi}, "issuer does not match"),
             ]:
                 candidate, stream = yield from issue_association(label, **options)
-                work = yield from deliver(stream, candidate.said, "failed")
-                assert reason in work.failureReason, work
+                work = yield from deliver(stream, candidate.said, "rejected")
+                assert reason in work.reason, work
             finished.append(True)
             workflow.remove([d for d in workflow.doers if d is not task])
             return True

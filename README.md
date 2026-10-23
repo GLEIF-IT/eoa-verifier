@@ -46,12 +46,12 @@ or unusable RPC responses leave unfinished work for retry. Native acceptance is
 separate from receipt of bytes; KELs, TELs, credentials and schemas live in the
 native Habery/Reger stores, not in the work record.
 
-Work states are `verifying` (ready, in flight or awaiting RPC retry),
-`awaiting_artifacts` (missing native evidence), `verified` (initial checks passed)
-and `failed` (initial checks rejected). Restart rediscovers unfinished rows;
-duplicate Grants do not reset them. `verified` does not mean application
-acceptance, webhook delivery or Ethereum endorsement. The worker emits an account
-observation, but this increment does not persist it in `VerificationWork`.
+Unfinished verification lives in `pending`; completed initial checks live in
+`results` with a `verified` or `rejected` outcome. Completion writes the result
+and removes pending work in one LMDB transaction. Duplicate Grants preserve the
+first Grant and never re-enqueue completed work. Verified results retain the
+wallet and initial account observation; they do not mean application acceptance,
+webhook delivery or Ethereum endorsement. Restart rediscovers pending work.
 
 ## Service authentication primitives
 

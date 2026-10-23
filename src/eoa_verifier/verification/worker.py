@@ -25,8 +25,8 @@ class EoaVerifierDoer(doing.DoDoer):
     - {kin: "retry", said, error} for unavailable or unusable RPC responses.
 
     observation contains chainId and blockNumber integers, blockHash and code hex
-    strings, and observedAt ISO timestamp. It is emitted, not persisted here or in
-    VerificationWork. The coordinator alone persists work status. Programming errors
+    strings, and observedAt ISO timestamp. The coordinator persists successful
+    observations with completed results; this worker owns no application storage. Programming errors
     propagate instead of becoming retry cues. Each HTTP ClientDoer is a child whose
     lifetime ends on completion, failure or cancellation.
     """

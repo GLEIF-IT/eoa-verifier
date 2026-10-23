@@ -3,47 +3,9 @@
 from unittest.mock import patch
 
 import pytest
-from falcon.testing import TestClient
-from keri.app import indirecting
 
 from eoa_verifier.cli import main
 from eoa_verifier.serving import run_service, setup_service
-
-
-def test_identity_progress_and_terminal_duplicates_survive_reopen(config):
-    """Reopen real native stores and prove duplicate Grants preserve identity and every work state."""
-    runtime = setup_service(config)
-    aid = runtime.hab.pre
-    try:
-        directors = [
-            d for d in runtime.doers if isinstance(d, indirecting.MailboxDirector)
-        ]
-        assert len(directors) == 1
-        assert TestClient(runtime.app).simulate_get("/health").json == {"ok": True}
-        for state in ("verifying", "awaiting_artifacts", "failed", "verified"):
-            work = runtime.baser.start_verification(
-                association_said=state, grant_said="first"
-            )
-            if state == "verified":
-                runtime.baser.complete_verification(work)
-            else:
-                getattr(runtime.baser, f"mark_{state}")(work, "retained")
-    finally:
-        runtime.close()
-    runtime = setup_service(config)
-    try:
-        assert runtime.hab.pre == aid
-        for state in ("verifying", "awaiting_artifacts", "failed", "verified"):
-            work = runtime.baser.start_verification(
-                association_said=state, grant_said="duplicate"
-            )
-            assert (work.state, work.grantSaid, work.failureReason) == (
-                state,
-                "first",
-                "" if state == "verified" else "retained",
-            )
-    finally:
-        runtime.close()
 
 
 def test_setup_failure_releases_all_previously_opened_stores(config):
@@ -85,20 +47,6 @@ def test_cli_has_no_posting_options_and_requires_network(capsys):
     assert "posting" not in help_text and "registry" not in help_text
 
 
-def test_failed_work_cannot_complete(config):
-    """Prove the completion guard rejects a persisted failed row in real storage."""
-    runtime = setup_service(config)
-    try:
-        work = runtime.baser.start_verification(
-            association_said="test", grant_said="grant"
-        )
-        runtime.baser.mark_failed(work, "invalid")
-        with pytest.raises(ValueError, match="unfinished"):
-            runtime.baser.complete_verification(work)
-    finally:
-        runtime.close()
-
-
 def test_forged_said_cannot_create_verification_work(config):
     """Stub EXN lookup only; native ACDC decoding must reject tampering before persistence."""
     from types import SimpleNamespace
@@ -122,6 +70,6 @@ def test_forged_said_cannot_create_verification_work(config):
             pytest.raises(InvalidGrantError),
         ):
             grants.process_grant_notice({"d": "grant"})
-        assert runtime.baser.get_verification(association["d"]) is None
+        assert runtime.baser.pending.get(keys=(association["d"],)) is None
     finally:
         runtime.close()

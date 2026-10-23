@@ -5,47 +5,46 @@ from unittest.mock import patch
 from hio.base import tyming
 from keri.db import dbing
 
-from eoa_verifier.basing import VerifierBaser
+from eoa_verifier.basing import VerifierBaser, PendingVerification, VerificationResult
 from eoa_verifier.verification.coordinating import PresentationVerifierDoer
 from eoa_verifier.verification.errors import MissingCredentialArtifactsError
 from eoa_verifier.verification.worker import EoaVerifierDoer
 
 
-def test_work_scan_is_bounded_and_resumes_after_terminal_records():
-    """Page through real LMDB history, observing between-page writes and stopping at the final key."""
+def test_pending_scan_excludes_results_and_bounds_pages():
+    """Completed history never participates in pending scans; pages see intervening writes."""
     with dbing.openLMDB(cls=VerifierBaser) as baser:
         for i in range(65):
-            work = baser.start_verification(association_said=f"{i:03}", grant_said="")
-            baser.complete_verification(work)
-        page = baser.verification_batch()
+            baser.enqueue(PendingVerification(f"done-{i}", "first"))
+            baser.finish(VerificationResult(f"done-{i}", "verified"))
+            baser.enqueue(PendingVerification(f"{i:03}", "first"))
+        page = baser.pending_batch()
         assert len(page) == 32
-        # Mutations between pages must be visible; no read transaction is retained.
-        work = baser.start_verification(association_said="065", grant_said="")
-        baser.mark_awaiting_artifacts(work, "missing")
-        page = baser.verification_batch(after=page[-1].associationSaid)
+        baser.enqueue(PendingVerification("065", "first"))
+        page = baser.pending_batch(after=page[-1].associationSaid)
         assert len(page) == 32 and page[-1].associationSaid == "063"
-        page = baser.verification_batch(after="063")
-        assert [work.associationSaid for work in page] == ["064", "065"]
-        assert page[-1].state == "awaiting_artifacts"
-        assert baser.verification_batch(after="065") == []
-        assert baser.verification_batch(after="999") == []
+        assert [w.associationSaid for w in baser.pending_batch(after="063")] == [
+            "064",
+            "065",
+        ]
+        assert baser.pending_batch(after="065") == []
 
 
 def test_busy_worker_skips_scan_and_missing_artifacts_wait_fairly():
     """Use a controlled HIO clock and simulated missing evidence to check busy, fairness and cooldown rules."""
     with dbing.openLMDB(cls=VerifierBaser) as baser:
         for said in ("a", "b"):
-            baser.start_verification(association_said=said, grant_said="")
+            baser.enqueue(PendingVerification(said, ""))
         clock = tyming.Tymist()
         worker = EoaVerifierDoer(rpc_url="http://unused", chain_id=31337)
         coordinator = PresentationVerifierDoer(
             baser=baser, rgy=None, trusted_geda_aid="", eoa_verifier=worker
         )
         coordinator.wind(clock.tymen())
-        coordinator.pending = "busy"
-        with patch.object(baser, "verification_batch", side_effect=AssertionError):
+        coordinator.inflight = "busy"
+        with patch.object(baser, "pending_batch", side_effect=AssertionError):
             coordinator.process_ready()
-        coordinator.pending = None
+        coordinator.inflight = None
         # Simulate missing native evidence only; use actual work storage and clock.
         with (
             patch("eoa_verifier.verification.coordinating.grant_candidate"),
@@ -66,4 +65,27 @@ def test_busy_worker_skips_scan_and_missing_artifacts_wait_fairly():
             assert verify.call_count == 3
             coordinator.process_ready()
             assert verify.call_count == 4
-            assert baser.get_verification("a").state == "awaiting_artifacts"
+            assert baser.pending.get(keys=("a",)).reason == "missing"
+
+
+def test_rpc_retry_and_success_move_only_on_completion():
+    """A temporary RPC failure remains pending; a successful cue persists its observation."""
+    with dbing.openLMDB(cls=VerifierBaser) as baser:
+        baser.enqueue(PendingVerification("a", "first"))
+        worker = EoaVerifierDoer(rpc_url="http://unused", chain_id=31337)
+        coordinator = PresentationVerifierDoer(
+            baser=baser, rgy=None, trusted_geda_aid="", eoa_verifier=worker
+        )
+        coordinator.wind(tyming.Tymist().tymen())
+        coordinator.inflight = "a"
+        worker.cues.append({"kin": "retry", "said": "a", "error": "RPC unavailable"})
+        coordinator.process_results()
+        assert baser.pending.get(keys=("a",)).reason == "RPC unavailable"
+        assert baser.results.get(keys=("a",)) is None
+        coordinator.inflight = "a"
+        observation = {"wallet": "wallet", "observation": {"chainId": 31337}}
+        worker.cues.append({"kin": "verified", "said": "a", "verified": observation})
+        with patch("eoa_verifier.verification.coordinating.verify_association"):
+            coordinator.process_results()
+        assert baser.pending.get(keys=("a",)) is None
+        assert baser.results.get(keys=("a",)).verified == observation
