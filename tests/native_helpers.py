@@ -318,7 +318,7 @@ def association_from_challenge(challenge, signature, registry):
 @contextmanager
 def verifier_service(config):
     """Own native stores around a service whose HIO lifetime the caller schedules."""
-    from keri.app import keeping, configing, notifying, storing
+    from keri.app import keeping, configing, notifying
     from keri.db import basing, dbing
     from keri.vdr import viring, credentialing
     from eoa_verifier.basing import VerifierBaser
@@ -332,7 +332,6 @@ def verifier_service(config):
         viring.openReger(temp=config.temp, db=db, **options) as reger,
         dbing.openLMDB(cls=VerifierBaser, temp=config.temp, **options) as baser,
         dbing.openLMDB(cls=notifying.Noter, temp=config.temp, **options) as noter,
-        dbing.openLMDB(cls=storing.Mailboxer, temp=config.temp, **options) as mbx,
     ):
         hby = habbing.Habery(
             name=config.name,
@@ -347,9 +346,7 @@ def verifier_service(config):
         rgy = credentialing.Regery(
             hby=hby, name=config.name, base=config.base, temp=config.temp, reger=reger
         )
-        service = VerifierService(
-            config, hby=hby, rgy=rgy, baser=baser, noter=noter, mbx=mbx
-        )
+        service = VerifierService(config, hby=hby, rgy=rgy, baser=baser, noter=noter)
         yield service
 
 

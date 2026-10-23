@@ -1,5 +1,6 @@
 """Real witnessed KERI/IPEX verification with isolated stores and local Anvil."""
 
+import pytest
 import shutil
 import subprocess
 from contextlib import ExitStack
@@ -36,7 +37,8 @@ from eoa_verifier.verification.constants import LE_SCHEMA, QVI_SCHEMA
 from eoa_verifier.verification.eoa import build_challenge
 
 
-def test_native_grant_verification_and_restart(tmp_path):
+@pytest.mark.parametrize("method", ["POST", "PUT"])
+def test_native_grant_verification_and_restart(tmp_path, method):
     """Exercise real witnessed GEDA/QVI/LE issuance, IPEX HTTP delivery and local Anvil.
 
     Own isolated native stores/processes with ExitStack and all network tasks with
@@ -104,9 +106,13 @@ def test_native_grant_verification_and_restart(tmp_path):
 
         def send(stream):
             """Yield while sending CESR bytes through the owned HTTP client; assert each transport ACK, return None."""
-            count = httping.streamCESRRequests(
-                client, bytearray(stream), runtime.hab.pre
-            )
+            if method == "POST":
+                count = httping.streamCESRRequests(
+                    client, bytearray(stream), runtime.hab.pre
+                )
+            else:
+                client.request(method="PUT", path="/", body=stream)
+                count = 1
             for _ in range(count):
                 while not client.responses:
                     yield 0.01

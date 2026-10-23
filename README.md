@@ -58,6 +58,11 @@ webhook delivery or Ethereum endorsement. Restart rediscovers pending work.
 children before the outer contexts close stores, including startup failure and
 cancellation. Native network Doers own sockets; persistent stores survive shutdown.
 
+Direct intake uses `CesrEnd` on `/`: native CESR JSON/header POST and raw
+CESR-stream PUT, with 204 acknowledging intake only. Explicit POST queries are
+unsupported; PUT streams are not filtered. `Receiver` schedules the shared native
+parser and escrows. There is no mailbox polling, mailbox store or SSE query service.
+
 ## Service authentication primitives
 
 `authing.ServiceAuthenticator` signs and authenticates exact HTTP body bytes with

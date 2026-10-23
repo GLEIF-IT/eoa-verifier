@@ -8,24 +8,24 @@ from pathlib import Path
 import falcon
 from hio.base import doing
 from hio.core import http, tcp
+from hio.help import decking
 from keri.app import (
     configing,
     habbing,
     httping,
-    indirecting,
     keeping,
     notifying,
     oobiing,
-    storing,
 )
-from keri.core import coring
+from keri.core import coring, eventing, parsing, routing
 from keri.db import basing, dbing
 from keri.end import ending
 from keri.peer import exchanging
 from keri.vc import protocoling
-from keri.vdr import credentialing, verifying, viring
+from keri.vdr import credentialing, eventing as veventing, verifying, viring
 
 from .basing import VerifierBaser
+from .receiving.directing import CesrEnd, Receiver
 from .receiving.grants import GrantNotificationDoer
 from .verification.constants import ASSOCIATION_SCHEMA
 from .verification.coordinating import PresentationVerifierDoer
@@ -73,7 +73,7 @@ class ServiceConfig:
 class VerifierService(doing.DoDoer):
     """Own service tasks and sockets while borrowing the caller's open stores."""
 
-    def __init__(self, config, *, hby, rgy, baser, noter, mbx, **kwa):
+    def __init__(self, config, *, hby, rgy, baser, noter, **kwa):
         """Wire native verification and HTTP tasks without owning shared stores."""
         self.config = config
         inits = {
@@ -97,26 +97,30 @@ class VerifierService(doing.DoDoer):
         exc = exchanging.Exchanger(hby=hby, handlers=[])
         protocoling.loadHandlers(hby=hby, exc=exc, notifier=notifier)
         verifier = verifying.Verifier(hby=hby, reger=rgy.reger)
-        rep = storing.Respondant(hby=hby, mbx=mbx)
-        director = indirecting.MailboxDirector(
-            hby=hby,
-            topics=[
-                "/receipt",
-                "/replay",
-                "/credential",
-                "/delegate",
-                "/challenge",
-            ],
-            verifier=verifier,
-            exc=exc,
-            rep=rep,
+        cues = decking.Deck()
+        router = routing.Router()
+        rvy = routing.Revery(db=hby.db, rtr=router, lax=True, local=False)
+        kvy = eventing.Kevery(
+            db=hby.db, cues=cues, rvy=rvy, lax=True, local=False, direct=False
         )
-        # Direct HTTP, mailbox delivery and Grant embeds share this parser.
-        # MailboxDirector alone schedules inbound parsing and escrow processing.
+        kvy.registerReplyRoutes(router)
+        tvy = veventing.Tevery(
+            reger=rgy.reger, db=hby.db, rvy=rvy, cues=cues, lax=True, local=False
+        )
+        tvy.registerReplyRoutes(router)
+        parser = parsing.Parser(
+            framed=True, kvy=kvy, tvy=tvy, exc=exc, rvy=rvy, vry=verifier
+        )
+        # HTTP and Grant embeds share native processors; Receiver owns their scheduling.
+        receiver = Receiver(
+            parser,
+            msg_tock=hby.tocks["mailboxMsg"],
+            escrow_tock=hby.tocks["mailboxEscrow"],
+        )
         app = falcon.App()
         ending.loadEnds(app=app, hby=hby, default=hab.pre)
         oobiing.loadEnds(app=app, hby=hby, prefix="/ext")
-        app.add_route("/", indirecting.HttpEnd(rxbs=director.ims, mbx=mbx))
+        app.add_route("/", CesrEnd(rxbs=parser.ims))
         app.add_route("/health", HealthEnd())
         server = http.Server(
             host=config.host,
@@ -132,14 +136,13 @@ class VerifierService(doing.DoDoer):
         oobiery = oobiing.Oobiery(hby=hby, clienter=httping.Clienter())
         doers = [
             *oobiery.doers,
-            rep,
-            director,
+            receiver,
             http.ServerDoer(server=server),
             GrantNotificationDoer(
                 baser=baser,
                 hby=hby,
                 notifier=notifier,
-                parser=director.parser,
+                parser=parser,
                 expected_association_schema=ASSOCIATION_SCHEMA,
             ),
             PresentationVerifierDoer(
@@ -193,7 +196,6 @@ def run_service(config: ServiceConfig, *, expire: float = 0.0):
         viring.openReger(temp=config.temp, db=db, **options) as reger,
         dbing.openLMDB(cls=VerifierBaser, temp=config.temp, **options) as baser,
         dbing.openLMDB(cls=notifying.Noter, temp=config.temp, **options) as noter,
-        dbing.openLMDB(cls=storing.Mailboxer, temp=config.temp, **options) as mbx,
     ):
         hby = habbing.Habery(
             name=config.name,
@@ -208,9 +210,7 @@ def run_service(config: ServiceConfig, *, expire: float = 0.0):
         rgy = credentialing.Regery(
             hby=hby, name=config.name, base=config.base, temp=config.temp, reger=reger
         )
-        service = VerifierService(
-            config, hby=hby, rgy=rgy, baser=baser, noter=noter, mbx=mbx
-        )
+        service = VerifierService(config, hby=hby, rgy=rgy, baser=baser, noter=noter)
         print(
             f"eoa-verifier serving {service.hab.pre} on {config.host}:{config.http_port}",
             flush=True,
