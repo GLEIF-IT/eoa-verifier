@@ -173,7 +173,7 @@ def test_rotated_peer_state_survives_service_restart(tmp_path):
     """Reopen actual service stores and authenticate with persisted rotated peer key state."""
     from keri import core
     from eoa_verifier.serving import ServiceConfig
-    from native_helpers import running_service
+    from native_helpers import entered_service
 
     config = ServiceConfig(
         trusted_geda_aid=core.Signer().verfer.qb64,
@@ -183,7 +183,7 @@ def test_rotated_peer_state_survives_service_restart(tmp_path):
         http_port=0,
     )
     lifetime = ExitStack()
-    runtime = lifetime.enter_context(running_service(config))
+    runtime = lifetime.enter_context(entered_service(config))
     try:
         with habbing.openHby(name="remote", temp=True) as hby:
             remote = hby.makeHab(name="remote")
@@ -196,7 +196,7 @@ def test_rotated_peer_state_survives_service_restart(tmp_path):
             aid = runtime.hab.pre
             lifetime.close()
             lifetime = ExitStack()
-            runtime = lifetime.enter_context(running_service(config))
+            runtime = lifetime.enter_context(entered_service(config))
             assert runtime.hab.pre == aid
             receiver = ServiceAuthenticator(
                 hab=runtime.hab, baser=runtime.baser, peer_aid=remote.pre

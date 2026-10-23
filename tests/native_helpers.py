@@ -133,14 +133,12 @@ def grant(
     creder,
     recipient,
     *,
-    include_issuance=True,
-    include_anchor=True,
     acdc=None,
 ) -> bytes:
     """Return native IPEX Grant bytes addressed to recipient from the supplied issuer stores.
 
-    Use the issued creder plus native issuance/anchor embeds by default; flags can
-    omit those embeds and acdc can override serialized credential bytes. Source
+    Use the issued creder plus native issuance/anchor embeds; acdc can override
+    serialized credential bytes. Source
     credentials travel separately so tests can withhold them. This builds, not sends.
     """
     acdc = (
@@ -158,8 +156,8 @@ def grant(
         recp=recipient,
         message="External association",
         acdc=acdc,
-        iss=iss if include_issuance else None,
-        anc=anc if include_anchor else None,
+        iss=iss,
+        anc=anc,
     )
     return exn.raw + attachments
 
@@ -320,7 +318,7 @@ def verifier_service(config):
     """Yield a service borrowing native stores owned by this fixture.
 
     The caller must stop its HIO scheduler before leaving this context. Use
-    running_service when explicit scheduling control is unnecessary. Persistent
+    entered_service to enter and exit HIO tasks without advancing scheduler turns. Persistent
     configs retain files for reopening assertions; temporary configs remove them.
     """
     from keri.app import keeping, configing, notifying
@@ -356,8 +354,12 @@ def verifier_service(config):
 
 
 @contextmanager
-def running_service(config):
-    """Stop HIO tasks before leaving their borrowed resource contexts."""
+def entered_service(config):
+    """Yield an entered service, then stop its tasks before closing borrowed stores.
+
+    This fixture does not advance the scheduler. Tests call the relevant boundary
+    directly or supply their own scheduling loop when they need task progress.
+    """
     with verifier_service(config) as runtime:
         scheduler = doing.Doist(doers=[runtime])
         try:

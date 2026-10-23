@@ -10,11 +10,12 @@ from keri.core import eventing
 
 from eoa_verifier.receiving.directing import CesrEnd, Receiver
 from eoa_verifier.receiving.grants import GrantNotificationDoer
-from native_helpers import running_service
+from native_helpers import entered_service
 
 
 @pytest.fixture
 def endpoint():
+    """Return an in-process Falcon client and the byte buffer intake appends to."""
     incoming = bytearray()
     app = falcon.App()
     app.add_route("/", CesrEnd(incoming))
@@ -22,6 +23,7 @@ def endpoint():
 
 
 def test_post_preserves_native_message_and_attachments(endpoint):
+    """POST reconstructs a native message with attachments and acknowledges intake."""
     client, incoming = endpoint
     with habbing.openHab(name="sender", temp=True) as (_, hab):
         stream = hab.makeOwnInception()
@@ -50,6 +52,7 @@ def test_post_preserves_native_message_and_attachments(endpoint):
     ],
 )
 def test_invalid_post_does_not_enqueue(endpoint, body, headers, status):
+    """Bad HTTP framing returns its documented error without adding parser bytes."""
     client, incoming = endpoint
     response = client.simulate_post("/", body=body, headers=headers)
     assert response.status_code == status
@@ -57,6 +60,7 @@ def test_invalid_post_does_not_enqueue(endpoint, body, headers, status):
 
 
 def test_queries_have_no_http_stream_but_put_remains_unfiltered(endpoint):
+    """Reject POST queries, preserve raw PUT bytes and never open an SSE stream."""
     client, incoming = endpoint
     query = eventing.query(route="mbx", query={}).raw
     response = client.simulate_post(
@@ -76,10 +80,11 @@ def test_queries_have_no_http_stream_but_put_remains_unfiltered(endpoint):
 
 
 def test_runtime_has_one_receiver_and_no_mailbox(config):
+    """Compose one shared parser owner without opening or scheduling a mailbox."""
     with patch(
         "keri.app.storing.Mailboxer", side_effect=AssertionError("mailbox opened")
     ):
-        with running_service(config) as service:
+        with entered_service(config) as service:
             receivers = [d for d in service.doers if isinstance(d, Receiver)]
             assert len(receivers) == 1
             assert not any(

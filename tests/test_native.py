@@ -136,12 +136,12 @@ def test_native_grant_verification_and_restart(tmp_path, method):
                 assert workflow.tyme < deadline, (expected, work)
                 yield 0.01
 
-        def issue_association(label, *, signer=KEY, chain=31337, holder=None):
+        def issue_association(*, signer=KEY, chain=31337, holder=None):
             """Yield through witnessed issuance and return (ACDC, native evidence/Grant bytes).
 
-            label names the scenario; signer, chain and holder select intentional invalid
-            cases. The normal issuer is the LE holder. This constructs genuine signatures
-            and anchors even when testing a mismatched holder relationship.
+            signer, chain and holder select intentional invalid cases. The normal
+            issuer is the LE holder. Signatures and anchors remain genuine even
+            when testing a mismatched holder relationship.
             """
             hab = holder or le
             registry = registries["qvi" if holder else "le"]
@@ -235,7 +235,7 @@ def test_native_grant_verification_and_restart(tmp_path, method):
                 assert rgy.reger.saved.get(keys=(creder.said,))
 
             # Deliver the association first, then reopen with its sources still absent.
-            creder, evidence = yield from issue_association("delayed")
+            creder, evidence = yield from issue_association()
             yield from deliver(evidence, creder.said, "pending")
             aid = runtime.hab.pre
             workflow.remove([runtime, client_doer])
@@ -253,7 +253,21 @@ def test_native_grant_verification_and_restart(tmp_path, method):
             assert runtime.rgy.reger.saved.get(keys=(creder.said,))
             # Replaying the same Grant must retain the completed work record.
             original = runtime.baser.results.get(keys=(creder.said,))
-            yield from deliver(evidence, creder.said, "verified")
+            # EXN deduplication may suppress a new notice entirely. Test application
+            # replay explicitly after the HTTP redelivery, rather than observing the
+            # already-existing result before the duplicate has been processed.
+            yield from send(evidence)
+            from eoa_verifier.receiving.grants import GrantNotificationDoer
+
+            intake = next(
+                d for d in runtime.doers if isinstance(d, GrantNotificationDoer)
+            )
+            for _, exn in runtime.hby.db.exns.getItemIter():
+                if exn.ked.get("e", {}).get("acdc", {}).get("d") == creder.said:
+                    intake.process_grant_notice({"d": exn.said})
+                    break
+            else:
+                raise AssertionError("accepted Grant not found")
             assert runtime.baser.results.get(keys=(creder.said,)) == original
 
             # Hold completion after a real RPC observation, then deliver native
@@ -268,7 +282,7 @@ def test_native_grant_verification_and_restart(tmp_path, method):
                 d for d in coordinator.doers if d is not coordinator.eoa_verifier
             )
             coordinator.remove([verifier_loop])
-            raced, stream = yield from issue_association("revoked-during-rpc")
+            raced, stream = yield from issue_association()
             yield from send(stream)
             while runtime.baser.pending.get(keys=(raced.said,)) is None:
                 yield 0.01
@@ -292,9 +306,9 @@ def test_native_grant_verification_and_restart(tmp_path, method):
                 ("chain", {"chain": 31338}, "chain"),
                 ("issuer", {"holder": qvi}, "issuer does not match"),
             ]:
-                candidate, stream = yield from issue_association(label, **options)
+                candidate, stream = yield from issue_association(**options)
                 work = yield from deliver(stream, candidate.said, "rejected")
-                assert reason in work.reason, work
+                assert reason in work.reason, (label, work)
             finished.append(True)
             workflow.remove([d for d in workflow.doers if d is not task])
             return True
