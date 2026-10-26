@@ -1,9 +1,10 @@
 # EOA verifier workflow diagrams
 
-These charts describe the intended service split, not the delivered scope of
-PR #2. That increment implements native intake and initial verification only;
-acceptance/outbox, public stored status, authenticated webhooks and continuing
-association retirement remain future work. See the [runtime README](../README.md).
+These charts describe the deployment and workflows of the completed buildout.
+
+Start with the [deployment models](diagrams/deployment/deployment-models.md) for
+the verifier with a third-party webhook and the full USDC transfer deployment.
+The sequence diagrams below show the detailed interactions.
 
 Accepted associations have no time-based expiry. Initial verification is mandatory;
 refreshes, periodic account checks and continuing source-chain reassessment are
@@ -22,4 +23,4 @@ outside this build. Start with the overview, then open the relevant detail.
 | [Exact-wallet endorsement evaluation](diagrams/sequence/wallet-endorsement-evaluation-sequence.md) | Policy role checks and current wallet-to-identity endorsement matching     |
 | [Transfer outcomes and failures](diagrams/sequence/on-chain-transfer-outcomes-sequence.md)         | Policy rejection, pending requests and token-transfer reverts              |
 
-Creation, verification, oracle acceptance and on-chain endorsement are distinct milestones. Each document includes its rendered SVG and editable Mermaid source. The exports retain the methodology's palette on an opaque white canvas, with participant labels at both ends of the lifelines.
+Creation, verification, oracle acceptance and on-chain endorsement are distinct milestones. Each sequence document includes its rendered SVG and editable Mermaid source. The exports retain the methodology's palette on an opaque white canvas, with participant labels at both ends of the lifelines.
