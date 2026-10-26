@@ -69,6 +69,12 @@ def main(argv=None):
         "--incept-file",
         help="JSON inception options for a new identity only (default: built-in inception options)",
     )
+    start.add_argument(
+        "--webhook-url", help="Configured destination for accepted-association events"
+    )
+    start.add_argument(
+        "--webhook-aid", help="Trusted destination AID; required with --webhook-url"
+    )
     args = vars(parser.parse_args(argv))
     args.pop("command")
     args.pop("action")
