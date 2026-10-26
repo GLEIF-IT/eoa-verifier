@@ -59,7 +59,7 @@ flowchart TB
     V -->|"Initial account check"| RPC
     V -->|"Signed status updates"| O
     O -->|"Authenticated ACK"| V
-    O -->|"Transactions: publish mapping<br/>or withdraw exact association"| R
+    O -->|"Transactions: publish mapping<br/>or withdraw revoked endorsement"| R
     EW -->|"Sender: transfer(recipient, amount)"| C
     C -->|"Check both wallets' identities<br/>and current endorsements"| R
     C -->|"All policies pass:<br/>move USDC from sender to recipient"| U
@@ -68,7 +68,10 @@ flowchart TB
 Repeat association issuance and verification for both parties before transfer.
 The oracle trusts authenticated verifier status and applies ownership/replacement
 rules before publishing; it does not repeat verification. Verified association
-revocation produces a separately acknowledged webhook and exact-SAID withdrawal.
+revocation produces a separately acknowledged webhook. The oracle withdraws the
+wallet's on-chain endorsement only if it still refers to the revoked credential's
+SAID (self-addressing identifier). A delayed revocation of an older association
+must not remove the endorsement for a newer replacement.
 The same durable delivery and retry behavior from the first model applies here.
 
 The sender first approves `wUSDC` to spend its USDC. Transfer checks use stored
