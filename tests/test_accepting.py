@@ -136,3 +136,53 @@ def test_public_get_returns_stored_status_and_old_observation(verified_store):
     assert response.json["observation"]["observedAt"] == "2000-01-01T00:00:00Z"
     assert response.json["delivery"]["delivered"] is False
     assert client.simulate_get("/v1/associations/unknown/status").status_code == 404
+
+
+def test_retirement_commits_its_own_event_once_and_preserves_facts(verified_store):
+    """A failed retirement rolls back; a committed one survives replay with its own pending ACK."""
+    import json
+
+    baser = verified_store
+    accepted = accept_verified_result(baser)
+    baser.delivery_result(accepted.eventId)  # Initial-success ACK is already durable.
+    initial = baser.outbox.get(keys=(accepted.eventId,))
+    schedule = DestinationSchedule(failures=3, nextAttemptAt=4000000000)
+    baser.destinations.pin(keys=(initial.destination,), val=schedule)
+
+    with (
+        patch.object(
+            baser.outbox, "serializer", side_effect=RuntimeError("write failed")
+        ),
+        pytest.raises(RuntimeError, match="write failed"),
+    ):
+        baser.retire("association")
+    assert baser.associations.get(keys=("association",)) == accepted
+    assert baser.outbox.get(keys=("association:2",)) is None
+
+    retired = baser.retire("association")
+    baser.close()
+    baser.reopen()
+    assert baser.retire("association") == retired
+    assert accept_verified_result(baser) == retired  # No reacceptance after revocation.
+    assert baser.outbox.get(keys=(initial.eventId,)) == initial
+    event = baser.outbox.get(keys=(retired.eventId,))
+    assert not event.delivered and event.attempts == 0
+    assert (event.destination, event.peerAid) == (initial.destination, initial.peerAid)
+    assert baser.destinations.get(keys=(event.destination,)) == schedule
+    payload = json.loads(event.body)
+    assert (payload["revision"], payload["outcome"], payload["reasonCode"]) == (
+        2,
+        "invalid",
+        "REVOKED",
+    )
+    assert payload["association"] == accepted.facts
+    assert payload["observation"] == accepted.observation
+
+    app = falcon.App()
+    app.add_route("/v1/associations/{said}/status", StatusEnd(baser))
+    response = TestClient(app).simulate_get("/v1/associations/association/status")
+    assert response.json["status"] == "revoked"
+    assert response.json["reason"] == "REVOKED"
+    assert response.json["observation"] == accepted.observation
+    assert response.json["delivery"]["eventId"] == event.eventId
+    assert not response.json["delivery"]["delivered"]

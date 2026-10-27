@@ -8,14 +8,14 @@ Read the suite in this order:
 
 | File                   | Contract protected                                                                             |
 |------------------------|------------------------------------------------------------------------------------------------|
-| `test_native.py`       | Real witnessed issuance, verification, restart and critical rejection paths over POST and PUT. |
+| `test_native.py`       | Witnessed issuance, delayed-anchor retirement/restart and critical rejections over POST/PUT.   |
 | `test_account.py`      | Wallet/account outcomes, canonical-block RPC observation and client lifetime.                  |
 | `test_authing.py`      | Native signatures, covered HTTP context, rotation and durable replay protection.               |
 | `test_intake.py`       | Decode/replay/enqueue boundaries, malformed-input containment and coordinator-owned rejection. |
 | `test_coordinating.py` | Bounded work discovery, retry pacing and completion.                                           |
 | `test_basing.py`       | Duplicate-safe records and atomic completion.                                                  |
-| `test_accepting.py`    | Atomic acceptance/outbox, reopen, delivery progress and public stored status.                  |
-| `test_delivering.py`   | Real signed HTTP/ACK success, critical failed attempts and no automatic retry after reopen.    |
+| `test_accepting.py`    | Atomic acceptance/retirement outbox, rollback/reopen and public stored status.                 |
+| `test_delivering.py`   | Signed HTTP/ACK success and failures; retirement needs its own ACK; no automatic retry.        |
 | `test_directing.py`    | CESR HTTP framing and direct receiver wiring.                                                  |
 | `test_runtime.py`      | Store/task lifetime and CLI configuration.                                                     |
 
@@ -35,7 +35,7 @@ we can imagine another possible failure.
 
 - Real oracle intake: durable duplicate handling and redelivery after a lost ACK.
 - Automatic retry: controlled clock/random tests for pacing, backoff and restart.
-- Retirement and selection: native revocation, replacement and exact-SAID withdrawal.
+- Oracle selection: replacement and exact-SAID on-chain withdrawal.
 
 Do not add broad parser fuzzing, exhaustive exception matrices or a second native
 verification simulator to this suite now. Revisit extra malformed-version/RPC

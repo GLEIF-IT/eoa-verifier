@@ -13,7 +13,7 @@ from hio.base import doing
 from hio.core import http
 from keri.app import habbing, httping, indirecting, oobiing, signing
 from keri.core import coring, scheming
-from keri.db import basing
+from keri.db import basing, dbing
 from keri.help import helping
 from native_helpers import (
     KEY,
@@ -33,6 +33,7 @@ from native_helpers import (
 )
 
 from eoa_verifier.serving import ServiceConfig
+from eoa_verifier.retiring import RetirementDoer
 from eoa_verifier.verification.constants import LE_SCHEMA, QVI_SCHEMA
 from eoa_verifier.verification.eoa import build_challenge
 
@@ -43,8 +44,8 @@ def test_native_grant_verification_and_restart(tmp_path, method):
 
     Own isolated native stores/processes with ExitStack and all network tasks with
     HIO. Missing Anvil fails rather than skips. Test delayed evidence across restart,
-    acceptance with native issuance facts, duplicate delivery, revocation during
-    initial RPC, and invalid proof/relationships.
+    acceptance with native issuance facts, delayed-anchor retirement across restart,
+    duplicate delivery, revocation during initial RPC, and invalid proof/relationships.
     """
     anvil_path = shutil.which("anvil")
     assert anvil_path, "Anvil is required for native integration; install Foundry"
@@ -137,6 +138,16 @@ def test_native_grant_verification_and_restart(tmp_path, method):
                 ):
                     return work
                 assert workflow.tyme < deadline, (expected, work)
+                yield 0.01
+
+        def wait_status(said, expected):
+            """Yield until the application stores the expected status, with a bounded deadline."""
+            deadline = workflow.tyme + 5
+            while True:
+                status = runtime.baser.associations.get(keys=(said,))
+                if status is not None and status.status == expected:
+                    return status
+                assert workflow.tyme < deadline, (expected, status)
                 yield 0.01
 
         def issue_association(*, signer=KEY, chain=31337, holder=None):
@@ -255,14 +266,7 @@ def test_native_grant_verification_and_restart(tmp_path, method):
             )
             assert runtime.rgy.reger.saved.get(keys=(creder.said,))
             # Capture native issuance facts after verification, without another RPC pass.
-            deadline = workflow.tyme + 5
-            while (
-                accepted := runtime.baser.associations.get(keys=(creder.said,))
-            ) is None:
-                assert workflow.tyme < deadline, (
-                    "acceptance did not follow verification"
-                )
-                yield 0.01
+            accepted = yield from wait_status(creder.said, "accepted")
             assert accepted.facts["issuerAid"] == le.pre
             assert accepted.facts["leSaid"] == credentials["qvi"].said
             assert accepted.facts["issuance"] == {
@@ -290,6 +294,68 @@ def test_native_grant_verification_and_restart(tmp_path, method):
                 raise AssertionError("accepted Grant not found")
             assert runtime.baser.results.get(keys=(creder.said,)) == original
             assert runtime.baser.associations.get(keys=(creder.said,)) == accepted
+
+            # A newer same-LE/address association has independent application status.
+            successor, successor_stream = yield from issue_association()
+            yield from deliver(successor_stream, successor.said, "verified")
+            newer = yield from wait_status(successor.said, "accepted")
+            assert (
+                newer.facts["issuance"]["sequenceNumber"]
+                > accepted.facts["issuance"]["sequenceNumber"]
+            )
+            initial_event = runtime.baser.outbox.get(keys=(accepted.eventId,))
+
+            # A fresh Grant still embeds issuance. Neither it nor unanchored TEL
+            # evidence can retire an association; wait for actual native escrow.
+            yield from revoke_credential(issuers["le"], registries["le"], creder)
+            yield from send(grant(le, le_rgy, creder, runtime.hab.pre))
+            revocation = le_rgy.reger.cloneTvtAt(creder.said, sn=1)
+            yield from send(revocation)
+            deadline = workflow.tyme + 5
+            while runtime.rgy.reger.getTae(dbing.snKey(creder.said, 1)) is None:
+                assert workflow.tyme < deadline, (
+                    "revocation did not enter native anchor escrow"
+                )
+                yield 0.01
+            retirement = next(d for d in runtime.doers if isinstance(d, RetirementDoer))
+            retirement.recur(workflow.tyme)
+            assert (
+                runtime.rgy.reger.tevers[creder.regi].vcState(creder.said).et == "iss"
+            )
+            assert runtime.baser.associations.get(keys=(creder.said,)) == accepted
+
+            # Model loss between accepted native TEL and application commit. Only
+            # the missing KEL arrives now: no further Grant notification is needed.
+            runtime.remove([retirement])
+            yield from send(b"".join(le.db.clonePreIter(pre=le.pre)))
+            deadline = workflow.tyme + 5
+            while (
+                runtime.rgy.reger.tevers[creder.regi].vcState(creder.said).et != "rev"
+            ):
+                assert workflow.tyme < deadline, (
+                    "native revocation escrow did not resolve"
+                )
+                yield 0.01
+            assert runtime.baser.associations.get(keys=(creder.said,)) == accepted
+            workflow.remove([runtime, client_doer])
+            service_stores.close()
+            runtime = service_stores.enter_context(verifier_service(config))
+            client = http.Client(hostname="127.0.0.1", port=port)
+            client_doer = http.ClientDoer(client=client)
+            workflow.extend([runtime, client_doer])
+            retired = yield from wait_status(creder.said, "revoked")
+            assert (
+                retired.facts == accepted.facts
+            )  # Keep issuance, not revocation anchor.
+            assert retired.observation == accepted.observation
+            assert retired.eventId == f"{creder.said}:2"
+            assert (
+                runtime.baser.outbox.get(keys=(accepted.eventId,)).body
+                == initial_event.body
+            )
+            assert runtime.baser.associations.get(keys=(successor.said,)) == newer
+            # Replay both the original Grant and the now-revoked native artifacts.
+            yield from send(evidence + replay(le, le_rgy, registries["le"], creder))
 
             # Hold completion after a real RPC observation, then deliver native
             # revocation before applying the result. The final native recheck
@@ -330,6 +396,18 @@ def test_native_grant_verification_and_restart(tmp_path, method):
                 candidate, stream = yield from issue_association(**options)
                 work = yield from deliver(stream, candidate.said, "rejected")
                 assert reason in work.reason, (label, work)
+            assert runtime.baser.associations.get(keys=(creder.said,)) == retired
+            assert (
+                len(
+                    [
+                        event
+                        for _, event in runtime.baser.outbox.getItemIter()
+                        if event.associationSaid == creder.said
+                    ]
+                )
+                == 2
+            )
+            assert runtime.baser.associations.get(keys=(successor.said,)) == newer
             finished.append(True)
             workflow.remove([d for d in workflow.doers if d is not task])
             return True

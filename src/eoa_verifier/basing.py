@@ -1,7 +1,7 @@
 """Persist verification, acceptance and delivery independently of native evidence."""
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from itertools import islice
 
 from keri.db import dbing, koming
@@ -40,7 +40,7 @@ class AssociationStatus:
     """Stored application acceptance and immutable initially verified facts.
 
     Acceptance is not oracle ownership selection or an Ethereum endorsement.
-    There is no expiry; future verified retirement changes status explicitly.
+    There is no expiry; verified association revocation changes status explicitly.
     """
 
     associationSaid: str
@@ -160,6 +160,10 @@ class VerifierBaser(dbing.LMDBer):
         """Copy a bounded result page; close the read transaction before acceptance."""
         return self._batch(self.results, after=after, limit=limit)
 
+    def association_batch(self, *, after="", limit=32):
+        """Copy a bounded status page for local native-revocation reconciliation."""
+        return self._batch(self.associations, after=after, limit=limit)
+
     def delivery_batch(self, *, after="", limit=32):
         """Copy a bounded outbox page for initial-attempt discovery after restart."""
         return self._batch(self.outbox, after=after, limit=limit)
@@ -197,20 +201,13 @@ class VerifierBaser(dbing.LMDBer):
                 result.verified["observation"], wallet=result.verified["wallet"]
             )
             accepted = AssociationStatus(said, "accepted", event_id, facts, observation)
-            body = json.dumps(
-                {
-                    "version": "1",
-                    "eventId": event_id,
-                    "associationSaid": said,
-                    "revision": 1,
-                    "outcome": "valid",
-                    "association": facts,
-                    "observation": observation,
-                },
-                separators=(",", ":"),
-                sort_keys=True,
+            event = _status_delivery(
+                accepted,
+                revision=1,
+                outcome="valid",
+                destination=destination,
+                peer_aid=peer_aid,
             )
-            event = Delivery(event_id, said, destination, peer_aid, body)
             txn.put(
                 key, self.associations.serializer(accepted), db=self.associations.sdb
             )
@@ -224,6 +221,46 @@ class VerifierBaser(dbing.LMDBer):
                 overwrite=False,
             )
             return accepted
+
+    def retire(self, said):
+        """Atomically retire an accepted SAID and create its separate delivery obligation.
+
+        The caller establishes native revocation. Preserve original issuance facts,
+        observation and delivery destination/peer; never change another association.
+        Repeated retirement returns the same status/event, including across restart.
+        Native TEL persistence is separate and recovered by the retirement worker.
+        """
+        key = said.encode()
+        with self.env.begin(write=True) as txn:
+            current = self.associations.deserializer(
+                txn.get(key, db=self.associations.sdb)
+            )
+            if current is None:
+                raise ValueError("retirement requires an accepted association")
+            if current.status == "revoked":
+                return current
+            original = self.outbox.deserializer(
+                txn.get(current.eventId.encode(), db=self.outbox.sdb)
+            )
+            retired = replace(
+                current, status="revoked", eventId=f"{said}:2", reason="REVOKED"
+            )
+            event = _status_delivery(
+                retired,
+                revision=2,
+                outcome="invalid",
+                destination=original.destination,
+                peer_aid=original.peerAid,
+            )
+            txn.put(
+                key, self.associations.serializer(retired), db=self.associations.sdb
+            )
+            txn.put(
+                event.eventId.encode(),
+                self.outbox.serializer(event),
+                db=self.outbox.sdb,
+            )
+            return retired
 
     def record_attempt(self, event_id):
         """Persist an attempt before network work; an interrupted attempt stays pending."""
@@ -264,3 +301,20 @@ class VerifierBaser(dbing.LMDBer):
                     self.destinations.serializer(schedule),
                     db=self.destinations.sdb,
                 )
+
+
+def _status_delivery(status, *, revision, outcome, destination, peer_aid):
+    """Serialize one immutable v1 event for the existing outbox/ACK protocol."""
+    payload = {
+        "version": "1",
+        "eventId": status.eventId,
+        "associationSaid": status.associationSaid,
+        "revision": revision,
+        "outcome": outcome,
+        "association": status.facts,
+        "observation": status.observation,
+    }
+    if status.reason:
+        payload["reasonCode"] = status.reason
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    return Delivery(status.eventId, status.associationSaid, destination, peer_aid, body)

@@ -48,7 +48,7 @@ The current sender discovers never-attempted events and makes one attempt each.
 It validates HTTP success, the signed request reference and the accepting event
 payload before recording completion. Failed attempts remain visible and pending;
 explicit redelivery uses the same body with a new signature. Automatic retry/pacing
-and native revocation notifications below describe subsequent increments.
+remains a subsequent increment; native revocation notifications are implemented.
 
 Persist acceptance and its webhook obligation together. Deliver after commit;
 the receiver durably stores the status before acknowledging. Retry unacknowledged

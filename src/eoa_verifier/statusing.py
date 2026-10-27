@@ -14,7 +14,7 @@ class StatusEnd:
     def on_get(self, req, rep, said):
         """Handle GET /v1/associations/{said}/status without request signatures.
 
-        Return HTTP 200 JSON for known pending, completed or accepted candidates;
+        Return HTTP 200 JSON for known pending, completed, accepted or revoked candidates;
         return 404 for unknown SAIDs. Observation timestamps/block identifiers are
         informational. This method reads stored records only and never calls RPC.
         """

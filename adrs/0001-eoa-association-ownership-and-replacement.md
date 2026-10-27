@@ -1,6 +1,6 @@
 # ADR 0001: EOA association ownership and replacement
 
-Status: Accepted design; implementation pending
+Status: Accepted; association retirement implemented, ownership selection pending
 Date: 2026-10-22
 
 ## Context
