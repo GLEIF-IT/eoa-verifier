@@ -1,4 +1,4 @@
-"""Compose one native receiver and the initial association verifier."""
+"""Compose native intake, initial verification, retirement and status delivery."""
 
 import json
 from collections import deque
@@ -28,6 +28,7 @@ from keri.vdr import credentialing, eventing as veventing, verifying, viring
 from .accepting import AcceptanceDoer
 from .basing import VerifierBaser
 from .delivering import WebhookSender
+from .retiring import RetirementDoer
 from .statusing import StatusEnd
 from .receiving.directing import CesrEnd, Receiver
 from .receiving.grants import GrantNotificationDoer
@@ -184,6 +185,7 @@ class VerifierService(doing.DoDoer):
                 ),
             ),
         ]
+        doers.append(RetirementDoer(baser=baser, rgy=rgy))
         self.sender = None
         if config.webhook_url:
             self.sender = WebhookSender(baser=baser, hab=hab)

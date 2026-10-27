@@ -30,8 +30,9 @@ current key state must already be natively accepted by this verifier; missing
 keys leave delivery pending. Omitting both retains verification-only operation.
 
 Public `GET /v1/associations/{said}/status` returns stored `pending`, `rejected`,
-`verified` or `accepted` status and any initial account observation. Accepted
-records also expose delivery progress and errors. Unknown SAIDs return 404.
+`verified`, `accepted` or `revoked` status and any initial account observation.
+Accepted/retired records also expose their current event’s delivery progress and
+errors. Unknown SAIDs return 404.
 GET requires no signature and performs no RPC or refresh.
 
 Each new event gets one initial delivery attempt, with one request in flight and
@@ -39,25 +40,25 @@ a 10-second timeout. Only the expected authenticated ACK completes delivery.
 Failures and interrupted attempts stay pending across restart; automatic retries
 and backoff are not implemented yet. An embedding caller can explicitly schedule
 another attempt with `service.sender.request(event_id)`; there is no retry REST
-route. This is not yet unattended delivery. Revocation notifications, the oracle
-receiver and Ethereum publication are later increments. There are no periodic
-verification/account checks.
+route. This is not yet unattended delivery. Verified association revocation creates
+a separate event requiring its own ACK. Ethereum publication is the oracle's
+responsibility. There are no periodic verification/account checks.
 
 ## Maintainer orientation
 
-| Module                                   | Responsibility                                                                    |
-|------------------------------------------|-----------------------------------------------------------------------------------|
-| `cli`, `serving`                         | Configuration, native stores, shared parser and HIO task/resource ownership.      |
-| `receiving/directing`                    | Receive CESR POST/PUT and schedule shared native parsing and escrows.             |
-| `authing`                                | Authenticate service messages and ACKs; claim durable transport nonces.           |
-| `receiving/grants`                       | Decode authenticated native Grants, replay embeds and create duplicate-safe work. |
-| `basing`                                 | Atomic verification, acceptance/outbox and delivery records.                      |
-| `accepting`, `statusing`                 | Promote verified results using native issuance facts; serve stored status.        |
-| `delivering`                             | Own webhook attempts, ACK validation and delivery completion.                     |
-| `verification/coordinating`              | Scan bounded work pages, dispatch one association and apply results.              |
-| `verification/credentials`               | Check locally accepted ACDC/TEL/KEL evidence and LE/QVI relationships.            |
-| `verification/eoa`, `worker`, `rpc`      | Check the wallet proof and observe the configured Ethereum account.               |
-| `verification/constants`, `schema_cache` | Pin the existing credential schemas and load packaged resources.                  |
+| Module                                   | Responsibility                                                                            |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `cli`, `serving`                         | Configuration, native stores, shared parser and HIO task/resource ownership.              |
+| `receiving/directing`                    | Receive CESR POST/PUT and schedule shared native parsing and escrows.                     |
+| `authing`                                | Authenticate service messages and ACKs; claim durable transport nonces.                   |
+| `receiving/grants`                       | Decode authenticated native Grants, replay embeds and create duplicate-safe work.         |
+| `basing`                                 | Atomic verification, acceptance/outbox and delivery records.                              |
+| `accepting`, `retiring`, `statusing`     | Accept verified results, reconcile native association revocation and serve stored status. |
+| `delivering`                             | Own webhook attempts, ACK validation and delivery completion.                             |
+| `verification/coordinating`              | Scan bounded work pages, dispatch one association and apply results.                      |
+| `verification/credentials`               | Check locally accepted ACDC/TEL/KEL evidence and LE/QVI relationships.                    |
+| `verification/eoa`, `worker`, `rpc`      | Check the wallet proof and observe the configured Ethereum account.                       |
+| `verification/constants`, `schema_cache` | Pin the existing credential schemas and load packaged resources.                          |
 
 Initial flow: native Grant acceptance → embed replay and durable work → native
 credential checks → wallet proof and chain/block/code observation → final local
@@ -80,6 +81,22 @@ recovers results awaiting acceptance; repeated acceptance preserves the original
 event and destination. Native evidence lives in a separate database and is not
 part of this transaction. Missing evidence or already-known revocation prevents
 first acceptance. Once accepted, observation age does not invalidate the record.
+
+`RetirementDoer` scans bounded pages of accepted records against locally accepted
+association TEL state. Native `rev`/`brv` retires only that SAID and atomically
+creates its second event, preserving original issuance facts, observation and
+webhook destination. Duplicate evidence and restart do not create more events or
+revive retirement. A different association for the same wallet is untouched;
+ownership selection belongs to the oracle.
+
+IPEX Grant delivers supporting native KEL/TEL artifacts; the Grant’s embedded
+issuance or credential alone does not prove revocation. The existing shared parser
+and escrows validate those artifacts. Retirement also recovers from stored native
+state after restart, so it requires neither a retained cue nor another Grant.
+Missing or escrowed evidence leaves accepted status unchanged. This local scan
+performs no account/source reassessment or network refresh. Previously accepted
+records still retire when webhook sending is disabled; their delivery obligations
+remain stored for the original destination.
 
 `run_service()` owns shared stores through native KERIpy context managers.
 `VerifierService` borrows those stores and composes the HIO tasks. HIO stops

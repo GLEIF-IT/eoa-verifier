@@ -63,11 +63,11 @@ class WebhookSender(doing.DoDoer):
             status = self.baser.associations.get(keys=(event.associationSaid,))
             if (
                 status is None
-                or status.status != "accepted"
+                or status.status not in ("accepted", "revoked")
                 or status.eventId != event_id
             ):
                 self.baser.delivery_result(
-                    event_id, error="association is no longer current and accepted"
+                    event_id, error="event is no longer the current association status"
                 )
                 continue
             schedule = self.baser.destinations.get(keys=(event.destination,))

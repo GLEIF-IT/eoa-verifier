@@ -26,6 +26,8 @@ from native_helpers import free_port
         "tampered",
         "timeout",
         "refused",
+        "retirement",
+        "retirement-initial-ack",
     ],
 )
 def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
@@ -66,7 +68,13 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
                 event_id = json.loads(body)["eventId"]
                 ack = json.dumps(
                     {
-                        "eventId": "wrong" if reply == "wrong-event" else event_id,
+                        "eventId": (
+                            "wrong"
+                            if reply == "wrong-event"
+                            else "association:1"
+                            if reply == "retirement-initial-ack"
+                            else event_id
+                        ),
                         "accepted": True,
                     }
                 ).encode()
@@ -103,6 +111,11 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
         accepted = baser.accept(
             "association", facts={}, destination=target, peer_aid=receiver_hab.pre
         )
+        if reply.startswith("retirement"):
+            # Initial delivery is already acknowledged; retirement needs its own
+            # event ACK, even if the target signs another acceptance of event 1.
+            baser.delivery_result(accepted.eventId)
+            accepted = baser.retire("association")
         sender = WebhookSender(baser=baser, hab=sender_hab, timeout=1)
         # The sender discovers the committed event; intake need not enqueue it again.
 
@@ -124,12 +137,12 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
         doing.Doist(real=True, tock=0.01, limit=3).do(doers=[parent])
         event = baser.outbox.get(keys=(accepted.eventId,))
         assert parent.done
-        assert event.delivered == (reply == "accepted")
+        assert event.delivered == (reply in ("accepted", "retirement"))
         assert event.attempts == 1
         assert received_bodies == (
             [] if reply in ("timeout", "refused") else [event.body.encode()]
         )
-        assert bool(event.error) == (reply != "accepted")
+        assert bool(event.error) == (reply not in ("accepted", "retirement"))
 
         # Reopening delivery state does not resend an already-attempted event.
         # Automatic recovery of failed attempts is intentionally a later increment.

@@ -1,7 +1,7 @@
 # ADR 0002: Verifier result as an ordinary API object
 
-Status: Accepted; initial delivery implemented, retirement deferred
-Date: 2026-10-23
+Status: Accepted; acceptance and retirement delivery implemented
+Date: 2026-10-27
 
 ## Context
 
@@ -40,6 +40,13 @@ Identifiers above are illustrative. Issuance identifies the verified anchor in t
 issuer's KEL, not receipt order. The observation records the initial check only;
 its age never expires acceptance. `eventId` combines association SAID and revision.
 
+Verified association revocation creates a second event: `revision: 2`,
+`eventId: "example-association:2"`, `outcome: "invalid"`, and
+`reasonCode: "REVOKED"`. Keep the original `association` and `observation` objects;
+the issuance anchor must not become the revocation anchor. Commit retirement and
+this event together, using the original delivery destination. Retirement is terminal
+for that SAID and requires its own ACK; the initial event’s ACK cannot complete it.
+
 POST the exact stored bytes to the configured destination with the service
 signature profile. Completion requires an authenticated HTTP 200 response bound
 to that attempt, with exactly this JSON object (`accepted` is a boolean):
@@ -56,6 +63,6 @@ repeating effects. A signature on an error response does not complete delivery.
 
 The producer owns serialization and the delivery component owns ACK validation.
 The public GET response is a separate stored-state view. Native verification
-remains required before acceptance; JSON alone is never evidence. Add retirement
-representation and real receiver validation with those features. Revisit a
+remains required before acceptance; JSON alone is never evidence. Retirement
+requires accepted native association TEL revocation. Revisit a
 machine-readable result schema only when an actual consumer needs it.
