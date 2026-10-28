@@ -29,6 +29,14 @@ class VerificationResult:
 
 
 @dataclass
+class VerificationScope:
+    """Initial-verification policy shared by every result in one persistent store."""
+
+    trustedGedaAid: str
+    chainId: int
+
+
+@dataclass
 class MessageReceipt:
     """Durable transport nonce claim, independent of application-event deduplication."""
 
@@ -88,6 +96,7 @@ class VerifierBaser(dbing.LMDBer):
     def reopen(self, **kwa):
         """Open verification, acceptance/outbox and transport replay tables in one environment."""
         super().reopen(**kwa)
+        self.scope = koming.Komer(db=self, subkey="scope.", schema=VerificationScope)
         self.pending = koming.Komer(
             db=self, subkey="pending.", schema=PendingVerification
         )
@@ -103,6 +112,18 @@ class VerifierBaser(dbing.LMDBer):
             db=self, subkey="destinations.", schema=DestinationSchedule
         )
         return self.env
+
+    def bind_verification_scope(self, *, trusted_geda_aid, chain_id):
+        """Refuse another policy or previously completed results with unknown provenance."""
+        scope = VerificationScope(trusted_geda_aid, chain_id)
+        existing = self.scope.get(keys=("verification",))
+        if existing is not None and existing != scope:
+            raise ValueError("verifier store belongs to another GEDA root or chain")
+        if existing is None and (
+            self.results.cntAll() or self.associations.cntAll() or self.outbox.cntAll()
+        ):
+            raise ValueError("verifier store has unscoped results; use separate stores")
+        self.scope.put(keys=("verification",), val=scope)
 
     def enqueue(self, work):
         """Insert new unfinished work once; completed or pending duplicates return False."""

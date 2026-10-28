@@ -141,3 +141,45 @@ def test_webhook_timings_reach_sender_and_reject_invalid_config(config):
         replace(configured, webhook_interval=0)
     with pytest.raises(ValueError, match="at least"):
         replace(configured, webhook_backoff_cap=1)
+
+
+def test_saved_verification_keeps_its_trust_scope_when_enabling_delivery(config):
+    """Restart may enable delivery, but cannot reinterpret saved results under another root/chain."""
+    from keri import core
+    from eoa_verifier.basing import VerificationResult
+
+    with entered_service(config) as service:
+        # Isolate storage policy: native verification itself is covered by test_native.
+        service.baser.results.put(keys=("saved",), val=VerificationResult("saved", "verified"))
+    delivery = replace(config, webhook_url="http://127.0.0.1:9999/hook",
+                       webhook_aid=config.trusted_geda_aid)
+    with entered_service(delivery) as reopened:
+        assert reopened.sender is not None
+        assert reopened.baser.results.get(keys=("saved",)).outcome == "verified"
+    for changed in (
+        replace(delivery, trusted_geda_aid=core.Signer().verfer.qb64),
+        replace(delivery, chain_id=1),
+    ):
+        with pytest.raises(ValueError, match="another GEDA root or chain"):
+            with verifier_service(changed):
+                pass
+    with entered_service(delivery) as reopened:
+        assert reopened.baser.results.get(keys=("saved",)).outcome == "verified"
+
+
+def test_unscoped_saved_results_are_preserved_and_refused(config):
+    """Old stores lack proof of their verification policy; do not silently adopt them."""
+    from eoa_verifier.basing import VerificationResult
+
+    with entered_service(config) as service:
+        service.baser.results.put(keys=("saved",), val=VerificationResult("saved", "verified"))
+        service.baser.scope.rem(keys=("verification",))
+    with pytest.raises(ValueError, match="unscoped results"):
+        with verifier_service(config):
+            pass
+    from keri.db import dbing
+    from eoa_verifier.basing import VerifierBaser
+
+    with dbing.openLMDB(cls=VerifierBaser, name=config.name, base=config.base,
+                       headDirPath=config.head_dir, temp=False) as store:
+        assert store.results.get(keys=("saved",)).outcome == "verified"

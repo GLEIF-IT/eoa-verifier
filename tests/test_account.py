@@ -199,3 +199,26 @@ def test_cancellation_closes_in_flight_client_without_result():
     assert not clients[0].connector.opened
     assert not worker.cues
     assert not any(isinstance(d, http.ClientDoer) for d in worker.doers)
+
+
+def test_tls_failure_becomes_retry_without_stopping_scheduler():
+    """A real peer speaking plaintext to a TLS client fails only this observation."""
+
+    class PlaintextPeer(tcp.ServerDoer):
+        """Return plaintext after the ClientHello to trigger a native SSL error."""
+
+        def recur(self, tyme):
+            super().recur(tyme)
+            for peer in self.server.ixes.values():
+                if peer.rxbs:
+                    peer.rxbs.clear()
+                    peer.tx(b"HTTP/1.1 400 Bad Request\r\n\r\n")
+
+    server = tcp.Server(host="127.0.0.1", port=free_port())
+    worker = EoaVerifierDoer(
+        rpc_url=f"https://127.0.0.1:{server.ha[1]}", chain_id=31337
+    )
+    worker.msgs.append(candidate())
+    # The parent watcher must still run and observe cleanup after the child fails.
+    cue = run_worker(worker, PlaintextPeer(server=server))
+    assert cue["kin"] == "retry" and "transport failed" in cue["error"]
