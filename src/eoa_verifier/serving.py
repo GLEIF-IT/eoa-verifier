@@ -121,6 +121,9 @@ class VerifierService(doing.DoDoer):
         inception options apply only to that creation. Native network Doers own
         their sockets. kwa is passed to HIO DoDoer.
         """
+        baser.bind_verification_scope(
+            trusted_geda_aid=config.trusted_geda_aid, chain_id=config.chain_id
+        )
         self.config = config
         inits = {
             "transferable": True,

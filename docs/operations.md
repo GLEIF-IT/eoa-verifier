@@ -26,7 +26,12 @@ checkout. CI installs the wheel outside the checkout and runs native tests with
 Foundry 1.5.1.
 
 Reuse name, base, alias, store root and passcode on restart. `--incept-file` supplies
-native options for a new identity only. Preserve the entire native/application
+native options for a new identity only. The application store is bound to its
+GEDA root and chain ID before workers start, including verification-only mode.
+Changing either requires separate stores. Existing stores with completed results
+but no recorded scope are refused; preserve them for explicit migration, rather
+than guessing their original policy or deleting status. Enabling webhook delivery
+with the same root/chain remains supported. Preserve the entire native/application
 store set together; do not copy live LMDB files or share writable stores between
 processes. Stop the process before copying/reopening stores for maintenance.
 
