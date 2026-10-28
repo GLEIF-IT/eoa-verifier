@@ -2,17 +2,17 @@
 
 `eoa-verifier` verifies EOA associations and delivers their status to a configured
 webhook. `vlei-oracle` uses that authenticated status to publish or withdraw
-Ethereum mappings. This document describes the intended service contract; see
-the [README](../../README.md) for the implemented scope. [ADR 0002](../../adrs/0002-verifier-result-object.md) records
+Ethereum mappings. This document describes the service contract; see
+the [operator guide](../../docs/operations.md) for deployment and recovery. [ADR 0002](../../adrs/0002-verifier-result-object.md) records
 the initial delivery object and ACK shape.
 
 ## Responsibilities
 
-| Component    | Owns                                                                                                           |
-|--------------|----------------------------------------------------------------------------------------------------------------|
-| eoa-verifier | Initial verification, native credential stores, durable association status and authenticated webhook delivery. |
-| vlei-oracle  | Trusted status intake, ownership/replacement selection, Ethereum publish/withdraw and transaction results.     |
-| vlei-comply  | Registry, identity adapter and wallet-association policy for token transfers.                                  |
+| Component      | Owns                                                                                                             |
+| -------------- | ---------------------------------------------------------------------------------------------------------------- |
+| eoa-verifier   | Initial verification, native credential stores, durable association status and authenticated webhook delivery.   |
+| vlei-oracle    | Trusted status intake, ownership/replacement selection, Ethereum publish/withdraw and transaction results.       |
+| vlei-comply    | Registry, identity adapter and wallet-association policy for token transfers.                                    |
 
 Services have separate identities and writable stores, with no runtime imports
 between them. The verifier has no Ethereum posting key. The oracle authenticates
@@ -31,11 +31,12 @@ account rule against the configured chain ID/RPC at an identified canonical bloc
 Confirm native status after the initial RPC wait before accepting. These checks
 do not assess delegated-code safety or prove against later wallet-key theft.
 
-| Outcome       | Meaning                                                                        |
-|---------------|--------------------------------------------------------------------------------|
-| `valid`       | Required initial checks succeeded.                                             |
-| `invalid`     | Initial verification failed or the accepted association ACDC was revoked.      |
-| `unavailable` | Required initial evidence or access is missing; the candidate is not accepted. |
+Initial evidence or RPC unavailability leaves work `pending`; established failure
+produces `rejected`, and completed initial checks produce `verified`. With a
+webhook configured, acceptance commits status and an event. Only acceptance
+(`outcome: "valid"`) and later association retirement (`outcome: "invalid"`,
+`reasonCode: "REVOKED"`) are webhook events; initial rejection/unavailability is
+available through public stored status, not sent as a status event.
 
 Acceptance lasts indefinitely until association revocation or supersession.
 Elapsed time, old observations and outages do not invalidate it. There are no

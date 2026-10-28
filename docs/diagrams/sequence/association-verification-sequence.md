@@ -1,6 +1,6 @@
 # EOA association verification and webhook delivery
 
-Intended design; PR #2 implements only initial verification, not application acceptance or webhook delivery. Starting with an [issued EOA association](association-creation-sequence.md), `eoa-verifier` independently checks its KERI/vLEI evidence, Ethereum proof and account state before future acceptance and authenticated delivery to the configured webhook destination (`vlei-oracle` in this deployment).
+Starting with an [issued EOA association](association-creation-sequence.md), `eoa-verifier` independently checks its KERI/vLEI evidence, Ethereum proof and account state before durable acceptance and authenticated delivery to the configured webhook destination (`vlei-oracle` in this deployment).
 
 [Open the rendered chart](association-verification-sequence.svg). Dark teal participants, lavender notes and green completion bands follow the methodology's sequence diagram.
 
@@ -65,4 +65,4 @@ The webhook carries the association SAID, issuer AID, LE vLEI SAID, canonical `e
 
 Initial verification checks the association and observes its account; it does not itself grant on-chain authority. Continue with [oracle acceptance and endorsement](oracle-endorsement-sequence.md), then the [stablecoin flow](stablecoin-end-to-end-sequence.md). Later native association revocation and withdrawal are covered in [revocation and status maintenance](revocation-status-sequence.md).
 
-Sources: [EOA profile](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/eoa-profile.docx), [methodology and original color theme](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/methodology.docx), and [current EIP-712 profile](../../../../gl1/vlei-oracle/protocol/external-association-v1/eoa-v1/README.md). The documents permit other challenge carriers; this design selects EIP-712 from our agreed plan. Webhook delivery is the proposed extraction boundary.
+Sources: `eoa-profile.docx`, `methodology.docx` (original color theme), and [current EIP-712 profile](https://github.com/GLEIF-IT/vlei-oracle/blob/7d82d04cd444cb21e1da1e6ec0408cc40105d4f4/protocol/external-association-v1/eoa-v1/README.md). The documents permit other challenge carriers; this design selects EIP-712 from our agreed plan. Authenticated webhook delivery connects the independent verifier and receiver.

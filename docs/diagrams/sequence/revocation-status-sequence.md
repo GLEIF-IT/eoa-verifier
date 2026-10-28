@@ -1,6 +1,6 @@
 # Revocation and continuing status
 
-Future lifecycle beyond PR #2. An accepted association remains valid until its own ACDC is verifiably revoked or it is superseded. Time and service outages do not invalidate it.
+An accepted association remains valid until its own ACDC is verifiably revoked or it is superseded. Time and service outages do not invalidate it.
 
 [Open the rendered chart](revocation-status-sequence.svg) · [Workflow guide](../../README.md)
 
@@ -44,10 +44,10 @@ sequenceDiagram
 
 Only native verification of the association's revocation triggers retirement; missing evidence or an outage is not revocation. A delayed revocation of an older association must not withdraw its replacement. Continuing LE/QVI monitoring and account-code reassessment are outside this build.
 
-The future public GET-by-SAID route reads stored status and the last-known initial account observation without refresh or RPC. Its timestamps and block identifiers are informational. Webhook delivery remains authenticated independently of this unsigned public read.
+The public GET-by-SAID route reads stored status and the last-known initial account observation without refresh or RPC. Its timestamps and block identifiers are informational. Webhook delivery remains authenticated independently of this unsigned public read.
 
 Revocation has evidence-delivery, acknowledgement and transaction latency. Until withdrawal is confirmed, a mapping can remain active; contracts provide no automatic expiry. Use ordinary transaction results, without a new recovery subsystem.
 
 See [oracle endorsement](oracle-endorsement-sequence.md) for the granting path and the [end-to-end flow](stablecoin-end-to-end-sequence.md) for transfers.
 
-Sources: [EOA profile](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/eoa-profile.docx), [methodology and original color theme](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/methodology.docx), [wallet association policy](../../../../gl1/vlei-comply/src/policies/VLEIWalletAssociationPolicy.sol), [oracle registry](../../../../gl1/vlei-comply/src/attestation/VLEIOracleRegistry.sol), and [wrapped token](../../../../gl1/vlei-comply/src/wrappers/wUSDC.sol). Contract behavior is grounded in local `vlei-comply` commit `6220cd7`; the separate verifier and webhook and stored-status boundary are planned.
+Sources: `eoa-profile.docx`, `methodology.docx` (original color theme), [wallet association policy](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/src/policies/VLEIWalletAssociationPolicy.sol), [oracle registry](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/src/attestation/VLEIOracleRegistry.sol), and [wrapped token](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/src/wrappers/wUSDC.sol). Contract behavior is grounded in the linked comply revision; native retirement, authenticated delivery and stored status are implemented.

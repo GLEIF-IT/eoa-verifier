@@ -1,6 +1,6 @@
 # Local demo setup
 
-Proposed deployment workflow. Prepare the local chain, contracts and service configuration before either party starts the association workflow. This chart assumes the verifier has a signing AID and the oracle has a dedicated Ethereum posting key.
+Local deployment workflow. Prepare the local chain, contracts and service configuration before either party starts the association workflow. This chart assumes the verifier has a signing AID and the oracle has a dedicated Ethereum posting key.
 
 [Open the rendered chart](local-setup-sequence.svg) · [Workflow guide](../../README.md)
 
@@ -45,4 +45,4 @@ The wallet ceremony must select that network's chain ID. The verifier checks `et
 
 Both parties need their Ethereum wallets and valid LE vLEIs before [association creation](association-creation-sequence.md). Continue with the [end-to-end flow](stablecoin-end-to-end-sequence.md) after setup. Forge handles deployment and test preparation; it does not participate in each transfer.
 
-Sources: [EOA profile](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/eoa-profile.docx), [methodology and original color theme](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/methodology.docx), [wallet association policy](../../../../gl1/vlei-comply/src/policies/VLEIWalletAssociationPolicy.sol), [oracle registry](../../../../gl1/vlei-comply/src/attestation/VLEIOracleRegistry.sol), and [wrapped token](../../../../gl1/vlei-comply/src/wrappers/wUSDC.sol). Contract behavior is grounded in local `vlei-comply` commit `6220cd7`; the separate verifier and webhook/query boundary are planned.
+Sources: `eoa-profile.docx`, `methodology.docx` (original color theme), [wallet association policy](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/src/policies/VLEIWalletAssociationPolicy.sol), [oracle registry](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/src/attestation/VLEIOracleRegistry.sol), and [wrapped token](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/src/wrappers/wUSDC.sol). The linked comply revision provides the two-service launcher; public stored status and authenticated delivery are implemented.
