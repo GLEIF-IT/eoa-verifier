@@ -172,6 +172,10 @@ class WebhookSender(doing.DoDoer):
                     raise TimeoutError("webhook request timed out")
                 yield self.tock
             response = client.responses.popleft()
+            if response["errored"] and client.connector.cutoff:
+                raise ConnectionError(
+                    "webhook connection closed before a complete response"
+                )
             self._check_response(event, auth, sent, response)
         finally:
             self.remove([child])

@@ -26,6 +26,7 @@ from native_helpers import free_port
         "tampered",
         "timeout",
         "refused",
+        "disconnect",
         "retirement",
         "retirement-initial-ack",
         "lost-ack",
@@ -112,7 +113,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
 
         app = falcon.App()
         app.add_route("/hook", Endpoint())
-        if reply == "timeout":
+        if reply in ("timeout", "disconnect"):
             server = tcp.Server(host="127.0.0.1", port=port)
             server_doer = tcp.ServerDoer(server=server)
         else:
@@ -147,7 +148,18 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
         def wait_for_attempt(tymth, tock=0.0, **kwa):
             """Stop after one recorded result so failed ACKs cannot be hidden by retries."""
             yield tock
+            truncated = False
             while True:
+                if reply == "disconnect":
+                    # Close a real connection in the middle of the declared ACK body.
+                    for address, connection in list(server.ixes.items()):
+                        if connection.rxbs and not truncated:
+                            connection.tx(
+                                b"HTTP/1.1 200 OK\r\nContent-Length: 20\r\n\r\n{"
+                            )
+                            truncated = True
+                        elif truncated and not connection.txbs:
+                            server.removeIx(address)
                 event = baser.outbox.get(keys=(accepted.eventId,))
                 if event.delivered or (
                     reply != "lost-ack"
@@ -167,13 +179,15 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
         assert event.attempts == (2 if reply == "lost-ack" else 1)
         assert received_bodies == (
             []
-            if reply in ("timeout", "refused")
+            if reply in ("timeout", "refused", "disconnect")
             else [event.body.encode()] * event.attempts
         )
         assert bool(event.error) == (
             reply not in ("accepted", "retirement", "lost-ack")
         )
 
+        if reply == "disconnect":
+            assert "closed" in event.error
         if reply == "lost-ack":
             assert effects == {event.eventId}
             assert (
@@ -181,5 +195,5 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
             )  # Immutable body, fresh signed attempt references.
         elif not event.delivered:
             assert event.blocked == (
-                reply not in ("signed-error", "timeout", "refused")
+                reply not in ("signed-error", "timeout", "refused", "disconnect")
             )
