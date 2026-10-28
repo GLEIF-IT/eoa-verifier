@@ -9,7 +9,12 @@ description = "Native KERI and Ethereum EOA association verification"
 readme = "README.md"
 requires-python = ">=3.12.6"
 license = "Apache-2.0"
+license-files = ["LICENSE"]
 dependencies = ["gleif_keri==1.2.17", "gleif_hio==0.6.21", "eth-account==0.14.0"]
+
+[project.urls]
+Repository = "https://github.com/GLEIF-IT/eoa-verifier"
+Documentation = "https://github.com/GLEIF-IT/eoa-verifier/blob/master/docs/operations.md"
 
 [project.optional-dependencies]
 test = ["pytest>=9"]

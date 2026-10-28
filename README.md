@@ -8,6 +8,9 @@ results become durable acceptance and signed delivery events. No Ethereum postin
 key is needed.
 The service uses [HIO structured concurrency](adrs/0003-hio-structured-concurrency.md).
 
+For installation, peer introduction, restart and delivery recovery, see the
+[operator guide](docs/operations.md).
+
 ## Run
 
 Requires Python 3.12.6 or newer. Install with `python -m pip install .`, then:
@@ -46,7 +49,8 @@ Permanent HTTP, payload, signature or configuration failures remain visible as
 `delivery.blocked`, with `error` and the destination's earliest `nextAttemptAt`
 (UTC Unix seconds). After correcting the cause, an embedding caller can resume
 with `service.sender.request(event_id)`; restart alone does not unblock it.
-There is no retry REST route. Old acceptance events superseded by retirement stay
+There is no retry REST route; the [operator guide](docs/operations.md#delivery-failures)
+also describes an offline resume for standalone deployments. Old acceptance events superseded by retirement stay
 stored and blocked; retirement requires its own ACK. No periodic verification or
 account checks run, and Ethereum publication remains the oracle's responsibility.
 

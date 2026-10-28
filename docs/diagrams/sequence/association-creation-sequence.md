@@ -1,6 +1,6 @@
 # EOA association creation
 
-Proposed design. A legal entity operator uses an Ethereum wallet and a vLEI wallet controlling the entity's AID. The entity already holds a valid LE vLEI. This four-actor ceremony embeds the Ethereum proof before issuing the association ACDC.
+Association issuance workflow. A legal entity operator uses an Ethereum wallet and a vLEI wallet controlling the entity's AID. The entity already holds a valid LE vLEI. This four-actor ceremony embeds the Ethereum proof before issuing the association ACDC.
 
 [Open the rendered chart](association-creation-sequence.svg). Dark teal participants, lavender notes and green completion bands follow the methodology's sequence diagram.
 
@@ -48,4 +48,4 @@ EOA key control is proven at ceremony time. Account-state queries cannot detect 
 
 For the broader application, see [verified associations and stablecoin transfers](stablecoin-end-to-end-sequence.md).
 
-Sources: [EOA profile](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/eoa-profile.docx), [methodology and original color theme](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/methodology.docx), and [current EIP-712 profile](../../../../gl1/vlei-oracle/protocol/external-association-v1/eoa-v1/README.md). The documents permit other challenge carriers; this design selects EIP-712 from our agreed plan.
+Sources: `eoa-profile.docx`, `methodology.docx` (original color theme), and [current EIP-712 profile](https://github.com/GLEIF-IT/vlei-oracle/blob/7d82d04cd444cb21e1da1e6ec0408cc40105d4f4/protocol/external-association-v1/eoa-v1/README.md). The documents permit other challenge carriers; this design selects EIP-712 from our agreed plan.

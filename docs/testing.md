@@ -32,10 +32,12 @@ do not expand permutations without a concrete regression or new production path.
 A synthetic input is useful when it isolates a real contract, not merely because
 we can imagine another possible failure.
 
-## Future tests, when the feature arrives
+## Paired system qualification
 
-- Full-system qualification: issued/revoked delivery through the real oracle to contract state.
-- Oracle selection: replacement and exact-SAID on-chain withdrawal.
+The oracle's [two-service test](https://github.com/GLEIF-IT/vlei-oracle/blob/7d82d04cd444cb21e1da1e6ec0408cc40105d4f4/docs/two-service-qualification.md)
+runs both installed CLIs, witnessed native issuance, signed webhooks, Anvil
+publication/replacement/withdrawal and actual USDC balances. Keep contract and
+consumer-selection assertions there rather than duplicating them in this package.
 
 Do not add broad parser fuzzing, exhaustive exception matrices or a second native
 verification simulator to this suite now. Revisit extra malformed-version/RPC

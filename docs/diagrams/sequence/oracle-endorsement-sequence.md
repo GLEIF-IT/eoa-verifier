@@ -1,6 +1,6 @@
 # Oracle acceptance and on-chain endorsement
 
-Future workflow beyond PR #2 for one accepted, verified association. The verifier has completed cryptographic verification. The oracle now decides whether that result may grant authority in its configured deployment.
+Workflow for one accepted, verified association. The verifier has completed cryptographic verification. The oracle now decides whether that result may grant authority in its configured deployment.
 
 [Open the rendered chart](oracle-endorsement-sequence.svg) · [Workflow guide](../../README.md)
 
@@ -50,4 +50,4 @@ The oracle derives `wallet` from `extId` and `identityRef = keccak256(issuerAid)
 
 Use existing contract operations and ordinary submission/result handling. Report failures accurately: submission alone is not confirmed contract state. Retrying an accepted association checks durable revocation/replacement state without repeating verification. No new nonce-reconciliation, cancellation or reorg-recovery subsystem is required. See [association revocation](revocation-status-sequence.md) and [stablecoin transfers](stablecoin-end-to-end-sequence.md).
 
-Sources: [EOA profile](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/eoa-profile.docx), [methodology and original color theme](/Users/kbull/gleif/projects/vlei-external-association/initial-docs-from-kevin/methodology.docx), [wallet association policy](../../../../gl1/vlei-comply/src/policies/VLEIWalletAssociationPolicy.sol), [oracle registry](../../../../gl1/vlei-comply/src/attestation/VLEIOracleRegistry.sol), and [wrapped token](../../../../gl1/vlei-comply/src/wrappers/wUSDC.sol). Contract behavior is grounded in local `vlei-comply` commit `6220cd7`; the separate verifier and webhook boundary are planned.
+Sources: `eoa-profile.docx`, `methodology.docx` (original color theme), [wallet association policy](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/src/policies/VLEIWalletAssociationPolicy.sol), [oracle registry](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/src/attestation/VLEIOracleRegistry.sol), and [wrapped token](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/src/wrappers/wUSDC.sol). Contract behavior is grounded in the linked comply revision; the independent services and authenticated delivery are qualified in the paired native workflow.
