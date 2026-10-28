@@ -63,11 +63,13 @@ class Delivery:
     delivered: bool = False
     attempts: int = 0
     error: str = ""
+    # Permanent failure; requires correction and explicit resumption.
+    blocked: bool = False
 
 
 @dataclass
 class DestinationSchedule:
-    """Persisted operational scheduling values; automatic retry belongs to PR07.
+    """Persisted destination-wide cooldown and consecutive transient-failure count.
 
     nextAttemptAt is UTC Unix seconds, not an association-validity deadline.
     """
@@ -165,7 +167,7 @@ class VerifierBaser(dbing.LMDBer):
         return self._batch(self.associations, after=after, limit=limit)
 
     def delivery_batch(self, *, after="", limit=32):
-        """Copy a bounded outbox page for initial-attempt discovery after restart."""
+        """Copy a bounded outbox page for pending-delivery discovery, including after restart."""
         return self._batch(self.outbox, after=after, limit=limit)
 
     def _batch(self, table, *, after, limit):
@@ -262,22 +264,43 @@ class VerifierBaser(dbing.LMDBer):
             )
             return retired
 
-    def record_attempt(self, event_id):
-        """Persist an attempt before network work; an interrupted attempt stays pending."""
-        event = self.outbox.get(keys=(event_id,))
-        if event is None:
-            raise ValueError("unknown delivery event")
-        if event.delivered:
-            return event
-        event.attempts += 1
-        event.error = "attempt started; authenticated ACK not recorded"
-        self.outbox.pin(keys=(event_id,), val=event)
-        return event
+    def record_attempt(self, event_id, *, next_attempt_at=None):
+        """Atomically record the attempt and request-start pacing before network work.
 
-    def delivery_result(self, event_id, *, error=""):
+        An interrupted attempt stays pending. The sender supplies scheduling policy;
+        resuming an event clears its permanent-error block, not destination cooldown.
+        """
+        with self.env.begin(write=True) as txn:
+            event = self.outbox.deserializer(
+                txn.get(event_id.encode(), db=self.outbox.sdb)
+            )
+            if event is None:
+                raise ValueError("unknown delivery event")
+            if event.delivered:
+                return event
+            event.attempts += 1
+            event.blocked = False
+            event.error = "attempt started; authenticated ACK not recorded"
+            txn.put(
+                event_id.encode(), self.outbox.serializer(event), db=self.outbox.sdb
+            )
+            if next_attempt_at is not None:
+                schedule = self.destinations.deserializer(
+                    txn.get(event.destination.encode(), db=self.destinations.sdb)
+                )
+                schedule.nextAttemptAt = max(schedule.nextAttemptAt, next_attempt_at)
+                txn.put(
+                    event.destination.encode(),
+                    self.destinations.serializer(schedule),
+                    db=self.destinations.sdb,
+                )
+            return event
+
+    def delivery_result(self, event_id, *, error="", blocked=False, schedule=None):
         """Record failure or authenticated completion; never discard an undelivered event.
 
         An empty error means the delivery component validated the full ACK contract.
+        Failure progress and a supplied destination schedule commit together.
         This method enforces persistence, not authentication or delivery policy.
         """
         with self.env.begin(write=True) as txn:
@@ -288,6 +311,7 @@ class VerifierBaser(dbing.LMDBer):
             if event.delivered:
                 return
             event.error = error
+            event.blocked = blocked
             event.delivered = not error
             txn.put(
                 event_id.encode(), self.outbox.serializer(event), db=self.outbox.sdb
@@ -296,6 +320,7 @@ class VerifierBaser(dbing.LMDBer):
                 raw = txn.get(event.destination.encode(), db=self.destinations.sdb)
                 schedule = self.destinations.deserializer(raw)
                 schedule.failures = 0
+            if schedule is not None:
                 txn.put(
                     event.destination.encode(),
                     self.destinations.serializer(schedule),

@@ -70,10 +70,34 @@ def main(argv=None):
         help="JSON inception options for a new identity only (default: built-in inception options)",
     )
     start.add_argument(
-        "--webhook-url", help="Configured destination for accepted-association events"
+        "--webhook-url", help="Configured destination for association-status events"
     )
     start.add_argument(
         "--webhook-aid", help="Trusted destination AID; required with --webhook-url"
+    )
+    start.add_argument(
+        "--webhook-timeout",
+        type=float,
+        default=10.0,
+        help="Overall request timeout in seconds (default: 10)",
+    )
+    start.add_argument(
+        "--webhook-interval",
+        type=float,
+        default=1.0,
+        help="Minimum seconds between request starts (default: 1)",
+    )
+    start.add_argument(
+        "--webhook-backoff-base",
+        type=float,
+        default=1.0,
+        help="Initial retry lower bound in seconds; upper is twice this (default: 1)",
+    )
+    start.add_argument(
+        "--webhook-backoff-cap",
+        type=float,
+        default=150.0,
+        help="Retry lower-bound cap in seconds; upper is twice this (default: 150)",
     )
     args = vars(parser.parse_args(argv))
     args.pop("command")

@@ -7,7 +7,7 @@ CI builds a wheel and tests it outside the source checkout on Python 3.12.
 Read the suite in this order:
 
 | File                   | Contract protected                                                                             |
-|------------------------|------------------------------------------------------------------------------------------------|
+| ---------------------- | ---------------------------------------------------------------------------------------------- |
 | `test_native.py`       | Witnessed issuance, delayed-anchor retirement/restart and critical rejections over POST/PUT.   |
 | `test_account.py`      | Wallet/account outcomes, canonical-block RPC observation and client lifetime.                  |
 | `test_authing.py`      | Native signatures, covered HTTP context, rotation and durable replay protection.               |
@@ -15,8 +15,9 @@ Read the suite in this order:
 | `test_coordinating.py` | Bounded work discovery, retry pacing and completion.                                           |
 | `test_basing.py`       | Duplicate-safe records and atomic completion.                                                  |
 | `test_accepting.py`    | Atomic acceptance/retirement outbox, rollback/reopen and public stored status.                 |
-| `test_delivering.py`   | Signed HTTP/ACK success and failures; retirement needs its own ACK; no automatic retry.        |
+| `test_delivering.py`   | Signed HTTP/ACK boundaries, retirement ACKs and fresh signatures after a lost ACK.             |
 | `test_directing.py`    | CESR HTTP framing and direct receiver wiring.                                                  |
+| `test_retry.py`        | Controlled-clock pacing, backoff/cap, Retry-After, cooldown restart and permanent errors.      |
 | `test_runtime.py`      | Store/task lifetime and CLI configuration.                                                     |
 
 `native_helpers.py` constructs real issuer evidence and owns test resource contexts.
@@ -33,8 +34,7 @@ we can imagine another possible failure.
 
 ## Future tests, when the feature arrives
 
-- Real oracle intake: durable duplicate handling and redelivery after a lost ACK.
-- Automatic retry: controlled clock/random tests for pacing, backoff and restart.
+- Full-system qualification: issued/revoked delivery through the real oracle to contract state.
 - Oracle selection: replacement and exact-SAID on-chain withdrawal.
 
 Do not add broad parser fuzzing, exhaustive exception matrices or a second native

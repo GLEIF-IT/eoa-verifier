@@ -1,6 +1,7 @@
 """Compose native intake, initial verification, retirement and status delivery."""
 
 import json
+import math
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -69,9 +70,24 @@ class ServiceConfig:
     # Configure both to enable durable acceptance/outbox for one trusted destination.
     webhook_url: str | None = None
     webhook_aid: str | None = None
+    # Operational seconds: one in-flight request; backoff range is [lower, 2 * lower].
+    webhook_timeout: float = 10.0
+    webhook_interval: float = 1.0
+    webhook_backoff_base: float = 1.0
+    webhook_backoff_cap: float = 150.0
 
     def __post_init__(self):
         """Reject invalid verification configuration before opening resources."""
+        timings = (
+            self.webhook_timeout,
+            self.webhook_interval,
+            self.webhook_backoff_base,
+            self.webhook_backoff_cap,
+        )
+        if not all(math.isfinite(value) and value > 0 for value in timings):
+            raise ValueError("webhook timing values must be finite positive seconds")
+        if self.webhook_backoff_cap < self.webhook_backoff_base:
+            raise ValueError("webhook backoff cap must be at least the base")
         if bool(self.webhook_url) != bool(self.webhook_aid):
             raise ValueError("webhook URL and AID must be configured together")
         if self.webhook_url:
@@ -188,7 +204,14 @@ class VerifierService(doing.DoDoer):
         doers.append(RetirementDoer(baser=baser, rgy=rgy))
         self.sender = None
         if config.webhook_url:
-            self.sender = WebhookSender(baser=baser, hab=hab)
+            self.sender = WebhookSender(
+                baser=baser,
+                hab=hab,
+                timeout=config.webhook_timeout,
+                interval=config.webhook_interval,
+                backoff_base=config.webhook_backoff_base,
+                backoff_cap=config.webhook_backoff_cap,
+            )
             doers.extend(
                 [
                     AcceptanceDoer(

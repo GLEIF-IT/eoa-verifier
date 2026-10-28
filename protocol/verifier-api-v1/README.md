@@ -44,11 +44,11 @@ reassessments. Initial source-chain validation remains mandatory.
 
 ## Delivery and revocation
 
-The current sender discovers never-attempted events and makes one attempt each.
-It validates HTTP success, the signed request reference and the accepting event
-payload before recording completion. Failed attempts remain visible and pending;
-explicit redelivery uses the same body with a new signature. Automatic retry/pacing
-remains a subsequent increment; native revocation notifications are implemented.
+The sender rediscovers pending events across restart, validates HTTP success,
+the signed request reference and accepting event payload before completion, and
+signs every retry anew. Permanent failures stay blocked until correction and
+explicit resumption; transient failures retry automatically. Superseded acceptance
+events remain stored but are not sent after retirement.
 
 Persist acceptance and its webhook obligation together. Deliver after commit;
 the receiver durably stores the status before acknowledging. Retry unacknowledged
@@ -86,7 +86,7 @@ status route below is outside this authenticated service protocol.
 PR 03 implements `ServiceAuthenticator` with the pinned KERIpy native
 `Signature-Input` and CESR `Signature` primitives. This is their native signing
 format, not a general RFC 9421 implementation. The webhook sender uses these
-primitives; the durable receiver endpoint is a separate increment. The caller
+primitives; the oracle owns its durable receiver endpoint. The caller
 supplies exact body bytes, actual HTTP method
 and absolute target URL (including query), matched to its configured destination.
 Expected action and peer trust come from configuration/operation, not incoming headers.

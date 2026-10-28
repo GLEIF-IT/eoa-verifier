@@ -1,4 +1,4 @@
-"""Basic webhook delivery over real HIO HTTP, using native peer signatures."""
+"""Webhook delivery and retry over real HIO HTTP, using native peer signatures."""
 
 import json
 
@@ -28,6 +28,8 @@ from native_helpers import free_port
         "refused",
         "retirement",
         "retirement-initial-ack",
+        "lost-ack",
+        "unauthorized",
     ],
 )
 def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
@@ -49,7 +51,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
         receiver = ServiceAuthenticator(
             hab=receiver_hab, baser=receiver_db, peer_aid=sender_hab.pre
         )
-        received_bodies = []
+        received_bodies, references, effects = [], [], set()
 
         class Endpoint:
             """Authenticate actual request bytes and return the selected ACK boundary case."""
@@ -65,7 +67,17 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
                     body=body,
                     headers=req.headers,
                 )
+                references.append(received.reference)
                 event_id = json.loads(body)["eventId"]
+                if reply == "lost-ack":
+                    effects.add(
+                        event_id
+                    )  # Durable receiver behavior is qualified against the real oracle too.
+                    if len(received_bodies) == 1:
+                        rep.status = (
+                            503  # Receipt committed, but its accepting ACK was lost.
+                        )
+                        return
                 ack = json.dumps(
                     {
                         "eventId": (
@@ -78,7 +90,13 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
                         "accepted": True,
                     }
                 ).encode()
-                status = 500 if reply == "signed-error" else 200
+                status = (
+                    500
+                    if reply == "signed-error"
+                    else 401
+                    if reply == "unauthorized"
+                    else 200
+                )
                 headers, _ = receiver.sign(
                     method=req.method,
                     target=target,
@@ -116,7 +134,14 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
             # event ACK, even if the target signs another acceptance of event 1.
             baser.delivery_result(accepted.eventId)
             accepted = baser.retire("association")
-        sender = WebhookSender(baser=baser, hab=sender_hab, timeout=1)
+        sender = WebhookSender(
+            baser=baser,
+            hab=sender_hab,
+            timeout=1,
+            interval=0.05,
+            backoff_base=0.05,
+            backoff_cap=0.05,
+        )
         # The sender discovers the committed event; intake need not enqueue it again.
 
         def wait_for_attempt(tymth, tock=0.0, **kwa):
@@ -125,7 +150,8 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
             while True:
                 event = baser.outbox.get(keys=(accepted.eventId,))
                 if event.delivered or (
-                    event.error
+                    reply != "lost-ack"
+                    and event.error
                     and event.error != "attempt started; authenticated ACK not recorded"
                 ):
                     parent.remove([sender, server_doer])
@@ -137,17 +163,23 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
         doing.Doist(real=True, tock=0.01, limit=3).do(doers=[parent])
         event = baser.outbox.get(keys=(accepted.eventId,))
         assert parent.done
-        assert event.delivered == (reply in ("accepted", "retirement"))
-        assert event.attempts == 1
+        assert event.delivered == (reply in ("accepted", "retirement", "lost-ack"))
+        assert event.attempts == (2 if reply == "lost-ack" else 1)
         assert received_bodies == (
-            [] if reply in ("timeout", "refused") else [event.body.encode()]
+            []
+            if reply in ("timeout", "refused")
+            else [event.body.encode()] * event.attempts
         )
-        assert bool(event.error) == (reply not in ("accepted", "retirement"))
+        assert bool(event.error) == (
+            reply not in ("accepted", "retirement", "lost-ack")
+        )
 
-        # Reopening delivery state does not resend an already-attempted event.
-        # Automatic recovery of failed attempts is intentionally a later increment.
-        baser.close()
-        baser.reopen()
-        resumed = WebhookSender(baser=baser, hab=sender_hab)
-        doing.Doist(tock=0.01, limit=0.1).do(doers=[resumed])
-        assert baser.outbox.get(keys=(accepted.eventId,)) == event
+        if reply == "lost-ack":
+            assert effects == {event.eventId}
+            assert (
+                len(set(references)) == 2
+            )  # Immutable body, fresh signed attempt references.
+        elif not event.delivered:
+            assert event.blocked == (
+                reply not in ("signed-error", "timeout", "refused")
+            )

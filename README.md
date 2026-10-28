@@ -27,7 +27,7 @@ Send CESR to `/`; `/health` reports liveness. The listener defaults to loopback.
 Add `--webhook-url https://receiver.example/hook --webhook-aid "$RECEIVER_AID"`
 to enable application acceptance and delivery. Configure both together. The peer's
 current key state must already be natively accepted by this verifier; missing
-keys leave delivery pending. Omitting both retains verification-only operation.
+keys leave delivery blocked pending correction. Omitting both retains verification-only operation.
 
 Public `GET /v1/associations/{said}/status` returns stored `pending`, `rejected`,
 `verified`, `accepted` or `revoked` status and any initial account observation.
@@ -35,14 +35,28 @@ Accepted/retired records also expose their current event’s delivery progress a
 errors. Unknown SAIDs return 404.
 GET requires no signature and performs no RPC or refresh.
 
-Each new event gets one initial delivery attempt, with one request in flight and
-a 10-second timeout. Only the expected authenticated ACK completes delivery.
-Failures and interrupted attempts stay pending across restart; automatic retries
-and backoff are not implemented yet. An embedding caller can explicitly schedule
-another attempt with `service.sender.request(event_id)`; there is no retry REST
-route. This is not yet unattended delivery. Verified association revocation creates
-a separate event requiring its own ACK. Ethereum publication is the oracle's
-responsibility. There are no periodic verification/account checks.
+The sender keeps one request in flight and spaces starts by at least one second,
+including successes. Connection failures, timeouts, HTTP 408/429 and 5xx errors
+(except 501/505) retry automatically with jittered backoff from 1–2 seconds to
+150–300 seconds. A valid `Retry-After` is a minimum, even beyond that cap.
+Cooldown applies to the whole destination and survives restart. Only the expected
+authenticated ACK completes delivery and resets the failure count.
+
+Permanent HTTP, payload, signature or configuration failures remain visible as
+`delivery.blocked`, with `error` and the destination's earliest `nextAttemptAt`
+(UTC Unix seconds). After correcting the cause, an embedding caller can resume
+with `service.sender.request(event_id)`; restart alone does not unblock it.
+There is no retry REST route. Old acceptance events superseded by retirement stay
+stored and blocked; retirement requires its own ACK. No periodic verification or
+account checks run, and Ethereum publication remains the oracle's responsibility.
+
+| Option                   | Default | Meaning                                               |
+| ------------------------ | ------- | ----------------------------------------------------- |
+| `--webhook-timeout`      | 10      | Overall request timeout, seconds.                     |
+| `--webhook-interval`     | 1       | Minimum seconds between request starts.               |
+| `--webhook-backoff-base` | 1       | First retry's lower bound; upper bound is twice this. |
+| `--webhook-backoff-cap`  | 150     | Maximum lower bound; upper bound is twice this.       |
+
 
 ## Maintainer orientation
 
