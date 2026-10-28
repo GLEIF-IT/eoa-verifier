@@ -1,5 +1,6 @@
 """Resource lifetime, store reopening and the standalone CLI boundary."""
 
+from dataclasses import replace
 from unittest.mock import patch
 
 import pytest
@@ -32,6 +33,7 @@ def test_cli_documents_network_options_and_rejects_missing_config(capsys):
     assert caught.value.code == 0
     help_text = capsys.readouterr().out
     assert "--chain-id" in help_text and "--rpc-url" in help_text
+    assert "--webhook-backoff-cap" in help_text
     with pytest.raises(SystemExit) as missing:
         main(["server", "start"])
     assert missing.value.code == 2
@@ -115,3 +117,27 @@ def test_cleanup_failure_still_stops_siblings_before_stores(config):
     assert stopped == [True]
     assert [str(error) for error in caught.value.exceptions] == ["cleanup failure"]
     assert not service.baser.opened and not service.hby.db.opened
+
+
+def test_webhook_timings_reach_sender_and_reject_invalid_config(config):
+    """Operational settings reach the one sender; invalid delays fail before opening resources."""
+    configured = replace(
+        config,
+        webhook_url="http://127.0.0.1:9999/hook",
+        webhook_aid=config.trusted_geda_aid,
+        webhook_timeout=7,
+        webhook_interval=2,
+        webhook_backoff_base=3,
+        webhook_backoff_cap=20,
+    )
+    with verifier_service(configured) as service:
+        assert (
+            service.sender.timeout,
+            service.sender.interval,
+            service.sender.backoff_base,
+            service.sender.backoff_cap,
+        ) == (7, 2, 3, 20)
+    with pytest.raises(ValueError, match="positive"):
+        replace(configured, webhook_interval=0)
+    with pytest.raises(ValueError, match="at least"):
+        replace(configured, webhook_backoff_cap=1)
