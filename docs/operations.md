@@ -20,8 +20,8 @@ python -m venv /opt/eoa-verifier/venv
 ```
 
 Use writable paths appropriate to the service account. Start from any working
-directory; schemas ship in the wheel. The pinned runtime is `gleif_keri==1.2.17`,
-`gleif_hio==0.6.21`, `eth-account==0.14.0`. Runtime imports do not require a sibling
+directory; schemas ship in the wheel. The pinned runtime is `gleif_keri==1.2.18`,
+`gleif_hio==0.6.22`, `eth-account==0.14.0`. Runtime imports do not require a sibling
 checkout. CI installs the wheel outside the checkout and runs native tests with
 Foundry 1.5.1.
 
