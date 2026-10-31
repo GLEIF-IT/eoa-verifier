@@ -198,3 +198,69 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
             assert event.blocked == (
                 reply not in ("signed-error", "timeout", "refused", "disconnect")
             )
+
+
+def test_malformed_chunk_response_preserves_pending_delivery(tmp_path):
+    """Bad HTTP framing closes only its client and leaves the immutable event recoverable."""
+
+    class BadResponsePeer(tcp.ServerDoer):
+        """Send an invalid chunk-size line over a real TCP connection."""
+
+        def recur(self, tyme):
+            """Wait for a request before returning malformed chunk framing."""
+            super().recur(tyme)
+            for peer in self.server.ixes.values():
+                if peer.rxbs:
+                    peer.rxbs.clear()
+                    peer.tx(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nZ\r\n")
+
+    with (
+        habbing.openHby(name="sender", temp=True) as hby,
+        dbing.openLMDB(
+            cls=VerifierBaser, name="chunk", headDirPath=str(tmp_path), temp=False
+        ) as baser,
+    ):
+        hab = hby.makeHab(name="sender")
+        server = tcp.Server(host="127.0.0.1", port=free_port())
+        peer = BadResponsePeer(server=server)
+        baser.enqueue(PendingVerification("association", "grant"))
+        baser.finish(
+            VerificationResult(
+                "association", "verified",
+                eoaResult={"wallet": "wallet", "accountObservation": {}},
+            )
+        )
+        status = baser.accept(
+            "association", association={},
+            destination=f"http://127.0.0.1:{server.ha[1]}/hook", peer_aid=hab.pre,
+        )
+        original = baser.outbox.get(keys=(status.eventId,))
+        sender = WebhookSender(baser=baser, hab=hab)
+        clients = []
+
+        def watch(tymth, tock=0.0, **kwa):
+            """A sibling must run after parsing fails and observe per-attempt cleanup."""
+            yield tock
+            while True:
+                clients.extend(
+                    d.client for d in sender.doers if isinstance(d, http.ClientDoer)
+                )
+                event = baser.outbox.get(keys=(status.eventId,))
+                if event.blocked:
+                    assert not any(isinstance(d, http.ClientDoer) for d in sender.doers)
+                    parent.remove([sender, peer])
+                    return
+                yield 0.01
+
+        parent = doing.DoDoer(doers=[sender, peer, doing.doify(watch)])
+        doing.Doist(real=True, tock=0.01, limit=3).do(doers=[parent])
+        assert parent.done and clients
+        assert all(not client.connector.opened for client in clients)
+        event = baser.outbox.get(keys=(status.eventId,))
+        assert not event.acknowledged and event.blocked and event.attempts == 1
+        assert "invalid literal" in event.error
+        assert event.body == original.body
+        # Framing errors use the existing blocked-delivery correction/resume path.
+        baser.close()
+        baser.reopen()
+        assert baser.outbox.get(keys=(status.eventId,)) == event

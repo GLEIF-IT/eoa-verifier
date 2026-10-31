@@ -6,13 +6,14 @@ from hio.core import http
 
 
 class RpcClientDoer(http.ClientDoer):
-    """Deliver expected socket failures to the waiting RPC; HIO exit closes sockets."""
+    """Report socket/framing failures to the waiting RPC; HIO exit closes sockets."""
 
     def recur(self, tyme):
         """Keep a failed connection from unwinding unrelated service tasks."""
         try:
             return super().recur(tyme)
-        except OSError as error:
+        except (OSError, ValueError) as error:
+            # HIO chunk-size parsing raises ValueError outside its HTTPException path.
             self.client.responses.append({"errored": True, "error": str(error)})
             return True
 

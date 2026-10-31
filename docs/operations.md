@@ -74,6 +74,9 @@ Retiring an old association does not retire its replacement.
 Transient network/HTTP failures retry automatically with persisted destination
 cooldown. Each attempt signs the same immutable event bytes anew. Only an expected
 authenticated HTTP 200 ACK completes it. Observation age never triggers refresh.
+Malformed HTTP chunk framing closes the affected client without stopping sibling
+tasks. RPC observations remain retryable; malformed webhook responses leave their
+events blocked and unacknowledged for correction and explicit resumption.
 Permanent failures remain blocked until the cause is corrected; restart alone
 does not unblock them. Inspect public status and fix peer keys, authorization,
 receiver configuration or malformed responses before retrying. Stored events
