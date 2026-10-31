@@ -92,6 +92,12 @@ supplies exact body bytes, actual HTTP method
 and absolute target URL (including query), matched to its configured destination.
 Expected action and peer trust come from configuration/operation, not incoming headers.
 
+Configuration rejects path/query spellings that the pinned HIO client rewrites.
+For example, `?memo=a+b&path=%2F` is preserved; `?memo=a%20b`, repeated parameter
+names, bare parameters and percent-escaped paths are rejected before startup.
+Include an explicit path (`/` for the root endpoint); leading `//` paths are unsupported.
+Use the same supported URL on both peers. Existing event destinations stay immutable.
+
 Signature label `sig0` covers, in order: `@method`, `@path`, `content-digest`,
 `content-type`, `eoa-target`, `eoa-audience`, `eoa-action`, `eoa-request`,
 `eoa-status`. The digest is SHA-256 over the exact bytes; content type is

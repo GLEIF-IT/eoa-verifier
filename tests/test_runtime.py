@@ -123,7 +123,7 @@ def test_webhook_timings_reach_sender_and_reject_invalid_config(config):
     """Operational settings reach the one sender; invalid delays fail before opening resources."""
     configured = replace(
         config,
-        webhook_url="http://127.0.0.1:9999/hook",
+        webhook_url="http://127.0.0.1:9999/hook?memo=a+b&path=%2F",
         webhook_aid=config.trusted_geda_aid,
         webhook_timeout=7,
         webhook_interval=2,
@@ -183,3 +183,20 @@ def test_unscoped_saved_results_are_preserved_and_refused(config):
     with dbing.openLMDB(cls=VerifierBaser, name=config.name, base=config.base,
                        headDirPath=config.head_dir, temp=False) as store:
         assert store.results.get(keys=("saved",)).status == "verified"
+
+
+@pytest.mark.parametrize("relative_uri", [
+    "",
+    "/hook?memo=a%20b",
+    "/hook?tag=a&tag=b",
+    "/hook?debug",
+    "/ho%6Fk",
+    "//hook",
+])
+def test_webhook_url_must_survive_hio_rendering(config, relative_uri):
+    """Reject rewritten path/query spellings before stores or delivery obligations exist."""
+    with pytest.raises(ValueError, match="HIO.*path/query"):
+        replace(
+            config, webhook_url="http://127.0.0.1:9999" + relative_uri,
+            webhook_aid=config.trusted_geda_aid,
+        )

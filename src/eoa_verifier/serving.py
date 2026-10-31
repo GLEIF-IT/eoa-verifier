@@ -5,11 +5,12 @@ import math
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import falcon
 from hio.base import doing
 from hio.core import http, tcp
+from hio.core.http import httping as hio_httping
 from hio.help import decking
 from keri.app import (
     configing,
@@ -100,6 +101,15 @@ class ServiceConfig:
                 raise ValueError(
                     "webhook must be an absolute HTTP URL without a fragment"
                 )
+            # Mirror the pinned HIO sender's path/query rendering before signing.
+            _, query = hio_httping.updateQargsQuery({}, target.query)
+            if (
+                not target.path
+                or target.path.startswith("//")
+                or quote(target.path) != target.path
+                or query != target.query
+            ):
+                raise ValueError("HIO would rewrite the webhook URL path/query")
             if coring.Prefixer(qb64=self.webhook_aid).qb64 != self.webhook_aid:
                 raise ValueError("webhook peer must be a canonical AID")
         if not self.rpc_url or self.chain_id <= 0:

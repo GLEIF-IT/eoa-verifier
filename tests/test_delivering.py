@@ -19,6 +19,7 @@ from keripy_helpers import free_port
     "reply",
     [
         "stored",
+        "stored-query",
         "signed-error",
         "wrong-event",
         "old-ack-shape",
@@ -49,7 +50,8 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
         sender_hby.psr.parse(ims=bytearray(receiver_hab.makeOwnEvent(sn=0)))
         receiver_hby.psr.parse(ims=bytearray(sender_hab.makeOwnEvent(sn=0)))
         port = free_port()
-        target = f"http://127.0.0.1:{port}/hook?chain=1"
+        query = "memo=a+b&path=%2F" if reply == "stored-query" else "chain=1"
+        target = f"http://127.0.0.1:{port}/hook?{query}"
         receiver = ServiceAuthenticator(
             hab=receiver_hab, baser=receiver_db, peer_aid=sender_hab.pre
         )
@@ -176,7 +178,9 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
         doing.Doist(real=True, tock=0.01, limit=3).do(doers=[parent])
         event = baser.outbox.get(keys=(accepted.eventId,))
         assert parent.done
-        assert event.acknowledged == (reply in ("stored", "retirement", "lost-ack"))
+        assert event.acknowledged == (
+            reply in ("stored", "stored-query", "retirement", "lost-ack")
+        )
         assert event.attempts == (2 if reply == "lost-ack" else 1)
         assert received_bodies == (
             []
@@ -184,7 +188,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
             else [event.body.encode()] * event.attempts
         )
         assert bool(event.error) == (
-            reply not in ("stored", "retirement", "lost-ack")
+            reply not in ("stored", "stored-query", "retirement", "lost-ack")
         )
 
         if reply == "disconnect":
