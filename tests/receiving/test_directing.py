@@ -1,18 +1,15 @@
-"""HTTP framing and direct-only runtime boundaries; KERI/IPEX integration verifies evidence."""
-
-from unittest.mock import patch
+"""receiving/test_directing.py."""
 
 import falcon
 import pytest
 from falcon import testing
 from hio.base import doing
 from hio.help import decking
-from keri.app import habbing, httping, indirecting, storing
+from keri.app import habbing, httping
 from keri.core import eventing
 
-from eoa_verifier.receiving.directing import CesrEnd, Receiver
-from eoa_verifier.receiving.grants import GrantNotificationDoer
-from keripy_helpers import entered_service, verifier_service
+from eoa_verifier.receiving.directing import CesrEnd
+from tests.support.services import verifier_service
 
 
 @pytest.fixture
@@ -81,45 +78,24 @@ def test_queries_have_no_http_stream_but_put_remains_unfiltered(endpoint):
     assert client.simulate_get("/").status_code == 405
 
 
-def test_runtime_has_one_receiver_and_no_mailbox(config):
-    """Compose one shared parser owner without opening or scheduling a mailbox."""
-    with patch(
-        "keri.app.storing.Mailboxer", side_effect=AssertionError("mailbox opened")
-    ):
-        with entered_service(config) as service:
-            receivers = [d for d in service.doers if isinstance(d, Receiver)]
-            assert len(receivers) == 1
-            assert not any(
-                isinstance(
-                    d,
-                    (
-                        indirecting.MailboxDirector,
-                        indirecting.Poller,
-                        storing.Respondant,
-                    ),
-                )
-                for d in service.doers
-            )
-            grants = next(
-                d for d in service.doers if isinstance(d, GrantNotificationDoer)
-            )
-            assert grants.parser is receivers[0].parser
-
-
 @pytest.mark.parametrize("method", ["POST", "PUT"])
 def test_incomplete_request_does_not_block_later_messages(config, method):
     """Discard incomplete request bytes; parse both messages in the next valid PUT."""
-    with verifier_service(config) as service, habbing.openHab(
-        name="sender", temp=True
-    ) as (_, hab):
+    with (
+        verifier_service(config) as service,
+        habbing.openHab(name="sender", temp=True) as (_, hab),
+    ):
         client = testing.TestClient(service.app)
         inception = hab.makeOwnInception()
         if method == "POST":
             # Declare a controller-signature attachment but omit its signature.
             response = client.simulate_post(
-                "/", body=hab.kever.serder.raw,
-                headers={"Content-Type": httping.CESR_CONTENT_TYPE,
-                         "CESR-ATTACHMENT": "-AAB"},
+                "/",
+                body=hab.kever.serder.raw,
+                headers={
+                    "Content-Type": httping.CESR_CONTENT_TYPE,
+                    "CESR-ATTACHMENT": "-AAB",
+                },
             )
         else:
             # A finite request cannot satisfy the serialization length it declares.
@@ -141,9 +117,10 @@ def test_http_cannot_advance_the_services_own_kel(config):
         hab = service.hab
         event = eventing.interact(pre=hab.pre, dig=hab.kever.serder.said, sn=1)
         stream = eventing.messagize(event, sigers=hab.sign(ser=event.raw))
-        assert testing.TestClient(service.app).simulate_put(
-            "/", body=stream
-        ).status_code == 204
+        assert (
+            testing.TestClient(service.app).simulate_put("/", body=stream).status_code
+            == 204
+        )
 
         doing.Doist(tock=0.01, limit=0.2).do(doers=[service])
 

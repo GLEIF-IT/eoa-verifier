@@ -1,34 +1,13 @@
-"""Real KERI AID signatures and persistent replay state, without application delivery."""
+"""delivery/test_authing.py."""
 
 from contextlib import ExitStack
 from unittest.mock import patch
 
 import pytest
 from keri.app import habbing
-from keri.db import dbing
 from keri.help import helping
 
 from eoa_verifier.delivery.authing import AuthenticationError, ServiceAuthenticator
-from eoa_verifier.persistence.basing import VerifierBaser
-
-
-@pytest.fixture
-def peers(tmp_path):
-    """Open KERIpy signer/receiver identities and isolated persistent replay stores."""
-    with ExitStack() as stack:
-        a = stack.enter_context(habbing.openHby(name="a", temp=True))
-        b = stack.enter_context(habbing.openHby(name="b", temp=True))
-        ah = a.makeHab(name="a")
-        bh = b.makeHab(name="b")
-        a.psr.parse(ims=bytearray(bh.makeOwnEvent(sn=0)))
-        b.psr.parse(ims=bytearray(ah.makeOwnEvent(sn=0)))
-        ab = stack.enter_context(dbing.openLMDB(cls=VerifierBaser, name="a", temp=True))
-        bb = VerifierBaser(name="b", headDirPath=str(tmp_path), temp=False)
-        stack.callback(bb.close)
-        yield (
-            ServiceAuthenticator(hab=ah, baser=ab, peer_aid=bh.pre),
-            ServiceAuthenticator(hab=bh, baser=bb, peer_aid=ah.pre),
-        )
 
 
 def message():
@@ -172,8 +151,9 @@ def test_malformed_or_changed_headers_fail_closed(peers, header, value):
 def test_rotated_peer_state_survives_service_restart(tmp_path):
     """Reopen actual service stores and authenticate with persisted rotated peer key state."""
     from keri import core
+
     from eoa_verifier.runtime.config import ServiceConfig
-    from keripy_helpers import entered_service
+    from tests.support.services import entered_service
 
     config = ServiceConfig(
         trusted_geda_aid=core.Signer().verfer.qb64,

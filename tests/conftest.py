@@ -1,8 +1,11 @@
-"""Isolated service configuration shared by runtime and intake tests."""
+"""conftest.py."""
 
 import pytest
 from keri import core
+from keri.db import dbing
 
+from eoa_verifier.persistence.basing import VerifierBaser
+from eoa_verifier.persistence.records import PendingVerification, VerificationResult
 from eoa_verifier.runtime.config import ServiceConfig
 
 
@@ -16,3 +19,29 @@ def config(tmp_path):
         head_dir=str(tmp_path),
         http_port=0,
     )
+
+
+@pytest.fixture
+def verified_store(tmp_path):
+    """Yield durable initial results; these fixture facts are not cryptographic evidence."""
+    with dbing.openLMDB(
+        cls=VerifierBaser, name="acceptance", headDirPath=str(tmp_path), temp=False
+    ) as baser:
+        baser.enqueue(PendingVerification("association", "grant"))
+        baser.finish(
+            VerificationResult(
+                "association",
+                "verified",
+                eoaResult={
+                    "wallet": "0x" + "12" * 20,
+                    "accountObservation": {
+                        "chainId": 31337,
+                        "blockNumber": 42,
+                        "blockHash": "0x" + "34" * 32,
+                        "code": "0x",
+                        "observedAt": "2000-01-01T00:00:00Z",
+                    },
+                },
+            )
+        )
+        yield baser

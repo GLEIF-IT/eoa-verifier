@@ -1,12 +1,13 @@
-"""Exercise the account boundary over real HIO HTTP requests."""
+"""verification/test_worker.py."""
 
 import falcon
 import pytest
 from hio.base import doing
 from hio.core import http, tcp
-from keripy_helpers import candidate, free_port
 
 from eoa_verifier.verification.worker import EoaVerifierDoer
+from tests.support.issuers import candidate
+from tests.support.network import free_port
 
 
 class Rpc:

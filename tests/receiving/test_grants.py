@@ -1,14 +1,14 @@
-"""Notification lifecycle using KERIpy storage and targeted failure injection."""
+"""receiving/test_grants.py."""
 
-from types import SimpleNamespace
 from contextlib import ExitStack
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from keripy_helpers import candidate
 
 from eoa_verifier.receiving.grants import GrantNotificationDoer
-from keripy_helpers import entered_service
+from tests.support.issuers import candidate, signed_notice
+from tests.support.services import entered_service
 
 
 @pytest.mark.parametrize("kind", ["accepted", "malformed", "unrelated"])
@@ -91,42 +91,6 @@ def test_missing_grant_retains_notification_until_available(config):
         lifetime.close()
 
 
-def signed_notice(runtime, grants, sender, embedded, attachments=b""):
-    """Deliver an actual signed opening Grant through KERIpy EXN authentication."""
-    from keri.core import coring, parsing, serdering
-    from keri.peer import exchanging
-    from keri.vc import protocoling
-
-    exn, _ = exchanging.exchange(
-        route="/ipex/grant",
-        sender=sender.pre,
-        recipient=runtime.hab.pre,
-        payload={"m": "intake regression"},
-    )
-    sad = dict(exn.sad)
-    sad["e"] = coring.Saider.saidify(sad={"d": "", "acdc": embedded})[1]
-    exn = serdering.SerderKERI(sad=sad, makify=True)
-    stream = sender.endorse(exn, last=False, pipelined=False)
-    if attachments:
-        from keri import core, kering
-
-        pathed = coring.Pather(path=["e", "acdc"]).qb64b + attachments
-        stream += (
-            core.Counter(
-                core.Codens.PathedMaterialGroup,
-                count=len(pathed) // 4,
-                gvrsn=kering.Vrsn_1_0,
-            ).qb64b
-            + pathed
-        )
-    exc = exchanging.Exchanger(hby=runtime.hby, handlers=[])
-    protocoling.loadHandlers(hby=runtime.hby, exc=exc, notifier=grants.notifier)
-    runtime.hby.psr.parse(ims=bytearray(sender.makeOwnEvent(sn=0)))
-    parsing.Parser(kvy=runtime.hby.kvy, exc=exc).parse(ims=bytearray(stream))
-    assert any(n.attrs["d"] == exn.said for n, _ in grants.notifier.noter.getNotes())
-    return exn.said
-
-
 @pytest.mark.parametrize("bad", ["empty", "truncated"])
 def test_signed_bad_embed_is_consumed_and_valid_work_progresses(config, bad):
     """A malformed body or incomplete frame is consumed; later work and restart still progress."""
@@ -198,43 +162,3 @@ def test_notice_pages_advance_past_retained_work(config):
         assert grants.notifier.noter.getNoteCnt() == 65
     finally:
         lifetime.close()
-
-
-def test_wrong_schema_is_coordinator_rejection_without_keripy_acceptance(config):
-    """A real signed Grant supplies rejection evidence, never KERIpy credential acceptance."""
-    from keri.app import habbing
-    from keri.core import serdering
-
-    from eoa_verifier.verification.constants import LE_SCHEMA
-    from eoa_verifier.verification.coordinating import VerificationCoordinator
-
-    with (
-        entered_service(config) as runtime,
-        habbing.openHby(name="sender", temp=True) as hby,
-    ):
-        grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
-        coordinator = next(
-            d for d in runtime.doers if isinstance(d, VerificationCoordinator)
-        )
-        sad = candidate()
-        sad["s"] = LE_SCHEMA
-        creder = serdering.SerderACDC(sad=sad, makify=True)
-        sender = hby.makeHab(name="sender")
-        grant_said = signed_notice(runtime, grants, sender, creder.sad)
-        attrs = {"d": grant_said}
-        grants.process_grant_notice(attrs)
-        pending = runtime.baser.pending.get(keys=(creder.said,))
-        assert pending is not None
-        assert runtime.baser.results.get(keys=(creder.said,)) is None
-        assert runtime.rgy.reger.creds.get(keys=(creder.said,)) is None
-        assert runtime.rgy.reger.saved.get(keys=(creder.said,)) is None
-        grants.process_grant_notice(attrs)
-        assert runtime.baser.pending.get(keys=(creder.said,)) == pending
-        coordinator.process_ready()
-        result = runtime.baser.results.get(keys=(creder.said,))
-        assert result.status == "rejected"
-        assert "unexpected schema" in result.reason
-        assert runtime.baser.pending.get(keys=(creder.said,)) is None
-        grants.process_grant_notice(attrs)
-        assert runtime.baser.results.get(keys=(creder.said,)) == result
-        assert runtime.baser.pending.get(keys=(creder.said,)) is None

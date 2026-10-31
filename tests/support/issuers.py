@@ -1,16 +1,9 @@
-"""Test-side issuer setup and KERIpy KLI artifact workflows.
-
-The verifier library receives and verifies; these helpers own test controllers,
-credential issuance setup, and supporting evidence transport.
-"""
-
-from contextlib import contextmanager
-import socket
+"""support/issuers.py."""
 
 from eth_account import Account
 from eth_account.messages import encode_typed_data
-from keri import core
 from hio.base import doing
+from keri import core
 from keri.app import habbing, signing
 from keri.core import coring, eventing, parsing, serdering
 from keri.db import dbing
@@ -21,16 +14,7 @@ from keri.vdr import credentialing, verifying
 from eoa_verifier.verification.constants import ASSOCIATION_SCHEMA, LE_SCHEMA
 from eoa_verifier.verification.eoa import DOMAIN_TAG, PROOF_ALGORITHM, build_challenge
 
-
-# Public deterministic test signing key; never a production secret.
 KEY = "0x" + "0" * 63 + "1"
-
-
-def free_port():
-    """Return an available loopback port, releasing the probe socket; the caller must bind it promptly."""
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 def candidate():
@@ -313,57 +297,37 @@ def association_from_challenge(challenge, signature, registry):
     )
 
 
-@contextmanager
-def verifier_service(config):
-    """Yield a service borrowing KERIpy stores owned by this fixture.
+def signed_notice(runtime, grants, sender, embedded, attachments=b""):
+    """Deliver an actual signed opening Grant through KERIpy EXN authentication."""
+    from keri.core import coring, parsing, serdering
+    from keri.peer import exchanging
+    from keri.vc import protocoling
 
-    The caller must stop its HIO scheduler before leaving this context. Use
-    entered_service to enter and exit HIO tasks without advancing scheduler turns. Persistent
-    configs retain files for reopening assertions; temporary configs remove them.
-    """
-    from keri.app import keeping, configing, notifying
-    from keri.db import basing, dbing
-    from keri.vdr import viring, credentialing
-    from eoa_verifier.persistence.basing import VerifierBaser
-    from eoa_verifier.runtime.serving import VerifierService
+    exn, _ = exchanging.exchange(
+        route="/ipex/grant",
+        sender=sender.pre,
+        recipient=runtime.hab.pre,
+        payload={"m": "intake regression"},
+    )
+    sad = dict(exn.sad)
+    sad["e"] = coring.Saider.saidify(sad={"d": "", "acdc": embedded})[1]
+    exn = serdering.SerderKERI(sad=sad, makify=True)
+    stream = sender.endorse(exn, last=False, pipelined=False)
+    if attachments:
+        from keri import core, kering
 
-    options = dict(name=config.name, base=config.base, headDirPath=config.head_dir)
-    with (
-        keeping.openKS(temp=config.temp, **options) as ks,
-        basing.openDB(temp=config.temp, **options) as db,
-        configing.openCF(temp=config.temp, **options) as cf,
-        viring.openReger(temp=config.temp, db=db, **options) as reger,
-        dbing.openLMDB(cls=VerifierBaser, temp=config.temp, **options) as baser,
-        dbing.openLMDB(cls=notifying.Noter, temp=config.temp, **options) as noter,
-    ):
-        hby = habbing.Habery(
-            name=config.name,
-            base=config.base,
-            temp=config.temp,
-            ks=ks,
-            db=db,
-            cf=cf,
-            bran=config.passcode,
-            free=False,
+        pathed = coring.Pather(path=["e", "acdc"]).qb64b + attachments
+        stream += (
+            core.Counter(
+                core.Codens.PathedMaterialGroup,
+                count=len(pathed) // 4,
+                gvrsn=kering.Vrsn_1_0,
+            ).qb64b
+            + pathed
         )
-        rgy = credentialing.Regery(
-            hby=hby, name=config.name, base=config.base, temp=config.temp, reger=reger
-        )
-        service = VerifierService(config, hby=hby, rgy=rgy, baser=baser, noter=noter)
-        yield service
-
-
-@contextmanager
-def entered_service(config):
-    """Yield an entered service, then stop its tasks before closing borrowed stores.
-
-    This fixture does not advance the scheduler. Tests call the relevant boundary
-    directly or supply their own scheduling loop when they need task progress.
-    """
-    with verifier_service(config) as runtime:
-        scheduler = doing.Doist(doers=[runtime])
-        try:
-            scheduler.enter()
-            yield runtime
-        finally:
-            scheduler.exit()
+    exc = exchanging.Exchanger(hby=runtime.hby, handlers=[])
+    protocoling.loadHandlers(hby=runtime.hby, exc=exc, notifier=grants.notifier)
+    runtime.hby.psr.parse(ims=bytearray(sender.makeOwnEvent(sn=0)))
+    parsing.Parser(kvy=runtime.hby.kvy, exc=exc).parse(ims=bytearray(stream))
+    assert any(n.attrs["d"] == exn.said for n, _ in grants.notifier.noter.getNotes())
+    return exn.said

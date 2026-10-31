@@ -135,6 +135,8 @@ CESR-stream PUT, with 204 acknowledging intake only. Explicit POST queries are
 unsupported; PUT streams are not filtered. `Receiver` schedules the shared KERIpy
 parser and escrows. There is no mailbox polling, mailbox store or SSE query service.
 
+See the [testing guide](docs/testing.md) for component and integration lookup.
+
 ## Service authentication primitives
 
 `delivery.authing.ServiceAuthenticator` signs and authenticates exact HTTP body bytes with

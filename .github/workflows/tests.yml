@@ -27,8 +27,10 @@ jobs:
           "$RUNNER_TEMP/verifier-tests/bin/python" -m pip install dist/*.whl pytest
       - name: Test installed package outside checkout
         run: |
-          cp -R tests "$RUNNER_TEMP/tests"
-          cd "$RUNNER_TEMP"
+          mkdir "$RUNNER_TEMP/qualification"
+          cp -R tests "$RUNNER_TEMP/qualification/tests"
+          cp pytest.ini "$RUNNER_TEMP/qualification/"
+          cd "$RUNNER_TEMP/qualification"
           anvil --version
           "$RUNNER_TEMP/verifier-tests/bin/eoa-verifier" server start --help
           "$RUNNER_TEMP/verifier-tests/bin/python" -m pytest -q tests

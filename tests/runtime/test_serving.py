@@ -1,13 +1,15 @@
-"""Resource lifetime, store reopening and the standalone CLI boundary."""
+"""runtime/test_serving.py."""
 
 from dataclasses import replace
 from unittest.mock import patch
 
 import pytest
+from keri.app import indirecting, storing
 
-from eoa_verifier.runtime.cli import main
+from eoa_verifier.receiving.directing import Receiver
+from eoa_verifier.receiving.grants import GrantNotificationDoer
 from eoa_verifier.runtime.serving import run_service
-from keripy_helpers import entered_service, verifier_service
+from tests.support.services import entered_service, verifier_service
 
 
 @pytest.mark.parametrize("failure", ["configing.openCF", "oobiing.Oobiery"])
@@ -26,24 +28,12 @@ def test_setup_failure_releases_all_previously_opened_stores(config, failure):
         pass
 
 
-def test_cli_documents_network_options_and_rejects_missing_config(capsys):
-    """Help lists network options; starting without required configuration exits with an error."""
-    with pytest.raises(SystemExit) as caught:
-        main(["server", "start", "--help"])
-    assert caught.value.code == 0
-    help_text = capsys.readouterr().out
-    assert "--chain-id" in help_text and "--rpc-url" in help_text
-    assert "--webhook-backoff-cap" in help_text
-    with pytest.raises(SystemExit) as missing:
-        main(["server", "start"])
-    assert missing.value.code == 2
-
-
 @pytest.mark.parametrize("mode", ["cancel", "partial-enter"])
 def test_children_stop_before_borrowed_stores_close(config, mode):
     """Cancellation and partial entry stop children before stores close."""
     from hio.base import doing
     from hio.core import http
+
     from eoa_verifier.runtime.serving import VerifierService
 
     stopped = []
@@ -146,13 +136,19 @@ def test_webhook_timings_reach_sender_and_reject_invalid_config(config):
 def test_saved_verification_keeps_its_trust_scope_when_enabling_delivery(config):
     """Restart may enable delivery, but cannot reinterpret saved results under another root/chain."""
     from keri import core
+
     from eoa_verifier.persistence.records import VerificationResult
 
     with entered_service(config) as service:
         # Isolate storage policy: KERIpy verification itself is covered by test_ipex_integration.
-        service.baser.results.put(keys=("saved",), val=VerificationResult("saved", "verified"))
-    delivery = replace(config, webhook_url="http://127.0.0.1:9999/hook",
-                       webhook_aid=config.trusted_geda_aid)
+        service.baser.results.put(
+            keys=("saved",), val=VerificationResult("saved", "verified")
+        )
+    delivery = replace(
+        config,
+        webhook_url="http://127.0.0.1:9999/hook",
+        webhook_aid=config.trusted_geda_aid,
+    )
     with entered_service(delivery) as reopened:
         assert reopened.sender is not None
         assert reopened.baser.results.get(keys=("saved",)).status == "verified"
@@ -160,7 +156,9 @@ def test_saved_verification_keeps_its_trust_scope_when_enabling_delivery(config)
         replace(delivery, trusted_geda_aid=core.Signer().verfer.qb64),
         replace(delivery, chain_id=1),
     ):
-        with pytest.raises(ValueError, match="another GEDA root, chain or acceptance policy"):
+        with pytest.raises(
+            ValueError, match="another GEDA root, chain or acceptance policy"
+        ):
             with verifier_service(changed):
                 pass
     with entered_service(delivery) as reopened:
@@ -172,31 +170,47 @@ def test_unscoped_saved_results_are_preserved_and_refused(config):
     from eoa_verifier.persistence.records import VerificationResult
 
     with entered_service(config) as service:
-        service.baser.results.put(keys=("saved",), val=VerificationResult("saved", "verified"))
+        service.baser.results.put(
+            keys=("saved",), val=VerificationResult("saved", "verified")
+        )
         service.baser.scope.rem(keys=("verification",))
     with pytest.raises(ValueError, match="unscoped results"):
         with verifier_service(config):
             pass
     from keri.db import dbing
+
     from eoa_verifier.persistence.basing import VerifierBaser
 
-    with dbing.openLMDB(cls=VerifierBaser, name=config.name, base=config.base,
-                       headDirPath=config.head_dir, temp=False) as store:
+    with dbing.openLMDB(
+        cls=VerifierBaser,
+        name=config.name,
+        base=config.base,
+        headDirPath=config.head_dir,
+        temp=False,
+    ) as store:
         assert store.results.get(keys=("saved",)).status == "verified"
 
 
-@pytest.mark.parametrize("relative_uri", [
-    "",
-    "/hook?memo=a%20b",
-    "/hook?tag=a&tag=b",
-    "/hook?debug",
-    "/ho%6Fk",
-    "//hook",
-])
-def test_webhook_url_must_survive_hio_rendering(config, relative_uri):
-    """Reject rewritten path/query spellings before stores or delivery obligations exist."""
-    with pytest.raises(ValueError, match="HIO.*path/query"):
-        replace(
-            config, webhook_url="http://127.0.0.1:9999" + relative_uri,
-            webhook_aid=config.trusted_geda_aid,
-        )
+def test_runtime_has_one_receiver_and_no_mailbox(config):
+    """Compose one shared parser owner without opening or scheduling a mailbox."""
+    with patch(
+        "keri.app.storing.Mailboxer", side_effect=AssertionError("mailbox opened")
+    ):
+        with entered_service(config) as service:
+            receivers = [d for d in service.doers if isinstance(d, Receiver)]
+            assert len(receivers) == 1
+            assert not any(
+                isinstance(
+                    d,
+                    (
+                        indirecting.MailboxDirector,
+                        indirecting.Poller,
+                        storing.Respondant,
+                    ),
+                )
+                for d in service.doers
+            )
+            grants = next(
+                d for d in service.doers if isinstance(d, GrantNotificationDoer)
+            )
+            assert grants.parser is receivers[0].parser

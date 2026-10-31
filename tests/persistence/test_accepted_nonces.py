@@ -1,11 +1,11 @@
-"""Atomic accepted-nonce ownership using native LMDB, including process death/races."""
+"""persistence/test_accepted_nonces.py."""
 
 import subprocess
 import sys
 
 import falcon
-from falcon.testing import TestClient
 import pytest
+from falcon.testing import TestClient
 from keri.db import dbing
 
 from eoa_verifier.associations.statusing import StatusEnd
@@ -15,6 +15,25 @@ from eoa_verifier.persistence.records import (
     PendingVerification,
     VerificationResult,
 )
+from tests.support.issuers import candidate
+
+WORKER = """
+import os, sys
+from keri.db import dbing
+from eoa_verifier.persistence.basing import VerifierBaser
+root, said, mode = sys.argv[1:]
+with dbing.openLMDB(cls=VerifierBaser, name="process", headDirPath=root, temp=False) as baser:
+    if mode == "race":
+        print("ready", flush=True)
+        sys.stdin.readline()
+    elif mode == "abort":
+        baser.associations.serializer = lambda value: os._exit(23)
+    status = baser.accept(said, association={"issuerAid":"issuer"}, nonce="process-nonce",
+                          destination="https://receiver.example/hook", peer_aid="peer")
+    if mode == "commit":
+        os._exit(24)
+    print(status.status, flush=True)
+"""
 
 
 def verify(baser, said):
@@ -162,26 +181,6 @@ def test_old_scope_is_rejected_without_reading_or_migrating_acceptance():
             baser.bind_verification_scope(trusted_geda_aid="geda", chain_id=1)
 
 
-# Independent interpreters own separate environments. No application lock or retry.
-WORKER = """
-import os, sys
-from keri.db import dbing
-from eoa_verifier.persistence.basing import VerifierBaser
-root, said, mode = sys.argv[1:]
-with dbing.openLMDB(cls=VerifierBaser, name="process", headDirPath=root, temp=False) as baser:
-    if mode == "race":
-        print("ready", flush=True)
-        sys.stdin.readline()
-    elif mode == "abort":
-        baser.associations.serializer = lambda value: os._exit(23)
-    status = baser.accept(said, association={"issuerAid":"issuer"}, nonce="process-nonce",
-                          destination="https://receiver.example/hook", peer_aid="peer")
-    if mode == "commit":
-        os._exit(24)
-    print(status.status, flush=True)
-"""
-
-
 @pytest.mark.parametrize("same_said", [False, True])
 def test_independent_process_race_has_one_owner(tmp_path, same_said):
     options = dict(
@@ -267,3 +266,59 @@ def test_process_death_before_and_after_commit(tmp_path):
                 assert not original.acknowledged
                 assert accept(baser, "first").status == "accepted"
                 assert baser.outbox.get(keys=("first:1",)) == original
+
+
+@pytest.mark.parametrize(
+    "nonce", ["x", "N" * 128, "aZ09_-", "25C89E61-21F8-4CCF-948D-46D1FBB7BAE8"]
+)
+def test_ascii_boundaries_are_preserved_in_lmdb(nonce):
+    credential = candidate()
+    with dbing.openLMDB(cls=VerifierBaser) as baser:
+        issuer = credential["i"]
+        key = baser.nonce_key(issuer, nonce)
+        assert key == f"{issuer}.{nonce}".encode("ascii")
+        assert len(key) <= 173 < baser.env.max_key_size()
+
+
+@pytest.mark.parametrize(
+    "nonce",
+    [
+        "",
+        "N" * 129,
+        "é",
+        "e\u0301",
+        "😀",
+        " nonce",
+        "nonce ",
+        "nonce.nonce",
+        "nonce\n",
+        "nonce\r",
+        "nonce\x00",
+        "nonce/",
+        "nonce+",
+        "nonce=",
+        None,
+        7,
+    ],
+)
+def test_invalid_nonce_is_rejected_without_consumption(nonce):
+    credential = candidate()
+    with dbing.openLMDB(cls=VerifierBaser) as baser:
+        baser.enqueue(PendingVerification("candidate", "grant"))
+        baser.finish(
+            VerificationResult(
+                "candidate",
+                "verified",
+                eoaResult={"wallet": "wallet", "accountObservation": {}},
+            )
+        )
+        with pytest.raises(ValueError, match="nonce"):
+            baser.accept(
+                "candidate", association={"issuerAid": credential["i"]}, nonce=nonce
+            )
+        assert (
+            baser.accepted_nonces.cntAll()
+            == baser.associations.cntAll()
+            == baser.outbox.cntAll()
+            == 0
+        )
