@@ -46,8 +46,8 @@ Cooldown applies to the whole destination and survives restart. Only the expecte
 authenticated ACK completes delivery and resets the failure count.
 
 Permanent HTTP, payload, signature or configuration failures remain visible as
-`delivery.blocked`, with `error` and the destination's earliest `nextAttemptAt`
-(UTC Unix seconds). After correcting the cause, an embedding caller can resume
+`delivery.blocked`, with the current event's `error`. Shared destination scheduling
+state stays in local storage. After correcting the cause, an embedding caller can resume
 with `service.sender.request(event_id)`; restart alone does not unblock it.
 There is no retry REST route; the [operator guide](docs/operations.md#delivery-failures)
 also describes an offline resume for standalone deployments. Old acceptance events superseded by retirement stay

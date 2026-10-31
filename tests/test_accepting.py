@@ -194,3 +194,33 @@ def test_retirement_commits_its_own_event_once_and_preserves_facts(verified_stor
     assert response.json["accountObservation"] == accepted.accountObservation
     assert response.json["delivery"]["eventId"] == event.eventId
     assert not response.json["delivery"]["acknowledged"]
+
+
+def test_public_status_does_not_disclose_other_delivery_activity(verified_store):
+    """Another event's shared cooldown cannot change an acknowledged association's public view."""
+    baser = verified_store
+    accepted = accept_verified_result(baser)
+    baser.record_attempt(accepted.eventId)
+    baser.delivery_result(accepted.eventId)
+    event = baser.outbox.get(keys=(accepted.eventId,))
+    app = falcon.App()
+    app.add_route("/v1/associations/{said}/status", StatusEnd(baser))
+    client = TestClient(app)
+    path = "/v1/associations/association/status"
+    before = client.simulate_get(path).json
+
+    # A different association's event shares this destination.
+    result = baser.results.get(keys=("association",))
+    baser.enqueue(PendingVerification("other", "grant"))
+    baser.finish(VerificationResult("other", "verified", eoaResult=result.eoaResult))
+    other = baser.accept(
+        "other", association={}, destination=event.destination, peer_aid=event.peerAid
+    )
+    baser.record_attempt(other.eventId, next_attempt_at=3000000000)
+    schedule = DestinationSchedule(failures=3, nextAttemptAt=4000000000)
+    baser.delivery_result(other.eventId, error="target unavailable", schedule=schedule)
+
+    assert client.simulate_get(path).json == before
+    assert "nextAttemptAt" not in before["delivery"]
+    # Operators still have the complete durable schedule through local storage.
+    assert baser.destinations.get(keys=(event.destination,)) == schedule

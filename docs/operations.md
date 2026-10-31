@@ -20,7 +20,7 @@ python -m venv /opt/eoa-verifier/venv
 ```
 
 Use writable paths appropriate to the service account. Start from any working
-directory; schemas ship in the wheel. The pinned runtime is `gleif_keri==1.2.18`,
+directory; schemas ship in the wheel. The pinned runtime is `gleif_keri==1.2.19`,
 `gleif_hio==0.6.22`, `eth-account==0.14.0`. Runtime imports do not require a sibling
 checkout. CI installs the wheel outside the checkout and runs the integration tests with
 Foundry 1.5.1.
@@ -37,8 +37,9 @@ processes. Stop the process before copying/reopening stores for maintenance.
 The HTTP listener defaults to loopback on 9724. Put TLS at the deployment boundary.
 `GET /health` is liveness only. Public `GET /v1/associations/<said>/status` requires
 no signature, reads stored status/initial account observation and performs no RPC.
-It exposes delivery attempts, blocked/error state and the next destination attempt
-time (UTC seconds). The returned observation is not a continuous account check.
+It exposes delivery attempts and blocked/error state for that association's event.
+Shared destination timing and failure counts stay local. The returned observation
+is not a continuous account check.
 
 ## Introduce the webhook peer and present evidence
 
@@ -81,6 +82,10 @@ Permanent failures remain blocked until the cause is corrected; restart alone
 does not unblock them. Inspect public status and fix peer keys, authorization,
 receiver configuration or malformed responses before retrying. Stored events
 retain their original destination; changing startup settings does not retarget them.
+
+Local operators can inspect `store.destinations.get(keys=(event.destination,))`
+for the destination's failure count and `nextAttemptAt` (UTC Unix seconds). These
+scheduling records remain durable and drive the sender; they are absent from public GET.
 
 An embedding application can call `service.sender.request(event_id)`. For a
 standalone process, stop it and use its installed Python to unblock the **current**

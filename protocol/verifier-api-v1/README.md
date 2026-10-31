@@ -156,7 +156,9 @@ block number/hash and observation time. Unknown observations remain unknown.
 Known pending/rejected candidates return `200`; unknown SAIDs return `404`.
 Observation age is informational. GET performs no RPC, refresh or enrollment;
 its response does not replace authenticated status delivery to the oracle.
-Supersession is the oracle’s selection decision, not a verifier status.
+Delivery progress describes the requested association's current event; shared
+destination scheduling metadata is not public. Supersession is the oracle’s
+selection decision, not a verifier status.
 
 [carrier]: https://github.com/GLEIF-IT/vlei-oracle/blob/77849caae048381aee96b42f75053368d8d24c53/protocol/external-association-v1/eoa-v1/README.md
 [registry]: https://github.com/GLEIF-IT/vlei-comply/blob/6220cd78411b8b721838ee67f11293ff5504c05c/src/attestation/VLEIOracleRegistry.sol
