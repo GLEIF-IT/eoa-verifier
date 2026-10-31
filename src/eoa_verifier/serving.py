@@ -1,4 +1,4 @@
-"""Compose native intake, initial verification, retirement and status delivery."""
+"""Compose KERIpy intake, initial verification, retirement and status delivery."""
 
 import json
 import math
@@ -34,7 +34,7 @@ from .statusing import StatusEnd
 from .receiving.directing import CesrEnd, Receiver
 from .receiving.grants import GrantNotificationDoer
 from .verification.constants import ASSOCIATION_SCHEMA
-from .verification.coordinating import PresentationVerifierDoer
+from .verification.coordinating import VerificationCoordinator
 from .verification.schema_cache import pin_accepted_schemas
 from .verification.worker import EoaVerifierDoer
 
@@ -49,23 +49,23 @@ class ServiceConfig:
     rpc_url: str
     # Required positive network ID, checked against both association and RPC.
     chain_id: int
-    # Native store name; reuse to reopen existing state.
+    # KERIpy store name; reuse to reopen existing state.
     name: str = "eoa-verifier"
     # Habitat name within the Habery; reuse to retain the service AID.
     alias: str = "verifier"
-    # Optional native store namespace below each store root.
+    # Optional KERIpy store namespace below each store root.
     base: str = ""
-    # Root override for native storage; None uses each native store’s default/fallback.
+    # Root override for KERIpy storage; None uses each KERIpy store’s default/fallback.
     head_dir: str | None = None
     # HTTP bind address; loopback by default.
     host: str = "127.0.0.1"
     # HTTP listening port; zero asks the OS for an ephemeral port.
     http_port: int = 9724
-    # Optional native keystore passcode; excluded from dataclass repr.
+    # Optional KERIpy keystore passcode; excluded from dataclass repr.
     passcode: str | None = field(default=None, repr=False)
-    # Optional JSON native inception options; used only when creating the alias.
+    # Optional JSON KERIpy inception options; used only when creating the alias.
     incept_file: str | None = None
-    # Use disposable native stores and remove them on close; intended for tests.
+    # Use disposable KERIpy stores and remove them on close; intended for tests.
     temp: bool = False
     # Configure both to enable durable acceptance/outbox for one trusted destination.
     webhook_url: str | None = None
@@ -112,13 +112,13 @@ class VerifierService(doing.DoDoer):
     """Own service tasks and sockets while borrowing the caller's open stores."""
 
     def __init__(self, config, *, hby, rgy, baser, noter, **kwa):
-        """Wire native verification and HTTP tasks without owning shared stores.
+        """Wire KERIpy verification and HTTP tasks without owning shared stores.
 
-        config is ServiceConfig; hby/rgy are open native Habery/Regery instances,
-        baser is VerifierBaser, and noter is the native notification store. The
+        config is ServiceConfig; hby/rgy are open KERIpy Habery/Regery instances,
+        baser is VerifierBaser, and noter is the KERIpy notification store. The
         caller must keep all of them open until HIO child shutdown completes.
         Construction pins schemas and creates the configured habitat if absent;
-        inception options apply only to that creation. Native network Doers own
+        inception options apply only to that creation. HIO network Doers own
         their sockets. kwa is passed to HIO DoDoer.
         """
         baser.bind_verification_scope(
@@ -160,7 +160,7 @@ class VerifierService(doing.DoDoer):
         parser = parsing.Parser(
             framed=True, kvy=kvy, tvy=tvy, exc=exc, rvy=rvy, vry=verifier
         )
-        # HTTP and Grant embeds share native processors; Receiver owns their scheduling.
+        # HTTP and Grant embeds share KERIpy processors; Receiver owns their scheduling.
         receiver = Receiver(
             parser,
             msg_tock=hby.tocks["mailboxMsg"],
@@ -194,7 +194,7 @@ class VerifierService(doing.DoDoer):
                 notifier=notifier,
                 parser=parser,
             ),
-            PresentationVerifierDoer(
+            VerificationCoordinator(
                 baser=baser,
                 rgy=rgy,
                 trusted_geda_aid=config.trusted_geda_aid,
@@ -263,7 +263,7 @@ class HealthEnd:
 
 
 def run_service(config: ServiceConfig, *, expire: float = 0.0):
-    """Run the service inside native store contexts and a real-time HIO scheduler.
+    """Run the service inside KERIpy store contexts and a real-time HIO scheduler.
 
     config supplies identity, paths, passcode and network policy. expire is the
     scheduler limit in seconds; zero runs without a limit. Explicit config.temp
@@ -273,7 +273,7 @@ def run_service(config: ServiceConfig, *, expire: float = 0.0):
 
     Earlier contexts close if later startup fails. During normal shutdown HIO
     stops children before the contexts close their stores. Startup and cleanup
-    errors propagate; native contexts govern failures inside an individual open.
+    errors propagate; KERIpy contexts govern failures inside an individual open.
     Returns None after the scheduler stops.
     """
     options = dict(name=config.name, base=config.base, headDirPath=config.head_dir)

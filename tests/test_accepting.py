@@ -1,4 +1,6 @@
-"""Acceptance/outbox transactions and public stored status; native facts are tested end to end."""
+"""Acceptance/outbox transactions and public stored status; verified association facts are tested end to end."""
+
+import json
 
 from dataclasses import asdict
 from unittest.mock import patch
@@ -28,9 +30,9 @@ def verified_store(tmp_path):
             VerificationResult(
                 "association",
                 "verified",
-                verified={
+                eoaResult={
                     "wallet": "0x" + "12" * 20,
-                    "observation": {
+                    "accountObservation": {
                         "chainId": 31337,
                         "blockNumber": 42,
                         "blockHash": "0x" + "34" * 32,
@@ -44,14 +46,14 @@ def verified_store(tmp_path):
 
 
 def accept_verified_result(baser):
-    """Commit one known initial result with minimal application facts and target."""
+    """Commit one known initial result with minimal association facts and target."""
     return baser.accept(
         "association",
-        facts={
+        association={
             "issuerAid": "issuer",
             "leSaid": "le",
             "extId": "eip155:31337:0x" + "12" * 20,
-            "issuance": {"sequenceNumber": 3, "said": "anchor"},
+            "issuanceAnchor": {"sequenceNumber": 3, "said": "anchor"},
         },
         destination="https://receiver.example/hook",
         peer_aid="peer",
@@ -67,6 +69,13 @@ def test_acceptance_and_delivery_progress_survive_reopen(verified_store):
     baser.record_attempt(accepted.eventId)
     baser.delivery_result(accepted.eventId, error="connection failed")
     event = baser.outbox.get(keys=(accepted.eventId,))
+    # The durable bytes are the public status event, not the internal result row.
+    assert json.loads(event.body) == {
+        "version": "1", "eventId": "association:1",
+        "associationSaid": "association", "statusRevision": 1,
+        "status": "accepted", "association": accepted.association,
+        "accountObservation": accepted.accountObservation,
+    }
     schedule = DestinationSchedule(failures=3, nextAttemptAt=4000000000)
     baser.destinations.pin(keys=(event.destination,), val=schedule)
     baser.close()
@@ -77,7 +86,7 @@ def test_acceptance_and_delivery_progress_survive_reopen(verified_store):
 
     # The delivery component calls completion only after validating an ACK.
     baser.delivery_result(accepted.eventId)
-    assert baser.outbox.get(keys=(accepted.eventId,)).delivered
+    assert baser.outbox.get(keys=(accepted.eventId,)).acknowledged
     assert baser.destinations.get(keys=(event.destination,)).failures == 0
 
 
@@ -93,7 +102,7 @@ def test_failed_acceptance_rolls_back_status_and_event(verified_store):
         accept_verified_result(baser)
     assert baser.associations.get(keys=("association",)) is None
     assert list(baser.outbox.getItemIter()) == []
-    assert baser.results.get(keys=("association",)).outcome == "verified"
+    assert baser.results.get(keys=("association",)).status == "verified"
     assert accept_verified_result(baser).status == "accepted"
 
 
@@ -105,7 +114,7 @@ def test_rejected_result_cannot_create_acceptance_or_event(verified_store):
     with pytest.raises(ValueError, match="verified result"):
         baser.accept(
             "rejected",
-            facts={},
+            association={},
             destination="https://receiver.example/hook",
             peer_aid="peer",
         )
@@ -133,14 +142,13 @@ def test_public_get_returns_stored_status_and_old_observation(verified_store):
     accept_verified_result(baser)
     response = client.simulate_get("/v1/associations/association/status")
     assert response.json["status"] == "accepted"
-    assert response.json["observation"]["observedAt"] == "2000-01-01T00:00:00Z"
-    assert response.json["delivery"]["delivered"] is False
+    assert response.json["accountObservation"]["observedAt"] == "2000-01-01T00:00:00Z"
+    assert response.json["delivery"]["acknowledged"] is False
     assert client.simulate_get("/v1/associations/unknown/status").status_code == 404
 
 
 def test_retirement_commits_its_own_event_once_and_preserves_facts(verified_store):
     """A failed retirement rolls back; a committed one survives replay with its own pending ACK."""
-    import json
 
     baser = verified_store
     accepted = accept_verified_result(baser)
@@ -166,23 +174,23 @@ def test_retirement_commits_its_own_event_once_and_preserves_facts(verified_stor
     assert accept_verified_result(baser) == retired  # No reacceptance after revocation.
     assert baser.outbox.get(keys=(initial.eventId,)) == initial
     event = baser.outbox.get(keys=(retired.eventId,))
-    assert not event.delivered and event.attempts == 0
+    assert not event.acknowledged and event.attempts == 0
     assert (event.destination, event.peerAid) == (initial.destination, initial.peerAid)
     assert baser.destinations.get(keys=(event.destination,)) == schedule
     payload = json.loads(event.body)
-    assert (payload["revision"], payload["outcome"], payload["reasonCode"]) == (
+    assert (payload["statusRevision"], payload["status"], payload["reasonCode"]) == (
         2,
-        "invalid",
+        "revoked",
         "REVOKED",
     )
-    assert payload["association"] == accepted.facts
-    assert payload["observation"] == accepted.observation
+    assert payload["association"] == accepted.association
+    assert payload["accountObservation"] == accepted.accountObservation
 
     app = falcon.App()
     app.add_route("/v1/associations/{said}/status", StatusEnd(baser))
     response = TestClient(app).simulate_get("/v1/associations/association/status")
     assert response.json["status"] == "revoked"
     assert response.json["reason"] == "REVOKED"
-    assert response.json["observation"] == accepted.observation
+    assert response.json["accountObservation"] == accepted.accountObservation
     assert response.json["delivery"]["eventId"] == event.eventId
-    assert not response.json["delivery"]["delivered"]
+    assert not response.json["delivery"]["acknowledged"]

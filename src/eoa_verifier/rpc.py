@@ -1,4 +1,4 @@
-"""Yield for one JSON-RPC response on a caller-owned native HIO client."""
+"""Yield for one JSON-RPC response on a caller-owned HIO client."""
 
 import json
 
@@ -6,7 +6,7 @@ from hio.core import http
 
 
 class RpcClientDoer(http.ClientDoer):
-    """Deliver expected socket failures to the waiting RPC; native exit closes sockets."""
+    """Deliver expected socket failures to the waiting RPC; HIO exit closes sockets."""
 
     def recur(self, tyme):
         """Keep a failed connection from unwinding unrelated service tasks."""

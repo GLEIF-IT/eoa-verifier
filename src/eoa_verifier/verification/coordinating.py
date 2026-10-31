@@ -13,11 +13,11 @@ from eoa_verifier.verification.errors import (
 )
 
 
-class PresentationVerifierDoer(doing.DoDoer):
+class VerificationCoordinator(doing.DoDoer):
     """Own initial-verification scheduling, the EOA worker, and durable work updates.
 
-    Native credential checks precede dispatch and run once more after the initial
-    RPC wait to catch evidence received during that wait. These are local native
+    KERIpy credential checks precede dispatch and run once more after the initial
+    RPC wait to catch evidence received during that wait. These are local KERIpy
     state reads, not periodic verification or network refresh. One association is
     in flight; missing material and RPC failures leave unfinished work retryable.
     A verified result is initial progress, not application acceptance.
@@ -34,14 +34,14 @@ class PresentationVerifierDoer(doing.DoDoer):
         retry_delay: float = 5.0,
         **kwa,
     ):
-        """Borrow the work store and native Regery; own the supplied EOA child Doer.
+        """Borrow the work store and KERIpy Regery; own the supplied EOA child Doer.
 
         trusted_geda_aid and association_schema define the trust/profile policy.
         eoa_verifier is required and exposes msgs/cues decks. retry_delay is HIO-clock
         seconds between failed initial attempts. retry_at maps SAIDs to eligible times;
         inflight is the dispatched SAID or None; scan_after is the last examined key.
         These hints are in memory only: restart rediscovers durable unfinished work
-        and may retry sooner. kwa supplies native DoDoer scheduling options.
+        and may retry sooner. kwa supplies HIO DoDoer scheduling options.
         """
         self.baser = baser
         self.rgy = rgy
@@ -72,7 +72,7 @@ class PresentationVerifierDoer(doing.DoDoer):
         """Consume cues matching pending work and persist their status; return None.
 
         Ignore unmatched cues or work no longer pending. RPC failures set a retry
-        hint; local invalidity fails the row. Success rechecks locally accepted native
+        hint; local invalidity fails the row. Success rechecks locally accepted KERIpy
         state before completing the row. Store successful account observations with the
         result. Unexpected storage or programming errors propagate.
         """
@@ -103,7 +103,7 @@ class PresentationVerifierDoer(doing.DoDoer):
                 except (VerificationError, kering.ValidationError) as exc:
                     self._finish(op, "rejected", reason=str(exc))
                 else:
-                    self._finish(op, "verified", verified=cue["verified"])
+                    self._finish(op, "verified", eoaResult=cue["eoaResult"])
 
     def process_ready(self) -> None:
         """Skip scanning while busy; otherwise inspect at most one 32-record page.
@@ -124,15 +124,15 @@ class PresentationVerifierDoer(doing.DoDoer):
             if self.retry_at.get(op.associationSaid, 0) > self.tyme:
                 continue
             self.verify_operation(op)
-            break  # At most one native verification attempt per scheduler turn.
+            break  # At most one KERIpy verification attempt per scheduler turn.
 
     def verify_operation(self, op: PendingVerification) -> None:
-        """Check one pending row’s native evidence and dispatch it or record a decision.
+        """Check one pending row’s KERI evidence and dispatch it or record a decision.
 
         Missing artifacts retain pending work and a retry hint; invalid evidence
         produces a rejected result. Success queues the ACDC dictionary
         and tracks it as in flight. Candidate Grant bytes may justify rejection but never
-        substitute for native acceptance. Persistence/programming errors propagate.
+        substitute for KERIpy credential acceptance. Persistence/programming errors propagate.
         """
 
         try:
@@ -165,9 +165,9 @@ class PresentationVerifierDoer(doing.DoDoer):
         self.baser.note_pending(op.associationSaid, reason)
         self.retry_at[op.associationSaid] = self.tyme + self.retry_delay
 
-    def _finish(self, op, outcome, *, reason="", verified=None):
+    def _finish(self, op, status, *, reason="", eoaResult=None):
         """Persist the workflow decision and release its transient retry hint."""
         self.baser.finish(
-            VerificationResult(op.associationSaid, outcome, reason, verified or {})
+            VerificationResult(op.associationSaid, status, reason, eoaResult or {})
         )
         self.retry_at.pop(op.associationSaid, None)

@@ -15,17 +15,17 @@ from eoa_verifier.basing import PendingVerification, VerifierBaser
 
 
 class GrantNotReadyError(Exception):
-    """Native Grant material is not yet readable; retain its notice for a later turn."""
+    """KERIpy Grant material is not yet readable; retain its notice for a later turn."""
 
 
 class InvalidGrantError(ValueError):
-    """Grant decoding or native validation failed; report and consume its notice."""
+    """Grant decoding or KERIpy validation failed; report and consume its notice."""
 
 
 class GrantNotificationDoer(doing.Doer):
-    """Turn authenticated native IPEX notifications into durable verification work.
+    """Turn authenticated IPEX notifications into durable verification work.
 
-    Accepted Grant signatures authenticate delivery; they do not establish native
+    Accepted Grant signatures authenticate delivery; they do not establish KERIpy
     ACDC acceptance. Embedded evidence is replayed through the shared parser,
     which may escrow it. The coordinator separately checks credential acceptance.
     Missing Grant material leaves its notice pending for a later HIO turn.
@@ -40,7 +40,7 @@ class GrantNotificationDoer(doing.Doer):
         parser,
         **kwa,
     ):
-        """Borrow a work store, Habery, native Notifier and shared inbound parser.
+        """Borrow a work store, Habery, KERIpy Notifier and shared inbound parser.
 
         The outer resource contexts own stores; the service schedules parser/escrows;
         this Doer only consumes notifications and creates work. kwa supplies HIO options.
@@ -49,7 +49,7 @@ class GrantNotificationDoer(doing.Doer):
         self.hby = hby
         self.notifier = notifier
         self.parser = parser
-        self.scan_after = b""  # Native notice key; scheduling hint only.
+        self.scan_after = b""  # KERIpy notice key; scheduling hint only.
         super().__init__(**kwa)
 
     def recur(self, tyme):
@@ -60,13 +60,13 @@ class GrantNotificationDoer(doing.Doer):
         return False
 
     def process_notes(self) -> None:
-        """Consume native notices with attrs.r routing and attrs.d naming the Grant EXN.
+        """Consume KERIpy notices with attrs.r routing and attrs.d naming the Grant EXN.
 
         Remove unrelated, successfully processed and invalid notices through Noter so
         indexes/signatures are cleaned together. Report invalid input with a traceback;
         retain missing material and advance past it. Read at most 32 notices per turn.
         Unexpected parser/storage errors propagate and leave
-        the failing notice intact. Return None; native notification storage is borrowed.
+        the failing notice intact. Return None; KERIpy notification storage is borrowed.
         """
 
         batch = self._notice_batch()
@@ -90,7 +90,7 @@ class GrantNotificationDoer(doing.Doer):
                 self.notifier.noter.rem(notice.rid)
 
     def _notice_batch(self):
-        """Seek past the last native key and copy at most 32 notices before mutation.
+        """Seek past the last KERIpy key and copy at most 32 notices before mutation.
 
         Use a key cursor, not offset pagination that rescans the retained backlog.
         No read transaction survives processing; an empty page wraps next turn.
@@ -109,11 +109,11 @@ class GrantNotificationDoer(doing.Doer):
                 ]
 
     def _replay_embed(self, ims):
-        """Advance native parsing once for a complete, fixed embed frame.
+        """Advance KERIpy parsing once for a complete, fixed embed frame.
 
-        The native generator yields only for missing bytes. This private buffer
+        The KERIpy generator yields only for missing bytes. This private buffer
         cannot grow, so a yield is malformed input, not a reason to spin or wait.
-        Keep native dispatch/escrow behavior and close even an incomplete generator.
+        Keep KERIpy dispatch/escrow behavior and close even an incomplete generator.
         """
         parser = self.parser.onceParsator(ims=ims, framed=True)
         try:
@@ -130,11 +130,11 @@ class GrantNotificationDoer(doing.Doer):
     def process_grant_notice(self, attrs: dict[str, Any]) -> None:
         """Replay a decoded Grant’s embeds and enqueue a candidate for verification.
 
-        Only supplied embeds with attachments are replayed. Native parsing may escrow
+        Only supplied embeds with attachments are replayed. KERIpy parsing may escrow
         evidence; creating work does not assert acceptance. Repeated matching Grants
         preserve pending work and completed results. Schema-policy outcomes belong
         to the coordinator. GrantNotReadyError retains incomplete material; InvalidGrantError
-        identifies decoding/native-validation failure. Other errors propagate.
+        identifies decoding/KERIpy-validation failure. Other errors propagate.
         """
 
         grant_said, creder, streams = self._read_grant(attrs)
@@ -149,10 +149,10 @@ class GrantNotificationDoer(doing.Doer):
         self.baser.enqueue(PendingVerification(creder.said, grant_said))
 
     def _read_grant(self, attrs):
-        """Return (Grant SAID, native ACDC, replay bytearrays) from notification attributes.
+        """Return (Grant SAID, KERIpy ACDC, replay bytearrays) from notification attributes.
 
-        Clone and verify the native EXN, then validate the embedded ACDC identity before
-        any replay or work creation. Missing native material raises GrantNotReadyError;
+        Clone and verify the KERIpy EXN, then validate the embedded ACDC identity before
+        any replay or work creation. Missing KERIpy material raises GrantNotReadyError;
         malformed serialized input raises InvalidGrantError. Broad decoding exceptions
         are confined here, outside parser execution and persistence.
         """

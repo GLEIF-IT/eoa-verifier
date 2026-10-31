@@ -1,8 +1,8 @@
 # EOA verifier
 
-Receives native CESR/IPEX Grants and verifies EOA associations against the trusted
+Receives IPEX Grants carrying JSON messages with CESR attachments and verifies EOA associations against the trusted
 GEDA, the LE/QVI credential chain, the wallet's EIP-712 signature and a configured
-Ethereum network. Native evidence and initial verification progress survive restart.
+Ethereum network. KERIpy evidence and initial verification progress survive restart.
 Repeated Grants do not reset that progress. With a webhook configured, verified
 results become durable acceptance and signed delivery events. No Ethereum posting
 key is needed.
@@ -24,12 +24,12 @@ eoa-verifier server start \
 
 The service creates or reopens its KERI identity under the chosen store root.
 Reuse `--name`, `--base`, `--alias` and `--head-dir` on restart. `--incept-file`
-accepts native inception options for a new identity, including witnesses.
+accepts KERIpy inception options for a new identity, including witnesses.
 Send CESR to `/`; `/health` reports liveness. The listener defaults to loopback.
 
 Add `--webhook-url https://receiver.example/hook --webhook-aid "$RECEIVER_AID"`
 to enable application acceptance and delivery. Configure both together. The peer's
-current key state must already be natively accepted by this verifier; missing
+current key state must already be KERIpy-accepted by this verifier; missing
 keys leave delivery blocked pending correction. Omitting both retains verification-only operation.
 
 Public `GET /v1/associations/{said}/status` returns stored `pending`, `rejected`,
@@ -64,26 +64,26 @@ account checks run, and Ethereum publication remains the oracle's responsibility
 
 ## Maintainer orientation
 
-| Module                                   | Responsibility                                                                            |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `cli`, `serving`                         | Configuration, native stores, shared parser and HIO task/resource ownership.              |
-| `receiving/directing`                    | Receive CESR POST/PUT and schedule shared native parsing and escrows.                     |
-| `authing`                                | Authenticate service messages and ACKs; claim durable transport nonces.                   |
-| `receiving/grants`                       | Decode authenticated native Grants, replay embeds and create duplicate-safe work.         |
-| `basing`                                 | Atomic verification, acceptance/outbox and delivery records.                              |
-| `accepting`, `retiring`, `statusing`     | Accept verified results, reconcile native association revocation and serve stored status. |
-| `delivering`                             | Own webhook attempts, ACK validation and delivery completion.                             |
-| `verification/coordinating`              | Scan bounded work pages, dispatch one association and apply results.                      |
-| `verification/credentials`               | Check locally accepted ACDC/TEL/KEL evidence and LE/QVI relationships.                    |
-| `verification/eoa`, `worker`, `rpc`      | Check the wallet proof and observe the configured Ethereum account.                       |
-| `verification/constants`, `schema_cache` | Pin the existing credential schemas and load packaged resources.                          |
+| Module                                   | Responsibility                                                                              |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `cli`, `serving`                         | Configuration, KERIpy stores, shared parser and HIO task/resource ownership.                |
+| `receiving/directing`                    | Receive CESR POST/PUT and schedule shared KERIpy parsing and escrows.                       |
+| `authing`                                | Authenticate service messages and ACKs; claim durable transport nonces.                     |
+| `receiving/grants`                       | Decode authenticated IPEX Grants, replay embeds and create duplicate-safe work.             |
+| `basing`                                 | Atomic verification, acceptance/outbox and delivery records.                                |
+| `accepting`, `retiring`, `statusing`     | Accept verified results, reconcile verified association revocation and serve stored status. |
+| `delivering`                             | Own webhook attempts, ACK validation and delivery completion.                               |
+| `verification/coordinating`              | Scan bounded work pages, dispatch one association and apply results.                        |
+| `verification/credentials`               | Check locally accepted ACDC/TEL/KEL evidence and LE/QVI relationships.                      |
+| `verification/eoa`, `worker`, `rpc`      | Check the wallet proof and observe the configured Ethereum account.                         |
+| `verification/constants`, `schema_cache` | Pin the existing credential schemas and load packaged resources.                            |
 
-Initial flow: native Grant acceptance → embed replay and durable work → native
+Initial flow: IPEX Grant acceptance → embed replay and durable work → KERIpy
 credential checks → wallet proof and chain/block/code observation → final local
-native-state check after the RPC wait → a completed result. Missing artifacts
-or unusable RPC responses leave unfinished work for retry. Native acceptance is
+KERIpy-state check after the RPC wait → a completed result. Missing artifacts
+or unusable RPC responses leave unfinished work for retry. KERIpy acceptance is
 separate from receipt of bytes; KELs, TELs, credentials and schemas live in the
-native Habery/Reger stores, not in the work record.
+KERIpy Habery/Reger stores, not in the work record.
 
 Unfinished verification lives in `pending`; completed initial checks live in
 `results` with a `verified` or `rejected` outcome. Completion writes the result
@@ -96,47 +96,47 @@ With a destination configured, `AcceptanceDoer` reads the completed result and
 locally accepted issuance anchor without repeating initial checks. Acceptance,
 immutable facts and an outbox event commit in one application transaction. Restart
 recovers results awaiting acceptance; repeated acceptance preserves the original
-event and destination. Native evidence lives in a separate database and is not
+event and destination. KERIpy evidence lives in a separate database and is not
 part of this transaction. Missing evidence or already-known revocation prevents
 first acceptance. Once accepted, observation age does not invalidate the record.
 
 `RetirementDoer` scans bounded pages of accepted records against locally accepted
-association TEL state. Native `rev`/`brv` retires only that SAID and atomically
+association TEL state. KERIpy `rev`/`brv` retires only that SAID and atomically
 creates its second event, preserving original issuance facts, observation and
 webhook destination. Duplicate evidence and restart do not create more events or
 revive retirement. A different association for the same wallet is untouched;
 ownership selection belongs to the oracle.
 
-IPEX Grant delivers supporting native KEL/TEL artifacts; the Grant’s embedded
+IPEX Grant delivers supporting KEL/TEL artifacts; the Grant’s embedded
 issuance or credential alone does not prove revocation. The existing shared parser
-and escrows validate those artifacts. Retirement also recovers from stored native
+and escrows validate those artifacts. Retirement also recovers from stored KERIpy
 state after restart, so it requires neither a retained cue nor another Grant.
 Missing or escrowed evidence leaves accepted status unchanged. This local scan
 performs no account/source reassessment or network refresh. Previously accepted
 records still retire when webhook sending is disabled; their delivery obligations
 remain stored for the original destination.
 
-`run_service()` owns shared stores through native KERIpy context managers.
+`run_service()` owns shared stores through KERIpy context managers.
 `VerifierService` borrows those stores and composes the HIO tasks. HIO stops
 children before the outer contexts close stores, including startup failure and
-cancellation. Native network Doers own sockets; persistent stores survive shutdown.
+cancellation. HIO network Doers own sockets; persistent stores survive shutdown.
 
-Direct intake uses `CesrEnd` on `/`: native CESR JSON/header POST and raw
+Direct intake uses `CesrEnd` on `/`: JSON body/CESR-attachment header POST and raw
 CESR-stream PUT, with 204 acknowledging intake only. Explicit POST queries are
-unsupported; PUT streams are not filtered. `Receiver` schedules the shared native
+unsupported; PUT streams are not filtered. `Receiver` schedules the shared KERIpy
 parser and escrows. There is no mailbox polling, mailbox store or SSE query service.
 
 ## Service authentication primitives
 
 `authing.ServiceAuthenticator` signs and authenticates exact HTTP body bytes with
-the native service habitat and one configured peer AID. It uses the pinned KERI
+the KERIpy service habitat and one configured peer AID. It uses the pinned KERI
 `Signature-Input`/`Signature` format, checks locally accepted current keys, and
 stores nonce claims in `VerifierBaser` across restart. Single-key transferable
 Ed25519 service AIDs at threshold one are supported. See the
 [transport profile](protocol/verifier-api-v1/README.md#transport-signature-profile).
 
 `WebhookSender` uses these common primitives and owns ACK policy: actual HTTP 200,
-expected peer, exact attempt reference and an accepting payload for the event.
+expected peer, exact attempt reference and a `stored: true` acknowledgment for the event.
 The receiver must commit its effects before signing an ACK and acknowledge
 redelivery without repeating effects. See [ADR 0002](adrs/0002-verifier-result-object.md)
 for the implemented event and ACK shapes. Authentication alone is not delivery
@@ -145,7 +145,7 @@ completion or Ethereum confirmation.
 ## Test
 
 Install `python -m pip install '.[test]'` and run `python -m pytest -q`.
-The native integration test requires `anvil` from Foundry on `PATH` and fails if
+The KERI/IPEX integration test requires `anvil` from Foundry on `PATH` and fails if
 it is missing. It creates isolated GEDA/QVI/LE, witness and verifier stores and
 uses real IPEX/CESR, HTTP and a local chain. It never uses existing identities.
 
@@ -154,3 +154,9 @@ Packaged LE/QVI schemas come from [vLEI](https://github.com/GLEIF-IT/vLEI/tree/7
 the association schema retains the existing oracle protocol SAID.
 See the [service design](protocol/verifier-api-v1/README.md) and
 [workflow diagrams](docs/README.md).
+
+Terminology: this service exchanges JSON messages with CESR attachments.
+“KERIpy” identifies the implementation used for parsing, verification and storage;
+“CESR-native” is reserved for CESR serialization of message structures.
+See the [coordinated PoC upgrade](docs/operations.md#coordinated-poc-naming-update)
+before using this revision with existing stores or an oracle deployment.

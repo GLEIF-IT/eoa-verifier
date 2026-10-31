@@ -5,7 +5,7 @@ from keri import kering
 
 
 class AcceptanceDoer(doing.Doer):
-    """Borrow native/results stores and commit acceptance for verified candidates.
+    """Commit application acceptance using borrowed evidence and result stores.
 
     A bounded result scan recovers completion-to-acceptance gaps after restart.
     Read locally stored issuance evidence; do not repeat cryptographic or account
@@ -20,28 +20,28 @@ class AcceptanceDoer(doing.Doer):
         super().__init__(**kwa)
 
     def recur(self, tyme):
-        """Inspect one result page per turn, retaining native/application store separation."""
+        """Inspect one result page per turn, retaining KERIpy/application store separation."""
         page = self.baser.result_batch(after=self.after)
         if not page:
             self.after = ""
         for result in page:
             self.after = result.associationSaid
-            if result.outcome != "verified" or self.baser.associations.get(
+            if result.status != "verified" or self.baser.associations.get(
                 keys=(self.after,)
             ):
                 continue
-            facts = self.issuance_facts(self.after)
-            if facts is not None:
+            association = self.issuance_facts(self.after)
+            if association is not None:
                 self.baser.accept(
                     self.after,
-                    facts=facts,
+                    association=association,
                     destination=self.destination,
                     peer_aid=self.peer_aid,
                 )
         return False
 
     def issuance_facts(self, said):
-        """Read facts from natively accepted evidence for a completed verification.
+        """Read association facts from KERIpy-accepted evidence for a completed verification.
 
         Return None when evidence is absent or already revoked; this is a local
         status guard before first acceptance, not continuing source monitoring.
@@ -63,7 +63,7 @@ class AcceptanceDoer(doing.Doer):
             "issuerAid": credential.issuer,
             "leSaid": credential.edge["le"]["n"],
             "extId": credential.attrib["extId"],
-            "issuance": {
+            "issuanceAnchor": {
                 "sequenceNumber": state.a["s"],
                 "said": state.a["d"],
             },

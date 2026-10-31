@@ -1,4 +1,4 @@
-"""Exercise delivery scheduling with native storage and virtual HIO time, without network waits."""
+"""Exercise delivery scheduling with KERIpy storage and virtual HIO time, without network waits."""
 
 from datetime import datetime, timezone
 from email.utils import format_datetime
@@ -26,11 +26,11 @@ def accept(baser, said):
     baser.enqueue(PendingVerification(said, "grant"))
     baser.finish(
         VerificationResult(
-            said, "verified", verified={"wallet": "wallet", "observation": {}}
+            said, "verified", eoaResult={"wallet": "wallet", "accountObservation": {}}
         )
     )
     return baser.accept(
-        said, facts={}, destination="https://receiver.example/hook", peer_aid="peer"
+        said, association={}, destination="https://receiver.example/hook", peer_aid="peer"
     )
 
 
@@ -65,7 +65,7 @@ def test_retry_backoff_caps_and_paces_successes(outbox):
     assert len(starts) == 13
     assert all(b - a >= 1.5 - 1e-6 for a, b in zip(starts[:10], starts[1:11]))
     assert all(b - a >= 1 - 1e-6 for a, b in zip(starts, starts[1:]))
-    assert all(event.delivered for _, event in outbox.outbox.getItemIter())
+    assert all(event.acknowledged for _, event in outbox.outbox.getItemIter())
     assert (
         outbox.destinations.get(keys=("https://receiver.example/hook",)).failures == 0
     )
@@ -128,7 +128,7 @@ def test_permanent_failure_waits_for_explicit_resumption(outbox):
     with patch.object(sender, "_send", misconfigured):
         scheduler.do(doers=[sender])
     failed = outbox.outbox.get(keys=(accepted.eventId,))
-    assert failed.blocked and not failed.delivered and failed.attempts == 1
+    assert failed.blocked and not failed.acknowledged and failed.attempts == 1
     outbox.close()
     outbox.reopen()
     resumed = WebhookSender(baser=outbox, hab=None, clock=clock)
@@ -145,7 +145,7 @@ def test_permanent_failure_waits_for_explicit_resumption(outbox):
     with patch.object(resumed, "_send", corrected):
         scheduler.do(doers=[resumed], tyme=4)
     delivered = outbox.outbox.get(keys=(accepted.eventId,))
-    assert delivered.delivered and not delivered.blocked and delivered.attempts == 2
+    assert delivered.acknowledged and not delivered.blocked and delivered.attempts == 2
 
 
 def test_retry_after_supports_seconds_and_http_date():

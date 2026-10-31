@@ -1,4 +1,4 @@
-"""Reconcile accepted native association revocation with durable application status."""
+"""Reconcile accepted verified association revocation with durable application status."""
 
 from hio.base import doing
 from keri import kering
@@ -8,7 +8,7 @@ class RetirementDoer(doing.Doer):
     """Borrow stores and scan a bounded page of associations each scheduler turn.
 
     Read accepted local TEL state, without verification refreshes, peer polling or
-    account/source checks. The scan recovers native/application commit gaps after
+    account/source checks. The scan recovers KERIpy/application commit gaps after
     restart and does not rely on transient cues or a new Grant notification.
     """
 
@@ -18,7 +18,7 @@ class RetirementDoer(doing.Doer):
         super().__init__(tock=tock, **kwa)
 
     def recur(self, tyme):
-        """Retire only the exact SAID whose native TEL has accepted rev/brv state."""
+        """Retire only the exact SAID whose KERIpy TEL has accepted rev/brv state."""
         page = self.baser.association_batch(after=self.after)
         if not page:
             self.after = ""

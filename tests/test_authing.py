@@ -1,4 +1,4 @@
-"""Real native AID signatures and persistent replay state, without application delivery."""
+"""Real KERI AID signatures and persistent replay state, without application delivery."""
 
 from contextlib import ExitStack
 from unittest.mock import patch
@@ -14,7 +14,7 @@ from eoa_verifier.basing import VerifierBaser
 
 @pytest.fixture
 def peers(tmp_path):
-    """Open native signer/receiver identities and isolated persistent replay stores."""
+    """Open KERIpy signer/receiver identities and isolated persistent replay stores."""
     with ExitStack() as stack:
         a = stack.enter_context(habbing.openHby(name="a", temp=True))
         b = stack.enter_context(habbing.openHby(name="b", temp=True))
@@ -41,8 +41,8 @@ def message():
     )
 
 
-def test_native_roundtrip_and_ack_binding(peers):
-    """Authenticate a native signed request and a response bound to its attempt/body."""
+def test_signed_request_and_correlated_response(peers):
+    """Authenticate a KERI AID-signed request and a response bound to its attempt/body."""
     sender, receiver = peers
     context = message()
     headers, sent = sender.sign(**context)
@@ -85,7 +85,7 @@ def test_tampering_does_not_consume_nonce(peers, field, value):
 
 
 def test_restart_rejects_replay_but_allows_new_attempt(peers):
-    """A stored nonce survives native store reopen; a freshly signed retry is distinct."""
+    """A stored nonce survives KERIpy store reopen; a freshly signed retry is distinct."""
     sender, receiver = peers
     context = message()
     headers, _ = sender.sign(**context)
@@ -98,8 +98,8 @@ def test_restart_rejects_replay_but_allows_new_attempt(peers):
     receiver.verify(**context, headers=headers)
 
 
-def test_rotation_uses_native_accepted_key_state(peers):
-    """Same-AID rotation works after native event acceptance; old-key attempts fail."""
+def test_rotation_uses_keripy_accepted_key_state(peers):
+    """Same-AID rotation works after KERIpy event acceptance; old-key attempts fail."""
     sender, receiver = peers
     context = message()
     old, _ = sender.sign(**context)
@@ -160,7 +160,7 @@ def test_signed_error_response_authenticates_without_implying_delivery(peers):
     ],
 )
 def test_malformed_or_changed_headers_fail_closed(peers, header, value):
-    """Reject malformed native signatures and covered-field changes before claiming replay state."""
+    """Reject malformed KERI AID signatures and covered-field changes before claiming replay state."""
     sender, receiver = peers
     context = message()
     headers, _ = sender.sign(**context)
@@ -173,7 +173,7 @@ def test_rotated_peer_state_survives_service_restart(tmp_path):
     """Reopen actual service stores and authenticate with persisted rotated peer key state."""
     from keri import core
     from eoa_verifier.serving import ServiceConfig
-    from native_helpers import entered_service
+    from keripy_helpers import entered_service
 
     config = ServiceConfig(
         trusted_geda_aid=core.Signer().verfer.qb64,
@@ -207,7 +207,7 @@ def test_rotated_peer_state_survives_service_restart(tmp_path):
 
 
 def test_signed_http_request_and_ack(peers):
-    """Carry native signatures through Falcon HTTP parsing without a delivery implementation."""
+    """Carry KERI AID signatures through Falcon HTTP parsing without a delivery implementation."""
     import falcon
     from falcon.testing import TestClient
 

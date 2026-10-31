@@ -17,15 +17,15 @@ Persist one immutable JSON body per status event. The initial acceptance shape i
   "version": "1",
   "eventId": "example-association:1",
   "associationSaid": "example-association",
-  "revision": 1,
-  "outcome": "valid",
+  "statusRevision": 1,
+  "status": "accepted",
   "association": {
     "issuerAid": "example-issuer",
     "leSaid": "example-le",
     "extId": "eip155:31337:0x1111111111111111111111111111111111111111",
-    "issuance": {"sequenceNumber": 3, "said": "example-issuer-kel-event"}
+    "issuanceAnchor": {"sequenceNumber": 3, "said": "example-issuer-kel-event"}
   },
-  "observation": {
+  "accountObservation": {
     "wallet": "0x1111111111111111111111111111111111111111",
     "chainId": 31337,
     "blockNumber": 42,
@@ -38,21 +38,21 @@ Persist one immutable JSON body per status event. The initial acceptance shape i
 
 Identifiers above are illustrative. Issuance identifies the verified anchor in the
 issuer's KEL, not receipt order. The observation records the initial check only;
-its age never expires acceptance. `eventId` combines association SAID and revision.
+its age never expires acceptance. `eventId` combines association SAID and status revision.
 
-Verified association revocation creates a second event: `revision: 2`,
-`eventId: "example-association:2"`, `outcome: "invalid"`, and
-`reasonCode: "REVOKED"`. Keep the original `association` and `observation` objects;
+Verified association revocation creates a second event: `statusRevision: 2`,
+`eventId: "example-association:2"`, `status: "revoked"`, and
+`reasonCode: "REVOKED"`. Keep the original `association` and `accountObservation` objects;
 the issuance anchor must not become the revocation anchor. Commit retirement and
 this event together, using the original delivery destination. Retirement is terminal
 for that SAID and requires its own ACK; the initial event’s ACK cannot complete it.
 
 POST the exact stored bytes to the configured destination with the service
 signature profile. Completion requires an authenticated HTTP 200 response bound
-to that attempt, with exactly this JSON object (`accepted` is a boolean):
+to that attempt, with exactly this JSON object (`stored` is a boolean):
 
 ```json
-{"eventId": "example-association:1", "accepted": true}
+{"eventId": "example-association:1", "stored": true}
 ```
 
 The receiver signs only after durable acceptance. Redelivery keeps the event/body
@@ -62,7 +62,7 @@ repeating effects. A signature on an error response does not complete delivery.
 ## Consequences
 
 The producer owns serialization and the delivery component owns ACK validation.
-The public GET response is a separate stored-state view. Native verification
+The public GET response is a separate stored-state view. KERIpy verification
 remains required before acceptance; JSON alone is never evidence. Retirement
-requires accepted native association TEL revocation. Revisit a
+requires association TEL revocation accepted by KERIpy. Revisit a
 machine-readable result schema only when an actual consumer needs it.

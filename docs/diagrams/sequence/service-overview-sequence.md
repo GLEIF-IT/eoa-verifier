@@ -26,8 +26,8 @@ sequenceDiagram
             V->>V: Verify KERI / vLEI credential chain<br/>and Ethereum wallet signature
             V->>C: Read chain identity and EOA account state via RPC
             C-->>V: Chain and account observation
-            V->>O: Signed verified-result webhook<br/>Association, wallet, identity and revision
-            O->>O: Authenticate allowed verifier<br/>Deduplicate and persist accepted result
+            V->>O: Signed association-status webhook<br/>Association, wallet, identity and status revision
+            O->>O: Authenticate allowed verifier<br/>Deduplicate and persist association status
             O-->>V: Durable acknowledgement
         end
         rect rgb(246, 243, 247)

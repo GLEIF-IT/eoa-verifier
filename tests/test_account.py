@@ -4,13 +4,13 @@ import falcon
 import pytest
 from hio.base import doing
 from hio.core import http, tcp
-from native_helpers import candidate, free_port
+from keripy_helpers import candidate, free_port
 
 from eoa_verifier.verification.worker import EoaVerifierDoer
 
 
 class Rpc:
-    """Falcon endpoint simulating RPC facts over real HIO HTTP transport, without an Ethereum node."""
+    """Falcon endpoint simulating RPC observations over real HIO HTTP transport, without an Ethereum node."""
 
     def __init__(self, chain="0x7a69", code="0x"):
         """Set simulated chain/code results and an initially empty calls list for request assertions."""
@@ -66,7 +66,7 @@ def run_worker(worker, server_doer):
 def test_account_policy_uses_configured_chain_and_canonical_block(
     chain, code, expected
 ):
-    """Exercise chain/code policy against simulated facts carried by real local HTTP requests."""
+    """Exercise chain/code policy against simulated observations carried by real local HTTP requests."""
     endpoint, app = Rpc(chain, code), falcon.App()
     app.add_route("/", endpoint)
     server = http.Server(host="127.0.0.1", port=free_port(), app=app)
@@ -77,7 +77,7 @@ def test_account_policy_uses_configured_chain_and_canonical_block(
     cue = run_worker(worker, http.ServerDoer(server=server))
     assert cue["kin"] == expected
     if expected == "verified":
-        assert cue["verified"]["observation"]["blockNumber"] == 42
+        assert cue["eoaResult"]["accountObservation"]["blockNumber"] == 42
         assert endpoint.calls[-1]["params"][1] == {
             "blockHash": "0x" + "12" * 32,
             "requireCanonical": True,
@@ -205,7 +205,7 @@ def test_tls_failure_becomes_retry_without_stopping_scheduler():
     """A real peer speaking plaintext to a TLS client fails only this observation."""
 
     class PlaintextPeer(tcp.ServerDoer):
-        """Return plaintext after the ClientHello to trigger a native SSL error."""
+        """Return plaintext after the ClientHello to trigger a TLS error."""
 
         def recur(self, tyme):
             super().recur(tyme)

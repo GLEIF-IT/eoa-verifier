@@ -31,8 +31,8 @@ def validate_association_identifiers(
 ) -> None:
     """Validate canonical issuer AID and LE credential SAID plus the nonce; return None.
 
-    Use native CESR decoders and reject trailing material. Invalid inputs raise
-    ValueError or native material errors. This checks representation, not ownership.
+    Use KERIpy CESR primitive decoders and reject trailing material. Invalid inputs raise
+    ValueError or KERIpy material errors. This checks representation, not ownership.
     """
     validate_nonce(nonce)
     if coring.Prefixer(qb64=issuer_aid).qb64 != issuer_aid:
@@ -108,7 +108,7 @@ def verify_eoa_proof(association: dict[str, Any]) -> None:
     profile algorithm/domain, lowercase 65-byte hex signature with v=27/28, valid r
     and low-s (at most half the curve order), then match the recovered wallet.
     Policy/signature mismatches raise ValueError; malformed internal input may
-    propagate native or programming errors. No network or acceptance check occurs.
+    propagate KERIpy or programming errors. No network or acceptance check occurs.
     """
     attrs = association["a"]
     proof = attrs["proof"]

@@ -1,4 +1,4 @@
-"""Persist verification, acceptance and delivery independently of native evidence."""
+"""Persist verification, acceptance and delivery independently of KERI evidence."""
 
 import json
 from dataclasses import dataclass, field, replace
@@ -21,9 +21,9 @@ class VerificationResult:
     """Completed initial check, not application acceptance, ownership or endorsement."""
 
     associationSaid: str
-    outcome: str  # Workflow-selected verified or rejected outcome.
+    status: str  # Workflow-selected verified or rejected outcome.
     reason: str = ""
-    verified: dict = field(
+    eoaResult: dict = field(
         default_factory=dict
     )  # Wallet and initial account observation.
 
@@ -37,15 +37,15 @@ class VerificationScope:
 
 
 @dataclass
-class MessageReceipt:
+class ReplayClaim:
     """Durable transport nonce claim, independent of application-event deduplication."""
 
-    expires: int
+    expiresAt: int
 
 
 @dataclass
 class AssociationStatus:
-    """Stored application acceptance and immutable initially verified facts.
+    """Stored application acceptance and immutable initially verified association.
 
     Acceptance is not oracle ownership selection or an Ethereum endorsement.
     There is no expiry; verified association revocation changes status explicitly.
@@ -54,8 +54,8 @@ class AssociationStatus:
     associationSaid: str
     status: str
     eventId: str
-    facts: dict
-    observation: dict
+    association: dict
+    accountObservation: dict
     reason: str = ""
 
 
@@ -68,7 +68,7 @@ class Delivery:
     destination: str
     peerAid: str
     body: str
-    delivered: bool = False
+    acknowledged: bool = False
     attempts: int = 0
     error: str = ""
     # Permanent failure; requires correction and explicit resumption.
@@ -103,7 +103,7 @@ class VerifierBaser(dbing.LMDBer):
         self.results = koming.Komer(
             db=self, subkey="results.", schema=VerificationResult
         )
-        self.messages = koming.Komer(db=self, subkey="message.", schema=MessageReceipt)
+        self.replay_claims = koming.Komer(db=self, subkey="replay_claims.", schema=ReplayClaim)
         self.associations = koming.Komer(
             db=self, subkey="associations.", schema=AssociationStatus
         )
@@ -170,21 +170,21 @@ class VerifierBaser(dbing.LMDBer):
         """Copy a bounded page strictly after the SAID; close its cursor before returning."""
         return self._batch(self.pending, after=after, limit=limit)
 
-    def claim_message(self, peer, nonce, expires):
+    def claim_nonce(self, peer, nonce, expires_at):
         """Insert a peer/nonce claim after authentication; return False on replay.
 
-        expires is the authenticated Unix expiry time in seconds, retained as
+        expires_at is the authenticated Unix expiry time in seconds, retained as
         metadata. This method does not prune expired claims or deduplicate
         application events. Claims survive reopening persistent stores.
         """
-        return self.messages.put(keys=(peer, nonce), val=MessageReceipt(expires))
+        return self.replay_claims.put(keys=(peer, nonce), val=ReplayClaim(expires_at))
 
     def result_batch(self, *, after="", limit=32):
         """Copy a bounded result page; close the read transaction before acceptance."""
         return self._batch(self.results, after=after, limit=limit)
 
     def association_batch(self, *, after="", limit=32):
-        """Copy a bounded status page for local native-revocation reconciliation."""
+        """Copy a bounded status page for local TEL revocation reconciliation."""
         return self._batch(self.associations, after=after, limit=limit)
 
     def delivery_batch(self, *, after="", limit=32):
@@ -192,7 +192,7 @@ class VerifierBaser(dbing.LMDBer):
         return self._batch(self.outbox, after=after, limit=limit)
 
     def _batch(self, table, *, after, limit):
-        """Seek strictly after a key and release the native cursor before returning."""
+        """Seek strictly after a key and release the LMDB cursor before returning."""
         with self.env.begin(db=table.sdb) as txn, txn.cursor() as cursor:
             if not cursor.set_range(after.encode()):
                 return []
@@ -202,13 +202,13 @@ class VerifierBaser(dbing.LMDBer):
                 table.deserializer(raw) for _, raw in islice(cursor.iternext(), limit)
             ]
 
-    def accept(self, said, *, facts, destination, peer_aid):
+    def accept(self, said, *, association, destination, peer_aid):
         """Atomically persist acceptance and one outbox obligation for a verified result.
 
-        The caller supplies native issuance facts; storage does not verify credentials.
+        The caller supplies verified issuance facts; storage does not verify credentials.
         Repeated acceptance returns the original status without changing its event,
         body or destination. A failure rolls back all new application records.
-        Native stores are outside this LMDB transaction.
+        KERIpy stores are outside this LMDB transaction.
         """
         key = said.encode()
         with self.env.begin(write=True) as txn:
@@ -217,17 +217,16 @@ class VerifierBaser(dbing.LMDBer):
                 return self.associations.deserializer(previous)
             raw = txn.get(key, db=self.results.sdb)
             result = self.results.deserializer(raw) if raw is not None else None
-            if result is None or result.outcome != "verified":
+            if result is None or result.status != "verified":
                 raise ValueError("acceptance requires a completed verified result")
             event_id = f"{said}:1"
             observation = dict(
-                result.verified["observation"], wallet=result.verified["wallet"]
+                result.eoaResult["accountObservation"], wallet=result.eoaResult["wallet"]
             )
-            accepted = AssociationStatus(said, "accepted", event_id, facts, observation)
+            accepted = AssociationStatus(said, "accepted", event_id, association, observation)
             event = _status_delivery(
                 accepted,
-                revision=1,
-                outcome="valid",
+                status_revision=1,
                 destination=destination,
                 peer_aid=peer_aid,
             )
@@ -248,10 +247,10 @@ class VerifierBaser(dbing.LMDBer):
     def retire(self, said):
         """Atomically retire an accepted SAID and create its separate delivery obligation.
 
-        The caller establishes native revocation. Preserve original issuance facts,
+        The caller establishes verified revocation. Preserve original issuance facts,
         observation and delivery destination/peer; never change another association.
         Repeated retirement returns the same status/event, including across restart.
-        Native TEL persistence is separate and recovered by the retirement worker.
+        KERIpy TEL persistence is separate and recovered by the retirement worker.
         """
         key = said.encode()
         with self.env.begin(write=True) as txn:
@@ -270,8 +269,7 @@ class VerifierBaser(dbing.LMDBer):
             )
             event = _status_delivery(
                 retired,
-                revision=2,
-                outcome="invalid",
+                status_revision=2,
                 destination=original.destination,
                 peer_aid=original.peerAid,
             )
@@ -297,7 +295,7 @@ class VerifierBaser(dbing.LMDBer):
             )
             if event is None:
                 raise ValueError("unknown delivery event")
-            if event.delivered:
+            if event.acknowledged:
                 return event
             event.attempts += 1
             event.blocked = False
@@ -329,15 +327,15 @@ class VerifierBaser(dbing.LMDBer):
             if raw is None:
                 raise ValueError("unknown delivery event")
             event = self.outbox.deserializer(raw)
-            if event.delivered:
+            if event.acknowledged:
                 return
             event.error = error
             event.blocked = blocked
-            event.delivered = not error
+            event.acknowledged = not error
             txn.put(
                 event_id.encode(), self.outbox.serializer(event), db=self.outbox.sdb
             )
-            if event.delivered:
+            if event.acknowledged:
                 raw = txn.get(event.destination.encode(), db=self.destinations.sdb)
                 schedule = self.destinations.deserializer(raw)
                 schedule.failures = 0
@@ -349,16 +347,16 @@ class VerifierBaser(dbing.LMDBer):
                 )
 
 
-def _status_delivery(status, *, revision, outcome, destination, peer_aid):
+def _status_delivery(status, *, status_revision, destination, peer_aid):
     """Serialize one immutable v1 event for the existing outbox/ACK protocol."""
     payload = {
         "version": "1",
         "eventId": status.eventId,
         "associationSaid": status.associationSaid,
-        "revision": revision,
-        "outcome": outcome,
-        "association": status.facts,
-        "observation": status.observation,
+        "statusRevision": status_revision,
+        "status": status.status,
+        "association": status.association,
+        "accountObservation": status.accountObservation,
     }
     if status.reason:
         payload["reasonCode"] = status.reason

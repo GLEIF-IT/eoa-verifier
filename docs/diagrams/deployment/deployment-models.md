@@ -18,15 +18,15 @@ flowchart TB
     T["Third-party service<br/>Configured webhook destination"]
     ETH["Ethereum node / RPC"]
 
-    KW -->|"IPEX Grant + native evidence"| V
+    KW -->|"IPEX Grant + KERI evidence"| V
     V -->|"Initial account check"| ETH
     V -->|"KERI AID-signed status updates"| T
     T -->|"Authenticated ACK"| V
 ```
 
 The KERI wallet embeds the EIP-712 proof, issues the untargeted ACDC and presents the
-association with its native evidence, including the LE/QVI chain. The verifier
-performs initial verification and stores acceptance. Later, verified native
+association with its KERI evidence, including the LE/QVI chain. The verifier
+performs initial verification and stores acceptance. Later, verified KERIpy
 revocation evidence retires the association and produces a separate status update.
 Each webhook event requires an authenticated ACK after durable receipt; failed
 deliveries remain pending and retry with backoff. No Ethereum transaction is needed
@@ -55,7 +55,7 @@ flowchart TB
         U["USDC token<br/>Sender and recipient balances"]
     end
 
-    KW -->|"IPEX Grant + native evidence"| V
+    KW -->|"IPEX Grant + KERI evidence"| V
     V -->|"Initial account check"| RPC
     V -->|"Signed status updates"| O
     O -->|"Authenticated ACK"| V

@@ -7,7 +7,7 @@ import pytest
 
 from eoa_verifier.cli import main
 from eoa_verifier.serving import run_service
-from native_helpers import entered_service, verifier_service
+from keripy_helpers import entered_service, verifier_service
 
 
 @pytest.mark.parametrize("failure", ["configing.openCF", "oobiing.Oobiery"])
@@ -56,7 +56,7 @@ def test_children_stop_before_borrowed_stores_close(config, mode):
             stopped.append(True)
 
     class BrokenEntry(doing.Doer):
-        """Fail after earlier siblings entered, exercising native HIO unwinding."""
+        """Fail after earlier siblings entered, exercising HIO unwinding."""
 
         def enter(self, *, temp=None):
             raise RuntimeError("entry failure")
@@ -149,13 +149,13 @@ def test_saved_verification_keeps_its_trust_scope_when_enabling_delivery(config)
     from eoa_verifier.basing import VerificationResult
 
     with entered_service(config) as service:
-        # Isolate storage policy: native verification itself is covered by test_native.
+        # Isolate storage policy: KERIpy verification itself is covered by test_ipex_integration.
         service.baser.results.put(keys=("saved",), val=VerificationResult("saved", "verified"))
     delivery = replace(config, webhook_url="http://127.0.0.1:9999/hook",
                        webhook_aid=config.trusted_geda_aid)
     with entered_service(delivery) as reopened:
         assert reopened.sender is not None
-        assert reopened.baser.results.get(keys=("saved",)).outcome == "verified"
+        assert reopened.baser.results.get(keys=("saved",)).status == "verified"
     for changed in (
         replace(delivery, trusted_geda_aid=core.Signer().verfer.qb64),
         replace(delivery, chain_id=1),
@@ -164,7 +164,7 @@ def test_saved_verification_keeps_its_trust_scope_when_enabling_delivery(config)
             with verifier_service(changed):
                 pass
     with entered_service(delivery) as reopened:
-        assert reopened.baser.results.get(keys=("saved",)).outcome == "verified"
+        assert reopened.baser.results.get(keys=("saved",)).status == "verified"
 
 
 def test_unscoped_saved_results_are_preserved_and_refused(config):
@@ -182,4 +182,4 @@ def test_unscoped_saved_results_are_preserved_and_refused(config):
 
     with dbing.openLMDB(cls=VerifierBaser, name=config.name, base=config.base,
                        headDirPath=config.head_dir, temp=False) as store:
-        assert store.results.get(keys=("saved",)).outcome == "verified"
+        assert store.results.get(keys=("saved",)).status == "verified"

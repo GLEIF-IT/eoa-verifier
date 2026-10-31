@@ -20,11 +20,11 @@ class EoaVerifierDoer(doing.DoDoer):
 
     msgs contains schema-validated association ACDC dictionaries, including d, i,
     u, a.extId, a.proof and e.le.n. cues contains ordinary dictionaries:
-    - {kin: "verified", said, verified: {wallet, observation}};
+    - {kin: "verified", said, eoaResult: {wallet, accountObservation}};
     - {kin: "failed", said, error} for an invalid wallet proof or account;
     - {kin: "retry", said, error} for unavailable or unusable RPC responses.
 
-    observation contains chainId and blockNumber integers, blockHash and code hex
+    accountObservation contains chainId and blockNumber integers, blockHash and code hex
     strings, and observedAt ISO timestamp. The coordinator persists successful
     observations with completed results; this worker owns no application storage. Programming errors
     propagate instead of becoming retry cues. Each HTTP ClientDoer is a child whose
@@ -35,7 +35,7 @@ class EoaVerifierDoer(doing.DoDoer):
         """Configure the trusted rpc_url, expected chain_id and per-call timeout in seconds.
 
         msgs and cues are transient HIO decks; the coordinator persists work status
-        instead of these queues. kwa supplies native DoDoer options such as scheduling tock.
+        instead of these queues. kwa supplies HIO DoDoer options such as scheduling tock.
         """
         self.rpc_url = rpc_url
         self.chain_id = chain_id
@@ -89,8 +89,8 @@ class EoaVerifierDoer(doing.DoDoer):
             )
         except ValueError as exc:
             return {"kin": "failed", "said": said, "error": str(exc)}
-        result["observation"] = observation
-        return {"kin": "verified", "said": said, "verified": result}
+        result["accountObservation"] = observation
+        return {"kin": "verified", "said": said, "eoaResult": result}
 
     def _observe_account(self, wallet):
         """Yield through chain ID, latest block, then code at that block; return observation.

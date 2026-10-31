@@ -11,7 +11,7 @@ association issuer. An LEI or LE credential SAID is not that identity.
 
 ## Decision
 
-Every candidate must pass initial native KERI/ACDC and LE/QVI relationship
+Every candidate must pass initial KERI/ACDC and LE/QVI relationship
 checks, verified issuance anchoring, EIP-712 wallet signature verification and
 the configured-chain account check. Accepted associations remain valid indefinitely
 until their association ACDC is revoked or they are superseded. Age and outages
@@ -20,7 +20,7 @@ do not invalidate them. No refreshes or continuing source/account checks.
 1. **Same LE: later issuance wins.** For the same chain/address and holder AID,
    a fully verified association supersedes the earlier one only at a strictly
    higher verified issuance-anchor sequence in that AID's KEL. Do not use a
-   revocation anchor, arrival order, assessment revision or timestamps.
+   revocation anchor, arrival order, status revision or timestamps.
 2. **Different LE: revoke before transfer.** Reject another LE's competing
    claim until verified revocation of the current association ACDC releases it.
    Revoking an older, replaced association does not release its successor.

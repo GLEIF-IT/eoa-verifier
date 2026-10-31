@@ -1,4 +1,4 @@
-"""Test-side issuer setup and native KLI artifact workflows.
+"""Test-side issuer setup and KERIpy KLI artifact workflows.
 
 The verifier library receives and verifies; these helpers own test controllers,
 credential issuance setup, and supporting evidence transport.
@@ -34,7 +34,7 @@ def free_port():
 
 
 def candidate():
-    """Return a signed, SAID-valid test ACDC dict without native issuance or acceptance evidence."""
+    """Return a signed, SAID-valid test ACDC dict without KERIpy issuance or acceptance evidence."""
     said = coring.Diger(ser=b"test").qb64
     challenge = build_challenge(
         issuer_aid=core.Signer().verfer.qb64,
@@ -47,7 +47,7 @@ def candidate():
 
 
 def anchor(hab, event) -> serdering.SerderKERI:
-    """Append a signed TEL seal to hab’s KEL and return its native interaction Serder."""
+    """Append a signed TEL seal to hab’s KEL and return its KERIpy interaction Serder."""
     message = hab.interact(
         data=[eventing.SealEvent(event.pre, event.snh, event.said)._asdict()]
     )
@@ -55,7 +55,7 @@ def anchor(hab, event) -> serdering.SerderKERI:
 
 
 def replay(hab, rgy, registry, creder) -> bytes:
-    """Return issuer KEL, registry/credential TEL and accepted ACDC bytes from native stores.
+    """Return issuer KEL, registry/credential TEL and accepted ACDC bytes from KERIpy stores.
 
     The caller supplies an issued credential and its registry. Prepend upstream
     streams when the receiver also needs LE/QVI evidence; this helper does no network I/O.
@@ -71,7 +71,7 @@ def replay(hab, rgy, registry, creder) -> bytes:
 
 
 def issue_credential(issuer, registry, creder):
-    """Schedule native TEL/KEL issuance for creder in registry using the supplied Credentialer.
+    """Schedule KERIpy TEL/KEL issuance for creder in registry using the supplied Credentialer.
 
     Yield 0.01 HIO seconds until completion, then return None. The caller must run
     Registrar, Credentialer and escrow Doers and own their stores.
@@ -85,7 +85,7 @@ def issue_credential(issuer, registry, creder):
 
 
 def revoke_credential(issuer, registry, creder):
-    """Anchor native revocation and schedule it on the supplied issuer's Registrar.
+    """Anchor verified revocation and schedule it on the supplied issuer's Registrar.
 
     Yield 0.01 HIO seconds until witnessed completion, then return None. The caller
     owns scheduling and later transports the resulting TEL/KEL evidence.
@@ -114,7 +114,7 @@ def receive(hby, rgy, stream) -> None:
 
 
 def rules(schema) -> dict:
-    """Return a SAID-bearing rules dict with the exact disclaimers required by the supplied native schema."""
+    """Return a SAID-bearing rules dict with the exact disclaimers required by the supplied credential schema."""
     fields = schema.sed["properties"]["r"]["oneOf"][1]["properties"]
     return coring.Saider.saidify(
         sad={
@@ -135,9 +135,9 @@ def grant(
     *,
     acdc=None,
 ) -> bytes:
-    """Return native IPEX Grant bytes addressed to recipient from the supplied issuer stores.
+    """Return IPEX Grant bytes addressed to recipient from the supplied issuer stores.
 
-    Use the issued creder plus native issuance/anchor embeds; acdc can override
+    Use the issued creder plus KERIpy issuance/anchor embeds; acdc can override
     serialized credential bytes. Source
     credentials travel separately so tests can withhold them. This builds, not sends.
     """
@@ -167,7 +167,7 @@ class IssuerEscrows(doing.Doer):
 
     The KLI normally performs this alongside its mailbox processing. Local
     issuer-to-holder delivery here has no mailbox; Registrar and Credentialer
-    still run as their own native HIO doers.
+    still run as their own HIO doers.
     """
 
     def __init__(self, issuers):
@@ -184,7 +184,7 @@ class IssuerEscrows(doing.Doer):
 
 
 def issuer_for(hby, rgy):
-    """Return a native Credentialer with Registrar and Verifier borrowing the supplied Habery/Regery."""
+    """Return a KERIpy Credentialer with Registrar and Verifier borrowing the supplied Habery/Regery."""
     registrar = credentialing.Registrar(hby=hby, rgy=rgy, counselor=None)
     return credentialing.Credentialer(
         hby=hby,
@@ -197,9 +197,9 @@ def issuer_for(hby, rgy):
 def open_issuers(stack, schemas, *, base, temp, witness):
     """Return actor and issuer dictionaries for isolated witnessed GEDA/QVI/LE controllers.
 
-    Pin supplied native schemas and configure QVI delegation to GEDA. stack owns store closure;
+    Pin supplied credential schemas and configure QVI delegation to GEDA. stack owns store closure;
     temp selects disposable stores, base selects their namespace, witness supplies
-    the witness AID. The caller must schedule the returned native issuance tasks.
+    the witness AID. The caller must schedule the returned KERIpy issuance tasks.
     """
     actors, issuers = {}, {}
     for name in ("geda", "qvi", "le"):
@@ -225,7 +225,7 @@ def open_issuers(stack, schemas, *, base, temp, witness):
 
 
 def collect_receipts(issuer, hab, sn):
-    """Queue hab/sn on the issuer’s native receipt worker; yield until its completion cue, then return None."""
+    """Queue hab/sn on the issuer’s KERIpy receipt worker; yield until its completion cue, then return None."""
     receiptor = issuer.registrar.receiptor
     receiptor.msgs.append({"pre": hab.pre, "sn": sn})
     while not any(cue["pre"] == hab.pre and cue["sn"] == sn for cue in receiptor.cues):
@@ -260,11 +260,11 @@ def approve_qvi(actors, issuers):
 
 
 def association_from_challenge(challenge, signature, registry):
-    """Return a native SAID-bearing association ACDC for typed challenge, signature and registry.
+    """Return a SAID-bearing association ACDC for typed challenge, signature and registry.
 
     Require the exact EOA challenge shape and canonical registry SAID, raising
     ValueError on mismatch. Build nested proof/attribute/LE-edge SAIDs but do not
-    verify the wallet signature, issue the credential or establish native acceptance.
+    verify the wallet signature, issue the credential or establish KERIpy credential acceptance.
     """
     fields = challenge["message"]
     expected = build_challenge(
@@ -315,7 +315,7 @@ def association_from_challenge(challenge, signature, registry):
 
 @contextmanager
 def verifier_service(config):
-    """Yield a service borrowing native stores owned by this fixture.
+    """Yield a service borrowing KERIpy stores owned by this fixture.
 
     The caller must stop its HIO scheduler before leaving this context. Use
     entered_service to enter and exit HIO tasks without advancing scheduler turns. Persistent
