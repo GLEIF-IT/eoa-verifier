@@ -186,6 +186,7 @@ def test_unscoped_saved_results_are_preserved_and_refused(config):
 
 
 @pytest.mark.parametrize("relative_uri", [
+    "",
     "/hook?memo=a%20b",
     "/hook?tag=a&tag=b",
     "/hook?debug",
