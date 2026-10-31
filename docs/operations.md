@@ -1,7 +1,7 @@
 # Operate EOA Verifier
 
 EOA Verifier is an independent Python application. It needs a trusted GEDA AID,
-chain ID/RPC endpoint and persistent native stores. It does not need the oracle
+chain ID/RPC endpoint and persistent KERIpy stores. It does not need the oracle
 package, contract addresses or an Ethereum posting key.
 
 ## Install and start
@@ -22,16 +22,15 @@ python -m venv /opt/eoa-verifier/venv
 Use writable paths appropriate to the service account. Start from any working
 directory; schemas ship in the wheel. The pinned runtime is `gleif_keri==1.2.18`,
 `gleif_hio==0.6.22`, `eth-account==0.14.0`. Runtime imports do not require a sibling
-checkout. CI installs the wheel outside the checkout and runs native tests with
+checkout. CI installs the wheel outside the checkout and runs the integration tests with
 Foundry 1.5.1.
 
 Reuse name, base, alias, store root and passcode on restart. `--incept-file` supplies
-native options for a new identity only. The application store is bound to its
+KERIpy options for a new identity only. The application store is bound to its
 GEDA root and chain ID before workers start, including verification-only mode.
 Changing either requires separate stores. Existing stores with completed results
-but no recorded scope are refused; preserve them for explicit migration, rather
-than guessing their original policy or deleting status. Enabling webhook delivery
-with the same root/chain remains supported. Preserve the entire native/application
+but no recorded scope are refused; preserve them and use fresh stores rather than guessing their original policy. Enabling webhook delivery
+with the same root/chain remains supported. Preserve the entire KERIpy/application
 store set together; do not copy live LMDB files or share writable stores between
 processes. Stop the process before copying/reopening stores for maintenance.
 
@@ -43,29 +42,30 @@ time (UTC seconds). The returned observation is not a continuous account check.
 
 ## Introduce the webhook peer and present evidence
 
-Configure the peer AID explicitly. Deliver its public native CESR KEL and required
-attachments through `PUT /`, or resolve its native OOBI through the supported
-native endpoint. A header-provided key is never trusted. The receiver likewise
+Configure the peer AID explicitly. Deliver its public KEL messages with CESR attachments through `PUT /`, or resolve its OOBI through the supported
+KERIpy endpoint. A header-provided key is never trusted. The receiver likewise
 needs this verifier's accepted current key state; export it from
 `GET /oobi/<verifier-aid>/controller`. Current service authentication supports one
-transferable Ed25519 key at threshold one. On rotation, introduce the new native
+transferable Ed25519 key at threshold one. On rotation, introduce the new KERI
 key events before resuming delivery. Missing keys leave events blocked.
 
 Present the untargeted association through IPEX Grant with its source credentials,
-KEL/TEL and witnessed issuance evidence. `POST /` accepts native CESR JSON/header
+KEL/TEL and witnessed issuance evidence. `POST /` accepts JSON body/CESR-attachment header
 framing; `PUT /` accepts a finite CESR stream. HTTP 204 acknowledges intake only.
-Each request is parsed independently as remote evidence. Incomplete message or
-attachment bytes are discarded at its boundary, so they cannot block later
-deliveries. Complete preceding messages can already have entered native state;
+Each request is parsed independently as remote evidence. When KERIpy yields for missing
+message or attachment bytes, the incomplete
+remainder is discarded at that request boundary. The pinned KERIpy receipt-couple
+parser has a known non-yielding shortage path; this remains an unresolved intake
+liveness defect. Complete preceding messages can already have entered KERIpy state;
 request processing is not an atomic batch. Missing verification evidence still
-uses native escrows.
+uses KERIpy escrows.
 Initial checks must finish before acceptance. Without webhook configuration, the
 service retains verification-only results and does not create delivery obligations.
 
 Accepted status remains valid indefinitely. To retire it, deliver the association's
-native revocation TEL and its anchored/witnessed issuer KEL evidence through the
-same native transport. Grant receipt or ACDC bytes alone are not revocation proof.
-Native validation/escrows must accept the revocation. Retirement persists across
+revocation TEL and its anchored/witnessed issuer KEL evidence through the
+same CESR HTTP transport. Grant receipt or ACDC bytes alone are not revocation proof.
+KERIpy validation/escrows must accept the revocation. Retirement persists across
 restart and creates its own immutable event requiring its own authenticated ACK.
 Retiring an old association does not retire its replacement.
 
@@ -107,3 +107,14 @@ downstream mapping active until delivery and withdrawal finish. Source-chain
 monitoring, periodic account rechecks and advanced Ethereum recovery are outside
 this build. The [paired launcher](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/docs/gl1-vlei-local-infra-setup.md)
 provides the local verifier/oracle/Anvil setup and qualification.
+
+## Coordinated PoC naming update
+
+This revision changes status-event, ACK and application-store field names in place.
+Use fresh application stores and the matching oracle revision; old event bodies and
+records are not migrated or accepted through compatibility aliases. Keep existing
+stores untouched. Qualify the coordinated deployment with fresh local contracts.
+The webhook now carries `status: "accepted"` or `"revoked"`, `statusRevision`,
+`association.issuanceAnchor` and `accountObservation`. The authenticated ACK is
+exactly `{eventId, stored: true}`. Public delivery state uses `acknowledged`.
+The oracle update is a separate rollout prerequisite; an older oracle is incompatible.

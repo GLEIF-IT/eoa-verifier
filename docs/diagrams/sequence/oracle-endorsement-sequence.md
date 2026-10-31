@@ -20,8 +20,8 @@ sequenceDiagram
     participant C as vlei-comply contracts<br/>Configured chain
 
     rect rgb(246, 243, 247)
-        Note over V,C: 1. Accept an authenticated verification result
-        V->>O: AID-signed verified-event webhook<br/>Stable event ID, revision and association
+        Note over V,C: 1. Receive authenticated association status
+        V->>O: AID-signed association-status webhook<br/>Stable event ID, status revision and association
         O->>O: Check signature, allowed AID, action and chain<br/>Atomically deduplicate and persist accepted state
         O-->>V: Durable acknowledgement
         Note over V,O: Retry with the same event ID until acknowledged<br/>Acknowledgement is not an on-chain endorsement
@@ -50,4 +50,4 @@ The oracle derives `wallet` from `extId` and `identityRef = keccak256(issuerAid)
 
 Use existing contract operations and ordinary submission/result handling. Report failures accurately: submission alone is not confirmed contract state. Retrying an accepted association checks durable revocation/replacement state without repeating verification. No new nonce-reconciliation, cancellation or reorg-recovery subsystem is required. See [association revocation](revocation-status-sequence.md) and [stablecoin transfers](stablecoin-end-to-end-sequence.md).
 
-Sources: `eoa-profile.docx`, `methodology.docx` (original color theme), [wallet association policy](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/src/policies/VLEIWalletAssociationPolicy.sol), [oracle registry](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/src/attestation/VLEIOracleRegistry.sol), and [wrapped token](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/src/wrappers/wUSDC.sol). Contract behavior is grounded in the linked comply revision; the independent services and authenticated delivery are qualified in the paired native workflow.
+Sources: `eoa-profile.docx`, `methodology.docx` (original color theme), [wallet association policy](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/src/policies/VLEIWalletAssociationPolicy.sol), [oracle registry](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/src/attestation/VLEIOracleRegistry.sol), and [wrapped token](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/src/wrappers/wUSDC.sol). Contract behavior is grounded in the linked comply revision; the independent services and authenticated delivery are qualified in the paired IPEX workflow.

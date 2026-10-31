@@ -22,11 +22,11 @@ sequenceDiagram
 
     Note over V,O: Accepted status persists indefinitely<br/>No periodic account or source-chain checks
     rect rgb(246, 243, 247)
-        Note over K,C: 1. Accept native association revocation evidence
-        K-->>V: IPEX/native delivery with supporting TEL/KEL evidence
-        V->>V: Native parser and escrows accept revocation<br/>Grant or credential bytes alone are not proof
+        Note over K,C: 1. Accept verified association revocation evidence
+        K-->>V: IPEX delivery with supporting TEL/KEL evidence
+        V->>V: KERIpy parser and escrows accept revocation<br/>Grant or credential bytes alone are not proof
         V->>V: Durably retire this association<br/>Commit a separate status update and outbox event
-        V->>O: AID-signed revocation webhook<br/>Immutable event ID, revision and exact association SAID
+        V->>O: AID-signed revocation webhook<br/>Immutable event ID, status revision and exact association SAID
         O->>O: Authenticate, deduplicate and persist revoked status
         O-->>V: Authenticated durable acknowledgement
         Note over V,O: Retry the same event until acknowledged<br/>Preserve revocation across restart and replay
@@ -42,7 +42,7 @@ sequenceDiagram
 
 </details>
 
-Only native verification of the association's revocation triggers retirement; missing evidence or an outage is not revocation. A delayed revocation of an older association must not withdraw its replacement. Continuing LE/QVI monitoring and account-code reassessment are outside this build.
+Only KERIpy verification of the association's revocation triggers retirement; missing evidence or an outage is not revocation. A delayed revocation of an older association must not withdraw its replacement. Continuing LE/QVI monitoring and account-code reassessment are outside this build.
 
 The public GET-by-SAID route reads stored status and the last-known initial account observation without refresh or RPC. Its timestamps and block identifiers are informational. Webhook delivery remains authenticated independently of this unsigned public read.
 
@@ -50,4 +50,4 @@ Revocation has evidence-delivery, acknowledgement and transaction latency. Until
 
 See [oracle endorsement](oracle-endorsement-sequence.md) for the granting path and the [end-to-end flow](stablecoin-end-to-end-sequence.md) for transfers.
 
-Sources: `eoa-profile.docx`, `methodology.docx` (original color theme), [wallet association policy](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/src/policies/VLEIWalletAssociationPolicy.sol), [oracle registry](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/src/attestation/VLEIOracleRegistry.sol), and [wrapped token](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/src/wrappers/wUSDC.sol). Contract behavior is grounded in the linked comply revision; native retirement, authenticated delivery and stored status are implemented.
+Sources: `eoa-profile.docx`, `methodology.docx` (original color theme), [wallet association policy](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/src/policies/VLEIWalletAssociationPolicy.sol), [oracle registry](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/src/attestation/VLEIOracleRegistry.sol), and [wrapped token](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/src/wrappers/wUSDC.sol). Contract behavior is grounded in the linked comply revision; KERIpy retirement, authenticated delivery and stored status are implemented.

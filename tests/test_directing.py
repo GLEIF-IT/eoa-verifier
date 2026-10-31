@@ -1,4 +1,4 @@
-"""HTTP framing and direct-only runtime boundaries; native integration verifies evidence."""
+"""HTTP framing and direct-only runtime boundaries; KERI/IPEX integration verifies evidence."""
 
 from unittest.mock import patch
 
@@ -12,7 +12,7 @@ from keri.core import eventing
 
 from eoa_verifier.receiving.directing import CesrEnd, Receiver
 from eoa_verifier.receiving.grants import GrantNotificationDoer
-from native_helpers import entered_service, verifier_service
+from keripy_helpers import entered_service, verifier_service
 
 
 @pytest.fixture
@@ -24,8 +24,8 @@ def endpoint():
     return testing.TestClient(app), incoming
 
 
-def test_post_preserves_native_message_and_attachments(endpoint):
-    """POST reconstructs a native message with attachments and acknowledges intake."""
+def test_post_preserves_json_message_and_cesr_attachments(endpoint):
+    """POST reconstructs a JSON message with CESR attachments and acknowledges intake."""
     client, incoming = endpoint
     with habbing.openHab(name="sender", temp=True) as (_, hab):
         stream = hab.makeOwnInception()
@@ -136,7 +136,7 @@ def test_incomplete_request_does_not_block_later_messages(config, method):
 
 
 def test_http_cannot_advance_the_services_own_kel(config):
-    """A correctly signed own-AID event from HTTP remains native misfit evidence."""
+    """A correctly signed own-AID event from HTTP remains KERIpy misfit evidence."""
     with verifier_service(config) as service:
         hab = service.hab
         event = eventing.interact(pre=hab.pre, dig=hab.kever.serder.said, sn=1)

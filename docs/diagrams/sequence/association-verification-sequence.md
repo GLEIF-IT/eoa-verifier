@@ -49,9 +49,9 @@ sequenceDiagram
         V->>V: Record rejection — no success event
     else Both sides valid
         rect rgb(223, 251, 192)
-            Note over V,O: 3. Deliver the verified decision durably
-            V->>V: Atomically commit assessment and outbox event
-            V->>O: AID-signed webhook<br/>Event ID, revision, association and verified association
+            Note over V,O: 3. Deliver accepted association status durably
+            V->>V: Atomically commit acceptance and outbox event
+            V->>O: AID-signed webhook<br/>Event ID, status revision and association
             O->>O: Verify request signature, allowed AID and chain<br/>Atomically deduplicate and save accepted state
             O-->>V: Authenticated durable acknowledgement
             Note over V,O: Retry unacknowledged event with the same ID<br/>Acknowledged does not mean endorsed on-chain
@@ -61,8 +61,8 @@ sequenceDiagram
 
 </details>
 
-The webhook carries the association SAID, issuer AID, LE vLEI SAID, canonical `extId`, verdict, revision, issuance-order facts and observation time/block. The oracle derives `wallet` from `extId` and `identityRef = keccak256(issuerAid)`; it checks request authenticity and deployment scope rather than repeating association-proof verification. Its verifier AID allowlist is configured: OOBI discovery alone does not authorize a caller.
+The webhook carries the association SAID, issuer AID, LE vLEI SAID, canonical `extId`, status, status revision, issuance anchor and observation time/block. The oracle derives `wallet` from `extId` and `identityRef = keccak256(issuerAid)`; it checks request authenticity and deployment scope rather than repeating association-proof verification. Its verifier AID allowlist is configured: OOBI discovery alone does not authorize a caller.
 
-Initial verification checks the association and observes its account; it does not itself grant on-chain authority. Continue with [oracle acceptance and endorsement](oracle-endorsement-sequence.md), then the [stablecoin flow](stablecoin-end-to-end-sequence.md). Later native association revocation and withdrawal are covered in [revocation and status maintenance](revocation-status-sequence.md).
+Initial verification checks the association and observes its account; it does not itself grant on-chain authority. Continue with [oracle acceptance and endorsement](oracle-endorsement-sequence.md), then the [stablecoin flow](stablecoin-end-to-end-sequence.md). Later verified association revocation and withdrawal are covered in [revocation and status maintenance](revocation-status-sequence.md).
 
 Sources: `eoa-profile.docx`, `methodology.docx` (original color theme), and [current EIP-712 profile](https://github.com/GLEIF-IT/vlei-oracle/blob/7d82d04cd444cb21e1da1e6ec0408cc40105d4f4/protocol/external-association-v1/eoa-v1/README.md). The documents permit other challenge carriers; this design selects EIP-712 from our agreed plan. Authenticated webhook delivery connects the independent verifier and receiver.

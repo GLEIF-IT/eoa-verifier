@@ -26,7 +26,7 @@ class StatusEnd:
             event = self.baser.outbox.get(keys=(accepted.eventId,))
             data["delivery"] = {
                 "eventId": event.eventId,
-                "delivered": event.delivered,
+                "acknowledged": event.acknowledged,
                 "attempts": event.attempts,
                 "error": event.error,
                 "blocked": event.blocked,
@@ -37,13 +37,13 @@ class StatusEnd:
         elif result is not None:
             data = {
                 "associationSaid": said,
-                "status": result.outcome,
+                "status": result.status,
                 "reason": result.reason,
-                "observation": (
+                "accountObservation": (
                     dict(
-                        result.verified["observation"], wallet=result.verified["wallet"]
+                        result.eoaResult["accountObservation"], wallet=result.eoaResult["wallet"]
                     )
-                    if result.verified
+                    if result.eoaResult
                     else None
                 ),
             }
@@ -52,7 +52,7 @@ class StatusEnd:
                 "associationSaid": said,
                 "status": "pending",
                 "reason": pending.reason,
-                "observation": None,
+                "accountObservation": None,
             }
         else:
             raise falcon.HTTPNotFound(title="Unknown association")

@@ -15,7 +15,7 @@ from .authing import AuthenticationError, ServiceAuthenticator
 
 
 class _ClientDoer(http.ClientDoer):
-    """Contain socket failure in one attempt; native exit still owns socket cleanup."""
+    """Contain socket failure in one attempt; HIO exit still owns socket cleanup."""
 
     error = None
 
@@ -75,20 +75,20 @@ class WebhookSender(doing.DoDoer):
             self.requests.append(event_id)
 
     def send_do(self, tymth, tock=0.0, **opts):
-        """Process requests sequentially; native child removal closes each HTTP client."""
+        """Process requests sequentially; HIO child removal closes each HTTP client."""
         yield tock
         while True:
             if not self.requests:
                 page = self.baser.delivery_batch(after=self.after)
                 self.after = page[-1].eventId if page else ""
                 for event in page:
-                    if not event.delivered and not event.blocked:
+                    if not event.acknowledged and not event.blocked:
                         self.request(event.eventId)
                 yield self.tock
                 continue
             event_id = self.requests.popleft()
             event = self.baser.outbox.get(keys=(event_id,))
-            if event is None or event.delivered:
+            if event is None or event.acknowledged:
                 continue
             status = self.baser.associations.get(keys=(event.associationSaid,))
             if (
@@ -146,7 +146,7 @@ class WebhookSender(doing.DoDoer):
         """Yield through one signed HTTP request and validate its complete ACK contract.
 
         The receiver must return HTTP 200, authenticate the actual response bytes
-        and this request reference, and return exactly {eventId, accepted: true}.
+        and this request reference, and return exactly {eventId, stored: true}.
         A valid signature on an error response never establishes delivery success.
         This component, not ServiceAuthenticator, owns that decision.
         """
@@ -206,11 +206,11 @@ class WebhookSender(doing.DoDoer):
         ack = json.loads(response["body"])
         if (
             not isinstance(ack, dict)
-            or set(ack) != {"eventId", "accepted"}
+            or set(ack) != {"eventId", "stored"}
             or ack["eventId"] != event.eventId
-            or ack["accepted"] is not True
+            or ack["stored"] is not True
         ):
-            raise ValueError("webhook ACK does not accept the expected event")
+            raise ValueError("webhook ACK does not confirm storage of the expected event")
 
 
 def _retry_after(value, now):

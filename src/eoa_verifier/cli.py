@@ -11,7 +11,7 @@ from .serving import ServiceConfig, run_service
 def main(argv=None):
     """Parse argv (or process arguments when None) and run the standalone service.
 
-    Return 0 on normal shutdown. Report ValueError, OSError and native KeriError
+    Return 0 on normal shutdown. Report ValueError, OSError and KERIpy KeriError
     to stderr and return 1; other exceptions propagate. argparse exits directly
     for help or invalid/missing arguments. This entry point owns no posting keys.
     """
@@ -39,7 +39,7 @@ def main(argv=None):
     start.add_argument(
         "--name",
         default="eoa-verifier",
-        help="Native store name to create or reopen (default: eoa-verifier)",
+        help="KERIpy store name to create or reopen (default: eoa-verifier)",
     )
     start.add_argument(
         "--alias",
@@ -47,11 +47,11 @@ def main(argv=None):
         help="Service habitat alias to create or reopen (default: verifier)",
     )
     start.add_argument(
-        "--base", default="", help="Native store namespace (default: empty)"
+        "--base", default="", help="KERIpy store namespace (default: empty)"
     )
     start.add_argument(
         "--head-dir",
-        help="Native storage root override (default: native store defaults/fallbacks)",
+        help="KERIpy storage root override (default: KERIpy store defaults/fallbacks)",
     )
     start.add_argument(
         "--host", default="127.0.0.1", help="HTTP bind address (default: 127.0.0.1)"
@@ -63,7 +63,7 @@ def main(argv=None):
         help="HTTP listening port; 0 selects an available port (default: 9724)",
     )
     start.add_argument(
-        "--passcode", help="Optional passcode for the native keystore (default: none)"
+        "--passcode", help="Optional passcode for the KERIpy keystore (default: none)"
     )
     start.add_argument(
         "--incept-file",

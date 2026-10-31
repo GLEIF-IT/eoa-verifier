@@ -1,4 +1,4 @@
-"""Direct CESR intake and native parser/escrow scheduling."""
+"""Direct CESR intake and KERIpy parser/escrow scheduling."""
 
 import logging
 
@@ -13,11 +13,11 @@ logger = logging.getLogger(__name__)
 
 
 class Receiver(doing.DoDoer):
-    """Schedule one borrowed parser and its native escrow processors.
+    """Schedule one borrowed parser and its KERIpy escrow processors.
 
     ``parser`` must provide KEL, reply, exchange, TEL and credential processors.
     ``msg_tock`` and ``escrow_tock`` are HIO-clock intervals in seconds. The
-    service supplies the existing native mailbox timing settings for compatibility;
+    service supplies the existing KERIpy mailbox timing settings for compatibility;
     this receiver does not poll mailboxes. HTTP intake and Grant replay share the
     processors. ``msgs`` holds completed HTTP requests in separate bytearrays;
     it is transient intake, not a durable work queue. Closing this Doer stops its
@@ -37,9 +37,11 @@ class Receiver(doing.DoDoer):
     def msgDo(self, tymth, tock=0.0, **opts):
         """Parse one remote message per turn without carrying shortage across requests.
 
-        Native onceParsator yields only when it needs more bytes. Each request is
-        already complete, so discard its incomplete remainder and close the parser.
-        Complete evidence still uses the shared native processors and escrows.
+        An outward onceParsator yield requests more bytes. Each HTTP request is
+        complete, so discard its remainder and close that generator on a yield.
+        The pinned parser has a separate receipt-shortage path that does not yield;
+        this boundary does not remedy that dependency defect.
+        Complete evidence still uses the shared KERIpy processors and escrows.
         """
         self.wind(tymth)
         yield tock
@@ -64,7 +66,7 @@ class Receiver(doing.DoDoer):
             yield tock
 
     def escrowDo(self, tymth, tock=0.0, **opts):
-        """Retry the same native evidence escrows used by the inbound parser."""
+        """Retry the same KERI evidence escrows used by the inbound parser."""
         self.wind(tymth)
         yield tock
         while True:
@@ -77,11 +79,11 @@ class Receiver(doing.DoDoer):
 
 
 class CesrEnd:
-    """Accept native CESR POST envelopes and raw PUT streams at ``/``.
+    """Accept JSON/CESR-attachment POST requests and raw PUT streams at ``/``.
 
     Borrow the receiver's ``msgs`` deck; enqueue one bytearray per completed
     request on the service event loop. A 204 acknowledges only in-memory intake, not
-    durable storage, signature verification or association acceptance. Native
+    durable storage, signature verification or association acceptance. KERIpy
     parsing and escrow processing happen later. No signed webhook ACK is emitted.
     There is no SSE/query response service; unsupported methods return Falcon 405."""
 
@@ -89,13 +91,13 @@ class CesrEnd:
         self.msgs = msgs
 
     def on_post(self, req, rep):
-        """Accept one native CESR JSON envelope and enqueue its message plus attachments.
+        """Enqueue a JSON message with its CESR attachments.
 
         Parameters:
             req (falcon.Request): POST / with Content-Type exactly
                 application/cesr+json, a JSON event/credential object as body,
                 and the required CESR-ATTACHMENT header containing CESR text.
-                Native serialization reconstructs the body before appending
+                KERIpy serialization reconstructs the body before appending
                 UTF-8 attachment bytes; this is not raw JSON byte preservation.
             rep (falcon.Response): Set to 204 No Content with an empty body,
                 Cache-Control: no-cache and Connection: close on intake.
@@ -103,12 +105,12 @@ class CesrEnd:
         Raises:
             falcon.HTTPError: 406 for an unsupported content type; 412 for a
                 missing attachment header; 400 for malformed JSON/envelopes or
-                an explicit KERI qry envelope. Native framing checks run first.
+                an explicit KERI qry envelope. KERIpy framing checks run first.
 
         Returns:
-            None. A 204 is not evidence acceptance; native verification runs
+            None. A 204 is not evidence acceptance; KERIpy verification runs
             asynchronously and can reject or escrow the queued material. Incomplete
-            attachments are discarded without borrowing bytes from a later request.
+            attachments are discarded when the parser yields for missing bytes.
         """
         cr = httping.parseCesrHttpRequest(req)
         if not isinstance(cr.payload, dict):
@@ -124,10 +126,10 @@ class CesrEnd:
             and sadder.ked.get("t") == kering.Ilks.qry
         ):
             raise falcon.HTTPBadRequest(title="Queries are not supported")
-        self._accept(rep, msg)
+        self._enqueue_request(rep, msg)
 
     def on_put(self, req, rep):
-        """Append a raw CESR stream without interpreting or filtering its messages.
+        """Enqueue a CESR stream without interpreting or filtering its messages.
 
         Parameters:
             req (falcon.Request): PUT / whose bounded HTTP body contains CESR
@@ -135,18 +137,18 @@ class CesrEnd:
                 No CESR-ATTACHMENT header or content-type check is required here.
                 Empty bodies and embedded query messages are not rejected here.
             rep (falcon.Response): Set to 204 No Content with an empty body,
-                Cache-Control: no-cache and Connection: close after appending.
+                Cache-Control: no-cache and Connection: close after enqueueing.
 
         Returns:
-            None. Bytes are queued unchanged for native parsing. A 204 does not
+            None. Bytes are queued unchanged for KERIpy parsing. A 204 does not
             confirm valid framing, signatures or durable acceptance. An incomplete
-            remainder is discarded at this request's boundary; complete preceding
+            remainder is discarded on a parser shortage yield; complete preceding
             messages may already have been processed. Embedded
             queries receive no query result or SSE stream from this endpoint.
         """
-        self._accept(rep, req.bounded_stream.read())
+        self._enqueue_request(rep, req.bounded_stream.read())
 
-    def _accept(self, rep, msg):
+    def _enqueue_request(self, rep, msg):
         self.msgs.append(bytearray(msg))
         rep.set_header("Cache-Control", "no-cache")
         rep.set_header("connection", "close")

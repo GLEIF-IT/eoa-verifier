@@ -1,4 +1,4 @@
-"""Pin the association and its LE/QVI source schemas before native intake."""
+"""Pin the association and its LE/QVI source schemas before KERIpy intake."""
 
 from importlib.resources import files
 
@@ -15,10 +15,10 @@ SCHEMAS = {
 
 
 def pin_accepted_schemas(hby):
-    """Load packaged native Schemer objects and insert/replace them in hby's schema cache.
+    """Load packaged KERIpy Schemer objects and insert/replace them in hby's schema cache.
 
-    Native schema parsing verifies their serialization; each computed SAID must
-    match the pinned policy or ValueError is raised. Resource/I/O/native validation
+    KERIpy schema parsing verifies their serialization; each computed SAID must
+    match the pinned policy or ValueError is raised. Resource/I/O/KERIpy validation
     errors propagate. Return None. Pinning schemas is not credential acceptance;
     provenance and the upstream revisions are recorded in the repository README.
     """

@@ -1,4 +1,4 @@
-"""Webhook delivery and retry over real HIO HTTP, using native peer signatures."""
+"""Webhook delivery and retry over real HIO HTTP, using KERI AID signatures."""
 
 import json
 
@@ -12,15 +12,16 @@ from keri.db import dbing
 from eoa_verifier.authing import ServiceAuthenticator
 from eoa_verifier.basing import PendingVerification, VerificationResult, VerifierBaser
 from eoa_verifier.delivering import WebhookSender
-from native_helpers import free_port
+from keripy_helpers import free_port
 
 
 @pytest.mark.parametrize(
     "reply",
     [
-        "accepted",
+        "stored",
         "signed-error",
         "wrong-event",
+        "old-ack-shape",
         "wrong-attempt",
         "unsigned",
         "tampered",
@@ -88,7 +89,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
                             if reply == "retirement-initial-ack"
                             else event_id
                         ),
-                        "accepted": True,
+                        ("accepted" if reply == "old-ack-shape" else "stored"): True,
                     }
                 ).encode()
                 status = (
@@ -124,11 +125,11 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
             VerificationResult(
                 "association",
                 "verified",
-                verified={"wallet": "wallet", "observation": {"chainId": 31337}},
+                eoaResult={"wallet": "wallet", "accountObservation": {"chainId": 31337}},
             )
         )
         accepted = baser.accept(
-            "association", facts={}, destination=target, peer_aid=receiver_hab.pre
+            "association", association={}, destination=target, peer_aid=receiver_hab.pre
         )
         if reply.startswith("retirement"):
             # Initial delivery is already acknowledged; retirement needs its own
@@ -161,7 +162,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
                         elif truncated and not connection.txbs:
                             server.removeIx(address)
                 event = baser.outbox.get(keys=(accepted.eventId,))
-                if event.delivered or (
+                if event.acknowledged or (
                     reply != "lost-ack"
                     and event.error
                     and event.error != "attempt started; authenticated ACK not recorded"
@@ -175,7 +176,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
         doing.Doist(real=True, tock=0.01, limit=3).do(doers=[parent])
         event = baser.outbox.get(keys=(accepted.eventId,))
         assert parent.done
-        assert event.delivered == (reply in ("accepted", "retirement", "lost-ack"))
+        assert event.acknowledged == (reply in ("stored", "retirement", "lost-ack"))
         assert event.attempts == (2 if reply == "lost-ack" else 1)
         assert received_bodies == (
             []
@@ -183,7 +184,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
             else [event.body.encode()] * event.attempts
         )
         assert bool(event.error) == (
-            reply not in ("accepted", "retirement", "lost-ack")
+            reply not in ("stored", "retirement", "lost-ack")
         )
 
         if reply == "disconnect":
@@ -193,7 +194,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
             assert (
                 len(set(references)) == 2
             )  # Immutable body, fresh signed attempt references.
-        elif not event.delivered:
+        elif not event.acknowledged:
             assert event.blocked == (
                 reply not in ("signed-error", "timeout", "refused", "disconnect")
             )

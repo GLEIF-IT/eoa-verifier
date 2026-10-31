@@ -55,7 +55,7 @@ sequenceDiagram
 
 `VLEIWalletAssociationPolicy` checks every originator/beneficiary customer party and returns immediately on the first failed check. Both roles must be present. Other party roles are ignored by this policy. `VLEIEndorsementChecker` returns false for zero wallet or identity values; otherwise `VLEIOracleRegistry.isEndorsed` compares the **current endorsement for that wallet** with the supplied identity reference. An endorsement for another wallet of the same entity does not qualify.
 
-The transfer supplies no association SAID. The registry stores the SAID alongside the current wallet binding for [exact-association withdrawal and replacement](revocation-status-sequence.md). These reads do not verify KERI/EIP-712 evidence or query credential freshness; they consume authority previously posted by the oracle.
+The transfer supplies no association SAID. The registry stores the SAID alongside the current association mapping for [exact-association withdrawal and replacement](revocation-status-sequence.md). These reads do not verify KERI/EIP-712 evidence or query credential freshness; they consume authority previously posted by the oracle.
 
 This policy never returns Pending. `PolicyManager` aggregates its result with all other registered policies, and `wUSDC` decides whether to call the underlying token. See [transfer outcomes and failures](on-chain-transfer-outcomes-sequence.md) for rejection, queueing and rollback behavior.
 

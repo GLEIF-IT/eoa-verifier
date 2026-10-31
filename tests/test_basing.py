@@ -19,7 +19,7 @@ def test_duplicates_completion_and_restart(tmp_path):
         result = VerificationResult(
             "b",
             "verified",
-            verified={"wallet": "wallet", "observation": {"chainId": 31337}},
+            eoaResult={"wallet": "wallet", "accountObservation": {"chainId": 31337}},
         )
         baser.finish(result)
         baser.finish(result)
@@ -65,7 +65,7 @@ def test_completion_rollback_after_result_write():
                 raise RuntimeError("between writes")
 
         class FailingEnvironment:
-            """Supply the transaction fault without changing native commit semantics."""
+            """Supply the transaction fault without changing LMDB commit semantics."""
 
             def begin(self, **kwa):
                 return FailingTransaction()

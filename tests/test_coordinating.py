@@ -1,4 +1,4 @@
-"""Bounded scheduling over real persisted work, with controlled native outcomes."""
+"""Bounded scheduling over real persisted work, with controlled KERIpy outcomes."""
 
 from unittest.mock import patch
 
@@ -7,7 +7,7 @@ from keri.db import dbing
 
 from eoa_verifier.basing import VerifierBaser, PendingVerification, VerificationResult
 from eoa_verifier.verification.constants import ASSOCIATION_SCHEMA
-from eoa_verifier.verification.coordinating import PresentationVerifierDoer
+from eoa_verifier.verification.coordinating import VerificationCoordinator
 from eoa_verifier.verification.errors import MissingCredentialArtifactsError
 from eoa_verifier.verification.worker import EoaVerifierDoer
 
@@ -38,7 +38,7 @@ def test_busy_worker_skips_scan_and_missing_artifacts_wait_fairly():
             baser.enqueue(PendingVerification(said, ""))
         clock = tyming.Tymist()
         worker = EoaVerifierDoer(rpc_url="http://unused", chain_id=31337)
-        coordinator = PresentationVerifierDoer(
+        coordinator = VerificationCoordinator(
             baser=baser,
             rgy=None,
             trusted_geda_aid="",
@@ -50,7 +50,7 @@ def test_busy_worker_skips_scan_and_missing_artifacts_wait_fairly():
         with patch.object(baser, "pending_batch", side_effect=AssertionError):
             coordinator.process_ready()
         coordinator.inflight = None
-        # Simulate missing native evidence only; use actual work storage and clock.
+        # Simulate missing KERI evidence only; use actual work storage and clock.
         with (
             patch("eoa_verifier.verification.coordinating.grant_candidate"),
             patch(
@@ -78,7 +78,7 @@ def test_rpc_retry_and_success_move_only_on_completion():
     with dbing.openLMDB(cls=VerifierBaser) as baser:
         baser.enqueue(PendingVerification("a", "first"))
         worker = EoaVerifierDoer(rpc_url="http://unused", chain_id=31337)
-        coordinator = PresentationVerifierDoer(
+        coordinator = VerificationCoordinator(
             baser=baser,
             rgy=None,
             trusted_geda_aid="",
@@ -92,9 +92,9 @@ def test_rpc_retry_and_success_move_only_on_completion():
         assert baser.pending.get(keys=("a",)).reason == "RPC unavailable"
         assert baser.results.get(keys=("a",)) is None
         coordinator.inflight = "a"
-        observation = {"wallet": "wallet", "observation": {"chainId": 31337}}
-        worker.cues.append({"kin": "verified", "said": "a", "verified": observation})
+        observation = {"wallet": "wallet", "accountObservation": {"chainId": 31337}}
+        worker.cues.append({"kin": "verified", "said": "a", "eoaResult": observation})
         with patch("eoa_verifier.verification.coordinating.verify_association"):
             coordinator.process_results()
         assert baser.pending.get(keys=("a",)) is None
-        assert baser.results.get(keys=("a",)).verified == observation
+        assert baser.results.get(keys=("a",)).eoaResult == observation

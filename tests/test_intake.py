@@ -1,18 +1,18 @@
-"""Notification lifecycle using native storage and targeted failure injection."""
+"""Notification lifecycle using KERIpy storage and targeted failure injection."""
 
 from types import SimpleNamespace
 from contextlib import ExitStack
 from unittest.mock import patch
 
 import pytest
-from native_helpers import candidate
+from keripy_helpers import candidate
 
 from eoa_verifier.receiving.grants import GrantNotificationDoer
-from native_helpers import entered_service
+from keripy_helpers import entered_service
 
 
 @pytest.mark.parametrize("kind", ["accepted", "malformed", "unrelated"])
-def test_consumed_notification_removes_all_native_records(config, kind):
+def test_consumed_notification_removes_note_and_signal(config, kind):
     """Use real Noter storage to prove success, bad input and unrelated notices clean all records."""
     lifetime = ExitStack()
     runtime = lifetime.enter_context(entered_service(config))
@@ -27,7 +27,7 @@ def test_consumed_notification_removes_all_native_records(config, kind):
         association = candidate()
         if kind == "malformed":
             association["u"] = "invalid SAID"
-        # Replace envelope lookup only; native decoding and persistence are real.
+        # Replace envelope lookup only; KERIpy decoding and persistence are real.
         with patch(
             "eoa_verifier.receiving.grants.exchanging.cloneMessage",
             return_value=(SimpleNamespace(ked={"e": {"acdc": association}}), {}),
@@ -45,7 +45,7 @@ def test_consumed_notification_removes_all_native_records(config, kind):
 
 @pytest.mark.parametrize("boundary", ["parser", "storage"])
 def test_internal_failure_preserves_notification(config, boundary):
-    """Inject parser/storage errors after valid decoding and prove the native notice remains retryable."""
+    """Inject parser/storage errors after valid decoding and prove the KERIpy notice remains retryable."""
     lifetime = ExitStack()
     runtime = lifetime.enter_context(entered_service(config))
     try:
@@ -92,7 +92,7 @@ def test_missing_grant_retains_notification_until_available(config):
 
 
 def signed_notice(runtime, grants, sender, embedded, attachments=b""):
-    """Deliver an actual signed opening Grant through native EXN authentication."""
+    """Deliver an actual signed opening Grant through KERIpy EXN authentication."""
     from keri.core import coring, parsing, serdering
     from keri.peer import exchanging
     from keri.vc import protocoling
@@ -172,7 +172,7 @@ def test_signed_bad_embed_is_consumed_and_valid_work_progresses(config, bad):
 
 
 def test_notice_pages_advance_past_retained_work(config):
-    """Real native storage retains early notices without starving later work or siblings."""
+    """Real KERIpy storage retains early notices without starving later work or siblings."""
     from hio.base import doing
 
     lifetime = ExitStack()
@@ -200,13 +200,13 @@ def test_notice_pages_advance_past_retained_work(config):
         lifetime.close()
 
 
-def test_wrong_schema_is_coordinator_rejection_without_native_acceptance(config):
-    """A real signed Grant supplies rejection evidence, never native acceptance."""
+def test_wrong_schema_is_coordinator_rejection_without_keripy_acceptance(config):
+    """A real signed Grant supplies rejection evidence, never KERIpy credential acceptance."""
     from keri.app import habbing
     from keri.core import serdering
 
     from eoa_verifier.verification.constants import LE_SCHEMA
-    from eoa_verifier.verification.coordinating import PresentationVerifierDoer
+    from eoa_verifier.verification.coordinating import VerificationCoordinator
 
     with (
         entered_service(config) as runtime,
@@ -214,7 +214,7 @@ def test_wrong_schema_is_coordinator_rejection_without_native_acceptance(config)
     ):
         grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
         coordinator = next(
-            d for d in runtime.doers if isinstance(d, PresentationVerifierDoer)
+            d for d in runtime.doers if isinstance(d, VerificationCoordinator)
         )
         sad = candidate()
         sad["s"] = LE_SCHEMA
@@ -232,7 +232,7 @@ def test_wrong_schema_is_coordinator_rejection_without_native_acceptance(config)
         assert runtime.baser.pending.get(keys=(creder.said,)) == pending
         coordinator.process_ready()
         result = runtime.baser.results.get(keys=(creder.said,))
-        assert result.outcome == "rejected"
+        assert result.status == "rejected"
         assert "unexpected schema" in result.reason
         assert runtime.baser.pending.get(keys=(creder.said,)) is None
         grants.process_grant_notice(attrs)
