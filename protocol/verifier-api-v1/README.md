@@ -95,7 +95,7 @@ Expected action and peer trust come from configuration/operation, not incoming h
 Configuration rejects path/query spellings that the pinned HIO client rewrites.
 For example, `?memo=a+b&path=%2F` is preserved; `?memo=a%20b`, repeated parameter
 names, bare parameters and percent-escaped paths are rejected before startup.
-Include an explicit path (`/` for the root endpoint).
+Include an explicit path (`/` for the root endpoint); leading `//` paths are unsupported.
 Use the same supported URL on both peers. Existing event destinations stay immutable.
 
 Signature label `sig0` covers, in order: `@method`, `@path`, `content-digest`,

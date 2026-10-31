@@ -191,6 +191,7 @@ def test_unscoped_saved_results_are_preserved_and_refused(config):
     "/hook?tag=a&tag=b",
     "/hook?debug",
     "/ho%6Fk",
+    "//hook",
 ])
 def test_webhook_url_must_survive_hio_rendering(config, relative_uri):
     """Reject rewritten path/query spellings before stores or delivery obligations exist."""

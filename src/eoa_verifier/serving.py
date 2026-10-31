@@ -104,7 +104,9 @@ class ServiceConfig:
             # Mirror the pinned HIO sender's path/query rendering before signing.
             _, query = hio_httping.updateQargsQuery({}, target.query)
             if (
-                not target.path or quote(target.path) != target.path
+                not target.path
+                or target.path.startswith("//")
+                or quote(target.path) != target.path
                 or query != target.query
             ):
                 raise ValueError("HIO would rewrite the webhook URL path/query")
