@@ -118,9 +118,9 @@ provides the local verifier/oracle/Anvil setup and qualification.
 
 Expired transport nonce claims are pruned in bounded background batches. If UTC
 moves behind the persisted cleanup cutoff, ACK authentication fails until time
-catches up; deliveries remain pending under the normal retry policy. Correct the
-system clock rather than deleting replay state. This cutoff survives restart and
-does not expire accepted associations.
+catches up. The existing authentication-failure policy blocks that delivery;
+correct the system clock and explicitly resume the event as above. Do not delete
+replay state. This cutoff survives restart and does not expire accepted associations.
 
 ## Coordinated PoC naming update
 
