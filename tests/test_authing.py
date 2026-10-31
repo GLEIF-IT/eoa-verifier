@@ -41,7 +41,7 @@ def message():
     )
 
 
-def test_ipex_integration_roundtrip_and_ack_binding(peers):
+def test_signed_request_and_correlated_response(peers):
     """Authenticate a KERI AID-signed request and a response bound to its attempt/body."""
     sender, receiver = peers
     context = message()
