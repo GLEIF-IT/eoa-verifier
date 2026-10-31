@@ -46,9 +46,9 @@ def test_exact_pair_scope_terminal_rejection_and_revocation(tmp_path, delivery):
             "first",
             "second",
             "issuer2",
-            "spaced",
-            "nfc",
-            "nfd",
+            "uppercase",
+            "lowercase",
+            "maximum",
             "after-revocation",
         ):
             verify(baser, said)
@@ -80,11 +80,21 @@ def test_exact_pair_scope_terminal_rejection_and_revocation(tmp_path, delivery):
             accept(baser, "issuer2", issuer="other", delivery=delivery).status
             == "accepted"
         )
-        for said, nonce in (("spaced", " nonce "), ("nfc", "é"), ("nfd", "e\u0301")):
+        for said, nonce in (
+            ("uppercase", "Nonce"),
+            ("lowercase", "nonce_"),
+            ("maximum", "N" * 128),
+        ):
             assert (
                 accept(baser, said, nonce=nonce, delivery=delivery).status == "accepted"
             )
         assert baser.accepted_nonces.cntAll() == 5
+        assert (
+            baser.accepted_nonces.get(keys=("issuer", "nonce")).associationSaid
+            == "first"
+        )
+        with baser.env.begin() as txn:
+            assert txn.get(b"issuer.nonce", db=baser.accepted_nonces.sdb) is not None
         baser.retire("first")
         baser.close()
         baser.reopen()

@@ -7,8 +7,10 @@ Date: 2026-10-31
 
 EOA Verifier permanently binds each exact `(issuerAid, nonce)` pair to one
 application-accepted association SAID. Read both values from the native credential
-after initial credential, relationship, wallet and account verification. Preserve
-Unicode representation and whitespace. Issuers may issue candidates, but neither
+after initial credential, relationship, wallet and account verification. Require
+1–128 ASCII characters from `[A-Za-z0-9_-]`; preserve their exact case and bytes.
+Reject whitespace, dots, other punctuation and non-ASCII text. Issuers may issue
+candidates, but neither
 credential creation nor oracle status receipt consumes an association nonce.
 
 Another issuer may use the same nonce. Another SAID from the same issuer may not,
@@ -25,8 +27,11 @@ that local rejection; the verifier-to-oracle wire contract remains unchanged.
 claim, accepted status and optional outbox obligation. Insert the claim without
 overwrite; inspect an existing claim in that same transaction. A minimal typed
 `AcceptedNonce` contains issuer, exact nonce and accepted SAID. Its `accepted_nonces.`
-Komer key is the 64-character hexadecimal SHA-256 digest of a compact UTF-8 JSON
-array `[issuerAid, nonce]`. Compare stored fields as well as the key; inconsistent
+Komer key is the ordinary dot-joined `(issuerAid, nonce)` tuple, encoded as ASCII.
+Neither a canonical issuer AID nor an allowed nonce contains a dot. With the
+schema's 44-byte issuer and a 128-byte nonce, the maximum key is 173 bytes,
+comfortably below the pinned LMDB environment's 511-byte limit. No hashing or
+JSON key encoding is needed. Compare stored fields with the key; inconsistent
 or orphaned claims abort acceptance. No application locks, worker threads, queues,
 retry loops or additional LMDB environments are introduced.
 
@@ -48,7 +53,7 @@ referenced outbox event is an error, not a fallback to local-only retirement.
 ## Baseline and limits
 
 The verification scope now requires the acceptance-policy identifier
-`issuer-nonce-v1`. Pre-policy scopes are refused; use a deliberate fresh complete
+`issuer-nonce-ascii-v1`. Pre-policy scopes are refused; use a deliberate fresh complete
 store set and preserve historical stores separately. Startup validates that every
 accepted/revoked SAID has exactly one consistent claim and every claim has an
 accepted/revoked owner. It does not backfill, migrate, release or silently recreate
@@ -63,7 +68,8 @@ separate concerns. Old oracle issuer stores are no longer read or migrated.
 
 ## Qualification
 
-Storage tests cover exact pairs, Unicode/whitespace, issuer scoping, idempotence,
+Storage tests cover exact ASCII pairs and case, 1/128-character boundaries,
+rejected non-ASCII/whitespace/punctuation/overlength inputs, issuer scoping, idempotence,
 revocation, restart, malformed history, native independent-process races and abrupt
 death before/after commit. Fault injection verifies rollback of the claim/status
 when outbox serialization fails. Real witnessed IPEX intake exercises a differently

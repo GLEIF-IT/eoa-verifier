@@ -35,6 +35,7 @@ Initial evidence or RPC unavailability leaves work `pending`; established failur
 produces `rejected`, and completed initial checks produce `verified`. With a
 webhook configured, acceptance commits status and an event. Without a webhook,
 acceptance commits locally without an outbox obligation (`delivery` is null).
+Association nonces contain 1–128 ASCII characters from `[A-Za-z0-9_-]`.
 In either mode, acceptance permanently consumes the exact issuer/nonce for that
 SAID. Another SAID reusing the pair is locally `rejected` with `NONCE_REUSED`;
 initial verification remains `verified`. Revocation and supersession do not

@@ -98,7 +98,9 @@ without repeating initial checks. Acceptance permanently binds the exact issuer/
 to one SAID, atomically with immutable facts and any configured outbox obligation.
 Another SAID using that pair becomes locally `rejected` with `NONCE_REUSED`; its
 initial verification remains `verified`. Same-SAID replay is idempotent, and
-revocation/supersession never releases the nonce. See [ADR 0005](adrs/0005-accepted-association-nonces.md).
+revocation/supersession never releases the nonce.
+Nonces contain 1–128 ASCII characters from `[A-Za-z0-9_-]`; storage uses ordinary
+`issuer.nonce` Komer keys. See [ADR 0005](adrs/0005-accepted-association-nonces.md).
 
 Acceptance runs with or without webhooks. With no target, public `delivery` is null;
 enabling delivery later does not backfill events for locally accepted records.
@@ -158,7 +160,7 @@ uses real IPEX/CESR, HTTP and a local chain. It never uses existing identities.
 
 Verification was extracted from [vlei-oracle](https://github.com/GLEIF-IT/vlei-oracle/tree/77849caae048381aee96b42f75053368d8d24c53).
 Packaged LE/QVI schemas come from [vLEI](https://github.com/GLEIF-IT/vLEI/tree/743622abc9a3b3684552e439efc5c8b6fda2f645/schema/acdc);
-the association schema retains the existing oracle protocol SAID.
+the association schema and its new SAID enforce the 1–128 ASCII nonce contract.
 See the [service design](protocol/verifier-api-v1/README.md) and
 [workflow diagrams](docs/README.md).
 

@@ -30,7 +30,8 @@ KERIpy options for a new identity only. The application store is bound to its
 GEDA root and chain ID before workers start, including operation without webhook delivery.
 Changing either requires separate stores. Existing stores with completed results
 but no recorded scope are refused; preserve them and use fresh stores rather than guessing their original policy. Pre-policy stores are also refused: acceptance now requires permanent issuer/nonce
-history under policy `issuer-nonce-v1`. Use a deliberate fresh store set; there is
+history under policy `issuer-nonce-ascii-v1`. Association nonces must contain
+1–128 ASCII characters from `[A-Za-z0-9_-]`; no normalization is applied. Use a deliberate fresh store set; there is
 no migration or backfill. Never reset accepted history to evade nonce rejection.
 Enabling webhook delivery with the same root/chain remains supported, but does not
 create deliveries for associations accepted without a configured target. Preserve the entire KERIpy/application

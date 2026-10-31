@@ -8,5 +8,5 @@ Upstream revisions and provenance are linked in the repository README.
 QVI_SCHEMA = "EBfdlu8R27Fbx-ehrqwImnK-8Cm79sqbAQ4MmvEAYqao"
 # QVI-issued LE credential: identifies the holder allowed to issue associations.
 LE_SCHEMA = "ENPXp1vQzRF6JwIuS-mp2U8Uf1MoADoP_GqQ62VsDZWY"
-# Existing external-association v1 schema; the SAID is a compatibility/trust pin.
-ASSOCIATION_SCHEMA = "EKeFW-30joNrTXUmq7Dpp2kExZgveYlsLfWrDml8hRYt"
+# External-association v1 with the 1–128 ASCII nonce contract.
+ASSOCIATION_SCHEMA = "EOgZ5tOZ0f7U-4H004zKoz75Pi8XwUM2FjKoMYrkBnmu"

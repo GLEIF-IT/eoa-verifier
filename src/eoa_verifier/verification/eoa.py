@@ -21,9 +21,14 @@ PRIMARY_TYPE = "ExternalAssociation"
 
 
 def validate_nonce(nonce: str) -> None:
-    """Return None for an unchanged 1–256 character string; otherwise raise ValueError."""
-    if not isinstance(nonce, str) or not 1 <= len(nonce) <= 256:
-        raise ValueError("nonce must be a string of 1 to 256 characters")
+    """Require 1–128 ASCII letters, digits, underscores or hyphens, without rewriting."""
+    if (
+        not isinstance(nonce, str)
+        or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", nonce) is None
+    ):
+        raise ValueError(
+            "nonce must contain 1 to 128 ASCII letters, digits, underscores or hyphens"
+        )
 
 
 def validate_association_identifiers(

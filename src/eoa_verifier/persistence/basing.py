@@ -1,7 +1,7 @@
 """Persist verification, acceptance and delivery independently of KERI evidence."""
 
-import hashlib
 import json
+import re
 from dataclasses import replace
 from itertools import islice
 
@@ -53,7 +53,7 @@ class VerifierBaser(dbing.LMDBer):
 
     def bind_verification_scope(self, *, trusted_geda_aid, chain_id):
         """Refuse another policy or previously completed results with unknown provenance."""
-        scope = VerificationScope(trusted_geda_aid, chain_id, "issuer-nonce-v1")
+        scope = VerificationScope(trusted_geda_aid, chain_id, "issuer-nonce-ascii-v1")
         try:
             existing = self.scope.get(keys=("verification",))
         except (TypeError, ValueError) as exc:
@@ -146,28 +146,21 @@ class VerifierBaser(dbing.LMDBer):
                 table.deserializer(raw) for _, raw in islice(cursor.iternext(), limit)
             ]
 
-    @staticmethod
-    def nonce_key(issuer, nonce):
-        """Hash an unambiguous pair without Unicode or whitespace normalization."""
+    def nonce_key(self, issuer, nonce):
+        """Use Komer's ordinary issuer.nonce key; neither component contains dots."""
+        if not isinstance(issuer, str) or not issuer or "." in issuer:
+            raise ValueError("issuer AID is required and cannot contain a dot")
         if (
-            not isinstance(issuer, str)
-            or not issuer
-            or not isinstance(nonce, str)
-            or not 1 <= len(nonce) <= 256
+            not isinstance(nonce, str)
+            or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", nonce) is None
         ):
-            raise ValueError("issuer and exact nonce are required for acceptance")
-        return (
-            hashlib.sha256(
-                json.dumps(
-                    [issuer, nonce], ensure_ascii=False, separators=(",", ":")
-                ).encode("utf-8")
+            raise ValueError(
+                "nonce must contain 1 to 128 ASCII letters, digits, underscores or hyphens"
             )
-            .hexdigest()
-            .encode("ascii")
-        )
+        return self.accepted_nonces._tokey((issuer, nonce))
 
     def _read_claim(self, txn, key, raw):
-        """Fail closed on corrupt claims, digest collisions or orphaned ownership."""
+        """Fail closed on corrupt claims, mismatched keys or orphaned ownership."""
         try:
             claim = self.accepted_nonces.deserializer(raw)
             if not isinstance(claim.associationSaid, str) or not claim.associationSaid:
@@ -246,14 +239,9 @@ class VerifierBaser(dbing.LMDBer):
                 wallet=result.eoaResult["wallet"],
             )
             if not inserted:
-                existing = self._read_claim(
+                self._read_claim(
                     txn, nonce_key, txn.get(nonce_key, db=self.accepted_nonces.sdb)
                 )
-                if (existing.issuerAid, existing.nonce) != (
-                    claim.issuerAid,
-                    claim.nonce,
-                ) or existing.associationSaid == said:
-                    raise ValueError("inconsistent accepted nonce claim")
                 rejected = AssociationStatus(
                     said, "rejected", "", association, observation, "NONCE_REUSED"
                 )
