@@ -80,3 +80,24 @@ def test_completion_rollback_after_result_write():
         baser.finish(VerificationResult("a", "rejected", "invalid proof"))
         assert baser.pending.get(keys=("a",)) is None
         assert baser.results.get(keys=("a",)).reason == "invalid proof"
+
+
+def test_replay_pruning_pages_past_live_claims_after_restart(tmp_path):
+    """Bound each scan, retain live nonces and resume past them after reopening LMDB."""
+    with dbing.openLMDB(
+        cls=VerifierBaser, name="replay", headDirPath=str(tmp_path), temp=False
+    ) as baser:
+        for nonce, expiry in (("a", 100), ("b", 200), ("c", 100), ("d", 100)):
+            assert baser.claim_nonce("peer", nonce, expiry, now=99)
+
+        # Only a and b are scanned: live b must not block expired c and d later.
+        assert baser.prune_replay_claims(100, limit=2) == 1
+        assert baser.replay_claims.cntAll() == 3
+        baser.close()
+        baser.reopen()
+        assert baser.prune_replay_claims(100, limit=2) == 2
+        assert baser.replay_claims.cntAll() == 1
+        assert baser.replay_claims.get(keys=("peer", "b")).expiresAt == 200
+        # The cursor wraps; the remaining live claim is still protected.
+        assert baser.prune_replay_claims(100, limit=2) == 0
+        assert not baser.claim_nonce("peer", "b", 200, now=100)

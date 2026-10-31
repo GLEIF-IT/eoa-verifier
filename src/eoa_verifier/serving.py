@@ -30,6 +30,7 @@ from keri.vdr import credentialing, eventing as veventing, verifying, viring
 from .accepting import AcceptanceDoer
 from .basing import VerifierBaser
 from .delivering import WebhookSender
+from .replaying import ReplayPruner
 from .retiring import RetirementDoer
 from .statusing import StatusEnd
 from .receiving.directing import CesrEnd, Receiver
@@ -196,6 +197,7 @@ class VerifierService(doing.DoDoer):
         oobiery = oobiing.Oobiery(hby=hby, clienter=httping.Clienter())
         doers = [
             *oobiery.doers,
+            ReplayPruner(baser=baser),
             receiver,
             http.ServerDoer(server=server),
             GrantNotificationDoer(

@@ -155,7 +155,7 @@ class ServiceAuthenticator:
         )
         return headers, AuthenticatedMessage(self.hab.pre, nonce, digest)
 
-    def _read_signature(self, headers):
+    def _read_signature(self, headers, *, now):
         """Decode one KERI AID signature and enforce peer/profile/message-time constraints.
 
         Return normalized headers, parsed input and signature. Malformed data raises
@@ -183,7 +183,6 @@ class ServiceAuthenticator:
                 or not isinstance(sig.markers[LABEL], coring.Cigar)
             ):
                 raise AuthenticationError("untrusted peer or signature profile")
-            now = int(helping.nowUTC().timestamp())
             if (
                 type(inp.created) is not int
                 or type(inp.expires) is not int
@@ -207,11 +206,14 @@ class ServiceAuthenticator:
         operation. Never obtain these expected values from signature headers.
         Rejected messages do not reserve nonces. Replay claims survive reopening;
         application retries must be newly signed. No network refresh occurs here.
+        Clock rollback behind an expiry already pruned from the replay store
+        rejects authentication until UTC catches up, including after restart.
         Returns AuthenticatedMessage; invalid context, signature or replay raises
         AuthenticationError. A successful claim precedes application persistence,
         so an application failure requires a newly signed delivery attempt.
         """
-        lowered, inp, sig = self._read_signature(headers)
+        now = int(helping.nowUTC().timestamp())
+        lowered, inp, sig = self._read_signature(headers, now=now)
         try:
             expected = {
                 "content-digest": body_digest(body),
@@ -229,10 +231,10 @@ class ServiceAuthenticator:
                 self._signature_base(inp, method, target, expected),
             ):
                 raise AuthenticationError("signature does not verify")
+            if not self.baser.claim_nonce(self.peer_aid, inp.nonce, inp.expires, now=now):
+                raise AuthenticationError("message replay")
         except (KeyError, TypeError, ValueError, kering.KeriError) as exc:
             raise AuthenticationError(str(exc)) from exc
-        if not self.baser.claim_nonce(self.peer_aid, inp.nonce, inp.expires):
-            raise AuthenticationError("message replay")
         return AuthenticatedMessage(
             self.peer_aid, inp.nonce, expected["content-digest"]
         )

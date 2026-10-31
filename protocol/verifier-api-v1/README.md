@@ -120,8 +120,11 @@ transport expiry has no effect on association validity.
 Verify only the configured peer's locally accepted current key. Rotation needs
 KERIpy event acceptance; after rotation, old-key attempts fail and a retry signs
 anew. There is no network key refresh in this helper. After authentication, an
-insert-only peer/nonce claim rejects replay across restart. Claims are retained
-in this increment. A lost ACK is retried with a fresh nonce and the same immutable
+insert-only peer/nonce claim rejects replay across restart. The verifier scans
+up to 32 claims per second and removes only expired claims. It durably records the
+greatest removed expiry and refuses authentication if UTC moves behind that
+cutoff, until the clock catches up. Association validity is unaffected.
+A lost ACK is retried with a fresh nonce and the same immutable
 application event; event deduplication remains separate. Missing keys or invalid
 signatures never consume a nonce or establish application acceptance.
 

@@ -1,15 +1,18 @@
 """Real KERI AID signatures and persistent replay state, without application delivery."""
 
 from contextlib import ExitStack
+from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
+from hio.base import doing
 from keri.app import habbing
 from keri.db import dbing
 from keri.help import helping
 
 from eoa_verifier.authing import AuthenticationError, ServiceAuthenticator
 from eoa_verifier.basing import VerifierBaser
+from eoa_verifier.replaying import ReplayPruner
 
 
 @pytest.fixture
@@ -98,6 +101,39 @@ def test_restart_rejects_replay_but_allows_new_attempt(peers):
     receiver.verify(**context, headers=headers)
 
 
+def test_pruned_nonce_cannot_replay_after_restart_and_clock_rollback(peers):
+    """Prune expired signatures through HIO; persisted cutoff closes the clock-rewind window."""
+    sender, receiver = peers
+    context = message()
+    start = helping.nowUTC().replace(microsecond=0)
+    with patch("keri.help.helping.nowUTC", return_value=start):
+        headers, sent = sender.sign(**context)
+        receiver.verify(**context, headers=headers)
+        with pytest.raises(AuthenticationError, match="replay"):
+            receiver.verify(**context, headers=headers)
+
+    with patch("keri.help.helping.nowUTC", return_value=start + timedelta(seconds=60)):
+        doing.Doist(tock=0.01, limit=0.02).do(
+            doers=[ReplayPruner(baser=receiver.baser, tock=0.01)]
+        )
+    assert receiver.baser.replay_claims.get(keys=(sender.hab.pre, sent.nonce)) is None
+    receiver.baser.close()
+    receiver.baser.reopen()
+
+    # These headers are otherwise within their original lifetime after rollback.
+    with patch("keri.help.helping.nowUTC", return_value=start + timedelta(seconds=30)):
+        with pytest.raises(AuthenticationError, match="clock"):
+            receiver.verify(**context, headers=headers)
+        assert receiver.baser.prune_replay_claims(int(helping.nowUTC().timestamp())) == 0
+
+    # At the cutoff the old attempt is expired; a newly signed attempt succeeds.
+    with patch("keri.help.helping.nowUTC", return_value=start + timedelta(seconds=60)):
+        with pytest.raises(AuthenticationError, match="lifetime"):
+            receiver.verify(**context, headers=headers)
+        fresh, _ = sender.sign(**context)
+        receiver.verify(**context, headers=fresh)
+
+
 def test_rotation_uses_keripy_accepted_key_state(peers):
     """Same-AID rotation works after KERIpy event acceptance; old-key attempts fail."""
     sender, receiver = peers
@@ -119,8 +155,6 @@ def test_expiry_and_unknown_peer(peers):
     context = message()
     headers, _ = sender.sign(**context)
     now = helping.nowUTC()
-    from datetime import timedelta
-
     with patch("keri.help.helping.nowUTC", return_value=now + timedelta(seconds=61)):
         with pytest.raises(AuthenticationError, match="lifetime"):
             receiver.verify(**context, headers=headers)

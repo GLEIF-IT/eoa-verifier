@@ -44,6 +44,14 @@ class ReplayClaim:
 
 
 @dataclass
+class ReplayPruning:
+    """Durable scan position and latest expiry actually removed from replay claims."""
+
+    prunedThrough: int = 0
+    after: str = ""
+
+
+@dataclass
 class AssociationStatus:
     """Stored application acceptance and immutable initially verified association.
 
@@ -104,6 +112,9 @@ class VerifierBaser(dbing.LMDBer):
             db=self, subkey="results.", schema=VerificationResult
         )
         self.replay_claims = koming.Komer(db=self, subkey="replay_claims.", schema=ReplayClaim)
+        self.replay_pruning = koming.Komer(
+            db=self, subkey="replay_pruning.", schema=ReplayPruning
+        )
         self.associations = koming.Komer(
             db=self, subkey="associations.", schema=AssociationStatus
         )
@@ -170,14 +181,60 @@ class VerifierBaser(dbing.LMDBer):
         """Copy a bounded page strictly after the SAID; close its cursor before returning."""
         return self._batch(self.pending, after=after, limit=limit)
 
-    def claim_nonce(self, peer, nonce, expires_at):
+    def claim_nonce(self, peer, nonce, expires_at, *, now):
         """Insert a peer/nonce claim after authentication; return False on replay.
 
-        expires_at is the authenticated Unix expiry time in seconds, retained as
-        metadata. This method does not prune expired claims or deduplicate
-        application events. Claims survive reopening persistent stores.
+        now is the UTC second used to validate this signature's lifetime. Refuse
+        clock rollback behind the persisted pruning cutoff: a removed nonce must
+        never become usable again. Claims do not deduplicate application events.
         """
-        return self.replay_claims.put(keys=(peer, nonce), val=ReplayClaim(expires_at))
+        key = self.replay_claims.sep.join((peer, nonce)).encode()
+        with self.env.begin(write=True) as txn:
+            raw = txn.get(b"expiry", db=self.replay_pruning.sdb)
+            if (
+                raw is not None
+                and now < self.replay_pruning.deserializer(raw).prunedThrough
+            ):
+                raise ValueError("clock is behind replay cleanup cutoff")
+            return txn.put(
+                key,
+                self.replay_claims.serializer(ReplayClaim(expires_at)),
+                db=self.replay_claims.sdb,
+                overwrite=False,
+            )
+
+    def prune_replay_claims(self, now, *, limit=32):
+        """Scan at most limit claims, deleting expired ones in one short transaction.
+
+        Persist progress and the greatest deleted expiry with the deletions. A
+        backward clock pauses pruning; authentication also refuses times below
+        that cutoff. UTC expiry applies only to transport, never associations.
+        Return the number removed. limit is a positive page size.
+        """
+        with self.env.begin(write=True) as txn:
+            raw = txn.get(b"expiry", db=self.replay_pruning.sdb)
+            state = self.replay_pruning.deserializer(raw) if raw else ReplayPruning()
+            if now < state.prunedThrough:
+                return 0
+            with txn.cursor(db=self.replay_claims.sdb) as cursor:
+                found = cursor.set_range(state.after.encode())
+                if found and state.after and cursor.key() == state.after.encode():
+                    found = cursor.next()
+                if not found:
+                    found = cursor.first()
+                page = list(islice(cursor.iternext(), limit)) if found else []
+            removed = 0
+            for key, raw_claim in page:
+                claim = self.replay_claims.deserializer(raw_claim)
+                if claim.expiresAt <= now:
+                    txn.delete(key, db=self.replay_claims.sdb)
+                    state.prunedThrough = max(state.prunedThrough, claim.expiresAt)
+                    removed += 1
+            state.after = page[-1][0].decode() if page else ""
+            encoded = self.replay_pruning.serializer(state)
+            if encoded != raw and (raw is not None or page):
+                txn.put(b"expiry", encoded, db=self.replay_pruning.sdb)
+            return removed
 
     def result_batch(self, *, after="", limit=32):
         """Copy a bounded result page; close the read transaction before acceptance."""

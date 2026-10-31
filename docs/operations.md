@@ -116,6 +116,12 @@ monitoring, periodic account rechecks and advanced Ethereum recovery are outside
 this build. The [paired launcher](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/docs/gl1-vlei-local-infra-setup.md)
 provides the local verifier/oracle/Anvil setup and qualification.
 
+Expired transport nonce claims are pruned in bounded background batches. If UTC
+moves behind the persisted cleanup cutoff, ACK authentication fails until time
+catches up; deliveries remain pending under the normal retry policy. Correct the
+system clock rather than deleting replay state. This cutoff survives restart and
+does not expire accepted associations.
+
 ## Coordinated PoC naming update
 
 This revision changes status-event, ACK and application-store field names in place.
