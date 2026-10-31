@@ -30,9 +30,6 @@ class StatusEnd:
                 "attempts": event.attempts,
                 "error": event.error,
                 "blocked": event.blocked,
-                "nextAttemptAt": self.baser.destinations.get(
-                    keys=(event.destination,)
-                ).nextAttemptAt,
             }
         elif result is not None:
             data = {
