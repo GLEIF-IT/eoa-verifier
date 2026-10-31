@@ -1,0 +1,48 @@
+{
+  "types": {
+    "EIP712Domain": [
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "version",
+        "type": "string"
+      },
+      {
+        "name": "chainId",
+        "type": "uint256"
+      }
+    ],
+    "ExternalAssociation": [
+      {
+        "name": "issuerAid",
+        "type": "string"
+      },
+      {
+        "name": "leVleiSaid",
+        "type": "string"
+      },
+      {
+        "name": "extId",
+        "type": "string"
+      },
+      {
+        "name": "nonce",
+        "type": "string"
+      }
+    ]
+  },
+  "primaryType": "ExternalAssociation",
+  "domain": {
+    "name": "vlei-external-association/v1",
+    "version": "1",
+    "chainId": "1"
+  },
+  "message": {
+    "issuerAid": "DIqI4910CfGV_VLbLTy6XXLKZwm_HZQSG_N0iAG0D29c",
+    "leVleiSaid": "EDtvFDCx-Kjtac85bs5PenfQlm41Y5BlWlpooRhF-RGn",
+    "extId": "eip155:1:0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+    "nonce": "0AAAAQIDBAUGBwgJCgsMDQ4P"
+  }
+}

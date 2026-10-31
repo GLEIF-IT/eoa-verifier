@@ -1,0 +1,60 @@
+{
+  "purpose": "Encoding fixture only; synthetic KERI evidence MUST NOT pass production verification.",
+  "publicTestPrivateKey": "0x0000000000000000000000000000000000000000000000000000000000000001",
+  "signer": "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf",
+  "typedData": {
+    "types": {
+      "EIP712Domain": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "name": "chainId",
+          "type": "uint256"
+        }
+      ],
+      "ExternalAssociation": [
+        {
+          "name": "issuerAid",
+          "type": "string"
+        },
+        {
+          "name": "leVleiSaid",
+          "type": "string"
+        },
+        {
+          "name": "extId",
+          "type": "string"
+        },
+        {
+          "name": "nonce",
+          "type": "string"
+        }
+      ]
+    },
+    "primaryType": "ExternalAssociation",
+    "domain": {
+      "name": "vlei-external-association/v1",
+      "version": "1",
+      "chainId": "1"
+    },
+    "message": {
+      "issuerAid": "DIqI4910CfGV_VLbLTy6XXLKZwm_HZQSG_N0iAG0D29c",
+      "leVleiSaid": "EDtvFDCx-Kjtac85bs5PenfQlm41Y5BlWlpooRhF-RGn",
+      "extId": "eip155:1:0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+      "nonce": "0AAAAQIDBAUGBwgJCgsMDQ4P"
+    }
+  },
+  "domainSeparator": "0xab984fd384878045f931921ab500e2888f9c6626cfe92697809d0742a05e7f0f",
+  "messageHash": "0xe4bfdb2f83030cc33c0e713a2ddb23799300aec91c7b9648865f6022a1a408aa",
+  "signingDigest": "0x068a2e6c0f87a4e2250e3b980bfb11f727d951d5e3d450aff2e93e41e46d73b8",
+  "signature": "0x67ba7282954e74c5742fc3bc0c6eedc8750deb2089f8193f163fe7b1851a55a91d14452d0ccfd5a1d85f6d893e9171bf48127e4989c755dd4095481c63d737b21b",
+  "schemaSaid": "EOgZ5tOZ0f7U-4H004zKoz75Pi8XwUM2FjKoMYrkBnmu",
+  "associationSaid": "EIMtYfwyE2KoT65Tze54g0IyPfw41Zly2sXvo9Mrgzv3",
+  "proofSaid": "EPTwWHZ5p4AlLo4U4IM8zsmtObavT59EsnCO8a4RP7X8"
+}

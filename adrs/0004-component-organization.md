@@ -78,7 +78,9 @@ source changes alone do not update installed entry-point metadata.
 
 ## Validation and future changes
 
-Keep tests flat and preserve the witnessed KERI/IPEX/Anvil integration topology.
+Organize tests by production component, with named shared support and integration
+scenarios in their own packages. Use pytest importlib mode and preserve the
+witnessed KERI/IPEX/Anvil integration topology.
 Run affected contract tests, then the full suite against a built wheel outside
 the checkout, including CLI help and packaged schemas. Record extraction must
 preserve field order/defaults and serialization, and moves must preserve methods.

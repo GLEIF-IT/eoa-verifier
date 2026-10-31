@@ -4,7 +4,7 @@
 webhook. `vlei-oracle` uses that authenticated status to publish or withdraw
 Ethereum mappings. This document describes the service contract; see
 the [operator guide](../../docs/operations.md) for deployment and recovery. [ADR 0002](../../adrs/0002-verifier-result-object.md) records
-the initial delivery object and ACK shape.
+the rationale for ordinary immutable API objects. This document owns their wire definition.
 
 ## Responsibilities
 
@@ -38,14 +38,15 @@ acceptance commits locally without an outbox obligation (`delivery` is null).
 Association nonces contain 1–128 ASCII characters from `[A-Za-z0-9_-]`.
 In either mode, acceptance permanently consumes the exact issuer/nonce for that
 SAID. Another SAID reusing the pair is locally `rejected` with `NONCE_REUSED`;
-initial verification remains `verified`. Revocation and supersession do not
+initial verification remains `verified`. Revocation and downstream selection supersession do not
 release claims. See [ADR 0005](../../adrs/0005-accepted-association-nonces.md).
 Only acceptance
 (`status: "accepted"`) and later association retirement (`status: "revoked"`,
 `reasonCode: "REVOKED"`) are webhook events; initial rejection/unavailability is
 available through public stored status, not sent as a status event.
 
-Acceptance lasts indefinitely until association revocation or supersession.
+Verifier acceptance lasts indefinitely until verified revocation of that association.
+Oracle supersession changes selection only; it does not revoke verifier acceptance.
 Elapsed time, old observations and outages do not invalidate it. There are no
 verification refreshes, periodic account checks or continuing source-chain
 reassessments. Initial source-chain validation remains mandatory.
@@ -55,8 +56,8 @@ reassessments. Initial source-chain validation remains mandatory.
 The sender rediscovers pending events across restart, validates HTTP success,
 the signed request reference and event-storage acknowledgment before completion, and
 signs every retry anew. Permanent failures stay blocked until correction and
-explicit resumption; transient failures retry automatically. Superseded acceptance
-events remain stored but are not sent after retirement.
+explicit resumption; transient failures retry automatically. Acceptance events replaced by terminal retirement
+remain stored but are not sent after retirement.
 
 Persist acceptance and its webhook obligation together. Deliver after commit;
 the receiver durably stores the status before acknowledging. Retry unacknowledged
@@ -114,7 +115,7 @@ and status `0`; ACKs use action `ack`, HTTP status `200` and the original
 `nonce:Content-Digest` reference. The actual response status must also be `200`.
 ACK policy belongs to the webhook delivery components, which use the common
 `sign()` and `verify()` operations. The webhook receiver signs after durable
-acceptance; the sender validates response status, request/event correlation and
+receipt; the sender validates response status, request/event correlation and
 application ACK payload before completing delivery. Authentication alone can
 succeed for a signed error response and does not imply delivery success.
 
@@ -127,32 +128,17 @@ transport expiry has no effect on association validity.
 Verify only the configured peer's locally accepted current key. Rotation needs
 KERIpy event acceptance; after rotation, old-key attempts fail and a retry signs
 anew. There is no network key refresh in this helper. After authentication, an
-insert-only peer/nonce claim rejects replay across restart. Claims are retained
-in this increment. A lost ACK is retried with a fresh nonce and the same immutable
+insert-only peer/nonce claim rejects replay across restart. Claims are retained persistently. A lost ACK is retried with a fresh nonce and the same immutable
 application event; event deduplication remains separate. Missing keys or invalid
 signatures never consume a nonce or establish application acceptance.
 
-## Ownership and Ethereum mappings
+## Downstream consumers
 
-Follow [ADR 0001](../../adrs/0001-eoa-association-ownership-and-replacement.md):
-strictly later verified issuance wins within the same LE; another LE must wait
-for verified revocation releasing the current claim. Never order different
-issuers by their KEL sequence numbers. Same-event multiple-association handling
-is deferred in the ADR appendix.
-
-The oracle publishes an accepted, issued, selected association and withdraws a
-revoked association by exact SAID. A delayed revocation of an older association
-must not remove its replacement. Check durable revocation and selection before
-acting or retrying, without repeating initial verification.
-
-Preserve the existing [registry ABI][registry], identity adapter and wallet policy.
-Derive the wallet from canonical `extId` and the identity reference from
-`keccak256(UTF-8(issuerAid))`, not LEI or LE credential SAID. Deployment supplies
-chain/RPC, writer and contract configuration. Use ordinary submission, receipt
-and contract-state handling: submission is not confirmation. An in-flight
-transaction can still mine after revocation; no immediate reversal or advanced
-transaction-recovery guarantee is made. Undelivered revocation can leave a
-mapping active because contracts do not expire mappings automatically.
+Durable delivery ACK, Oracle selection and confirmed on-chain endorsement are
+separate milestones. Oracle owns [oracle-api-v1](https://github.com/GLEIF-IT/vlei-oracle/blob/main/protocol/oracle-api-v1/README.md),
+including ownership, replacement and withdrawal. Oracle supersession is not a
+verifier status and cannot retire acceptance here. Contracts own their
+[registry interface](https://github.com/GLEIF-IT/vlei-comply/blob/main/docs/oracle-registry.md).
 
 ## Stored status
 
@@ -167,5 +153,66 @@ Delivery progress describes the requested association's current event; shared
 destination scheduling metadata is not public. Supersession is the oracle’s
 selection decision, not a verifier status.
 
-[carrier]: https://github.com/GLEIF-IT/vlei-oracle/blob/77849caae048381aee96b42f75053368d8d24c53/protocol/external-association-v1/eoa-v1/README.md
-[registry]: https://github.com/GLEIF-IT/vlei-comply/blob/6220cd78411b8b721838ee67f11293ff5504c05c/src/attestation/VLEIOracleRegistry.sol
+[carrier]: ../external-association-v1/eoa-v1/README.md
+
+## Status event and application ACK
+
+The initial acceptance shape is:
+
+```json
+{
+  "version": "1",
+  "eventId": "example-association:1",
+  "associationSaid": "example-association",
+  "statusRevision": 1,
+  "status": "accepted",
+  "association": {
+    "issuerAid": "example-issuer",
+    "leSaid": "example-le",
+    "extId": "eip155:31337:0x1111111111111111111111111111111111111111",
+    "issuanceAnchor": {"sequenceNumber": 3, "said": "example-issuer-kel-event"}
+  },
+  "accountObservation": {
+    "wallet": "0x1111111111111111111111111111111111111111",
+    "chainId": 31337,
+    "blockNumber": 42,
+    "blockHash": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "code": "0x",
+    "observedAt": "2026-10-23T12:00:00Z"
+  }
+}
+```
+
+Identifiers above are illustrative. Issuance identifies the verified anchor in the
+issuer's KEL, not receipt order. The observation records the initial check only;
+its age never expires acceptance. `eventId` combines association SAID and status revision.
+
+Verified association revocation creates a second event: `statusRevision: 2`,
+`eventId: "example-association:2"`, `status: "revoked"`, and
+`reasonCode: "REVOKED"`. Keep the original `association` and `accountObservation` objects;
+the issuance anchor must not become the revocation anchor. Commit retirement and
+this event together, using the original delivery destination. Retirement is terminal
+for that SAID and requires its own ACK; the initial event’s ACK cannot complete it.
+
+POST the exact stored bytes to the configured destination with the service
+signature profile. Completion requires an authenticated HTTP 200 response bound
+to that attempt, with exactly this JSON object (`stored` is a boolean):
+
+```json
+{"eventId": "example-association:1", "stored": true}
+```
+
+The receiver signs only after durable event receipt. Redelivery keeps the event/body
+and gets a fresh transport signature; the receiver acknowledges duplicates without
+repeating effects. A signature on an error response does not complete delivery.
+
+
+## Evidence intake
+
+`POST /` accepts the KERI JSON-body/CESR-attachment-header form; `PUT /` accepts
+a finite CESR stream. HTTP 204 means intake only. Each request is independent
+remote evidence; complete messages may enter KERIpy state even if a later message
+is incomplete. Missing source evidence uses native escrows. `GET /health` is
+liveness only; KERIpy also exposes public OOBI introduction routes. See
+[operations](../../docs/operations.md) for peer introduction, bounded framing and
+the known native receipt-couple shortage limitation.

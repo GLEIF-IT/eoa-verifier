@@ -2,10 +2,12 @@
 
 Run from the repository root with the installed verifier and pytest. Tests are an
 explicit tests package; pytest.ini selects importlib mode. No PYTHONPATH or
-sys.path edits are required. Production components and imports are unchanged.
+sys.path edits are required. Production components and imports are unchanged. The verifier also owns the
+external-association profile conformance suite and reference vectors.
 
 | Production subject | Test location / example |
 |---|---|
+| Credential/schema/proof profile | python -m pytest tests/verification/test_association_profile.py |
 | runtime/cli.py | python -m pytest tests/runtime/test_cli.py |
 | runtime/config.py | python -m pytest tests/runtime/test_config.py |
 | runtime/serving.py | python -m pytest tests/runtime/test_serving.py -k cleanup |
@@ -23,12 +25,12 @@ sys.path edits are required. Production components and imports are unchanged.
 Use ::test_function_name for one function and -k expression for a class or method.
 Reusable issuer, service ownership, network and acceptance construction is in
 tests/support. Fixtures live in their narrowest common conftest. Tests never
-import other test modules. The 20 former mixed nonce cases split into validation
-and persistence cases with every parameter/assertion preserved: 134 becomes 154.
-Other scenarios move whole.
+import other test modules. The complete suite includes component tests plus the 69 association-profile cases
+moved from Oracle. Contract mapping/calldata conformance remains at Oracle's
+Comply integration boundary.
 
 Run python -m pytest. Full tests require
-Foundry 1.5.1 including Anvil. CI builds a fresh wheel and copies tests plus
+Foundry 1.5.1 including Anvil. CI builds a fresh wheel and copies tests, protocol fixtures and
 pytest.ini outside the checkout before running python -m pytest. Test support is
 excluded from wheels. Run one repository's test package per invocation. The sole
 paired-system scenario belongs to the oracle; launchers invoke it without copies.

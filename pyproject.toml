@@ -17,7 +17,7 @@ Repository = "https://github.com/GLEIF-IT/eoa-verifier"
 Documentation = "https://github.com/GLEIF-IT/eoa-verifier/blob/master/docs/operations.md"
 
 [project.optional-dependencies]
-test = ["pytest>=9"]
+test = ["pytest>=9", "jsonschema==4.26.0"]
 
 [project.scripts]
 eoa-verifier = "eoa_verifier.runtime.cli:main"

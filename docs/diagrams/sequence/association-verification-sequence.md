@@ -1,68 +1,47 @@
-# EOA association verification and webhook delivery
+# Association verification and acceptance
 
-Starting with an [issued EOA association](association-creation-sequence.md), `eoa-verifier` independently checks its KERI/vLEI evidence, Ethereum proof and account state before durable acceptance and authenticated delivery to the configured webhook destination (`vlei-oracle` in this deployment).
+Verifier independently checks issued evidence before acceptance. The configured consumer may be Oracle or another service.
 
-[Open the rendered chart](association-verification-sequence.svg). Dark teal participants, lavender notes and green completion bands follow the methodology's sequence diagram.
-
-![Sequence chart showing association presentation, independent verification and durable webhook delivery](association-verification-sequence.svg)
+![Association verification and acceptance](association-verification-sequence.svg)
 
 <details>
 <summary>Editable Mermaid source</summary>
 
-Render exports on an opaque white canvas to preserve this palette in light and dark viewers. Keep bottom participant labels enabled so lifelines span the full sequence.
-
-```text
-%%{init: {"theme":"base","fontFamily":"Arial, sans-serif","themeCSS":"text { font-family: Arial, sans-serif !important; }","themeVariables":{"fontFamily":"Arial, sans-serif","primaryColor":"#003336","primaryTextColor":"#FFFFFF","primaryBorderColor":"#003336","lineColor":"#6A7B7F","actorBkg":"#003336","actorBorder":"#003336","actorTextColor":"#FFFFFF","actorLineColor":"#6A7B7F","signalColor":"#003336","signalTextColor":"#003336","labelBoxBkgColor":"#DFFBC0","labelBoxBorderColor":"#6A7B7F","labelTextColor":"#003336","loopTextColor":"#003336","noteBkgColor":"#E5DCE6","noteBorderColor":"#6A7B7F","noteTextColor":"#003336","sequenceNumberColor":"#FFFFFF"},"sequence":{"mirrorActors":true,"actorMargin":28,"width":155,"height":55,"messageMargin":24,"noteMargin":12,"diagramMarginX":20,"diagramMarginY":20,"wrap":false,"actorFontFamily":"Arial","messageFontFamily":"Arial","noteFontFamily":"Arial"}}}%%
+```mermaid
+%%{init: {"theme":"base","themeVariables":{"actorBkg":"#003336","actorTextColor":"#FFFFFF","signalColor":"#003336","signalTextColor":"#003336","noteBkgColor":"#E5DCE6","noteTextColor":"#003336","loopTextColor":"#003336","labelTextColor":"#003336","labelBoxBkgColor":"#DFFBC0","labelBoxBorderColor":"#6A7B7F","actorLineColor":"#6A7B7F","lineColor":"#6A7B7F"},"sequence":{"mirrorActors":true,"wrap":true}}}%%
 sequenceDiagram
     autonumber
-    participant VW as vLEI wallet<br/>Entity AID and registry
-    participant W as KERI evidence<br/>Witnesses and sources
-    participant V as eoa-verifier
-    participant RPC as Ethereum RPC<br/>Configured chain
-    participant O as vlei-oracle
-
-    rect rgb(246, 243, 247)
-        Note over VW,W: 1. Association already issued
-        Note over VW,W: Two-wallet ceremony complete<br/>ACDC embeds Ethereum proof<br/>KEL/TEL evidence ready<br/>See association creation chart
-    end
-
-    rect rgb(246, 243, 247)
-        Note over VW,RPC: 2. Independently verify the association
-        VW->>V: Present ACDC through IPEX/CESR<br/>Include LE vLEI chain and KEL/TEL evidence
-        V->>V: Parse and escrow, persist verification work
-        opt Supporting evidence is missing
-            V->>W: Resolve configured OOBIs / request evidence
-            W-->>V: Available events, receipts and credentials
-        end
-        V->>V: Check schema and SAIDs, accepted KEL/TEL<br/>Witnessed issuance, association and source status
-        V->>V: Follow LE to QVI to trusted GLEIF root<br/>Association issuer is LE credential holder
-        V->>V: Rebuild EIP-712 challenge from ACDC<br/>Recover signer, match canonical extId and chain
-        V->>RPC: Check eth_chainId, read account code<br/>at an identified canonical block
-        RPC-->>V: Chain, block hash/number and account code
-        V->>V: Accept empty code or valid EIP-7702 designation<br/>Recheck KERI status after RPC wait
-        Note over V,RPC: RPC URL comes from trusted configuration<br/>Account state is an observation,<br/>not an ownership proof
-    end
-
+    participant I as Issuer
+    participant V as EOA Verifier
+    participant R as Configured Ethereum RPC
+    participant C as Trusted webhook consumer
+    I->>V: IPEX Grant + source credentials, KEL/TEL, receipts
+    V->>V: Native parse/escrows, durable pending work
+    V->>V: Check schemas/SAIDs, LE/QVI trust, issuer/holder and witnessed issuance
+    V->>V: Reconstruct challenge, verify canonical EOA proof
+    V->>R: Check chain and account code at canonical block
+    R-->>V: Block/hash/code observation
+    V->>V: Recheck native credential status after RPC wait
     alt Evidence or RPC unavailable
-        V->>V: Keep pending and retry — no success event
+        V->>V: Retain pending work
     else Established invalidity
-        V->>V: Record rejection — no success event
-    else Both sides valid
-        rect rgb(223, 251, 192)
-            Note over V,O: 3. Deliver accepted association status durably
-            V->>V: Atomically commit acceptance and outbox event
-            V->>O: AID-signed webhook<br/>Event ID, status revision and association
-            O->>O: Verify request signature, allowed AID and chain<br/>Atomically deduplicate and save accepted state
-            O-->>V: Authenticated durable acknowledgement
-            Note over V,O: Retry unacknowledged event with the same ID<br/>Acknowledged does not mean endorsed on-chain
+        V->>V: Store initial rejection
+    else Initially verified
+        V->>V: Store verification result
+        alt Issuer/nonce owned by another accepted SAID
+            V->>V: Store local NONCE_REUSED rejection, no webhook
+        else Fresh pair or same accepted SAID
+            V->>V: Atomically commit nonce claim, acceptance and optional outbox
+            opt Webhook configured
+                V->>C: Authenticated immutable acceptance event
+                C->>C: Commit durable receipt
+                C-->>V: Authenticated correlated ACK
+                V->>V: Complete delivery, retry same event if ACK is lost
+            end
         end
     end
 ```
 
 </details>
 
-The webhook carries the association SAID, issuer AID, LE vLEI SAID, canonical `extId`, status, status revision, issuance anchor and observation time/block. The oracle derives `wallet` from `extId` and `identityRef = keccak256(issuerAid)`; it checks request authenticity and deployment scope rather than repeating association-proof verification. Its verifier AID allowlist is configured: OOBI discovery alone does not authorize a caller.
-
-Initial verification checks the association and observes its account; it does not itself grant on-chain authority. Continue with [oracle acceptance and endorsement](oracle-endorsement-sequence.md), then the [stablecoin flow](stablecoin-end-to-end-sequence.md). Later verified association revocation and withdrawal are covered in [revocation and status maintenance](revocation-status-sequence.md).
-
-Sources: `eoa-profile.docx`, `methodology.docx` (original color theme), and [current EIP-712 profile](https://github.com/GLEIF-IT/vlei-oracle/blob/7d82d04cd444cb21e1da1e6ec0408cc40105d4f4/protocol/external-association-v1/eoa-v1/README.md). The documents permit other challenge carriers; this design selects EIP-712 from our agreed plan. Authenticated webhook delivery connects the independent verifier and receiver.
+[Verifier API](../../../protocol/verifier-api-v1/README.md) owns events, signatures, ACKs and stored status. An ACK is not downstream selection or endorsement. [Oracle qualification](https://github.com/GLEIF-IT/vlei-oracle/blob/main/docs/two-service-qualification.md) owns the full-system scenario.
