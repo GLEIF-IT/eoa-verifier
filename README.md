@@ -93,17 +93,23 @@ first Grant and never re-enqueue completed work. Verified results retain the
 wallet and initial account observation; they do not mean application acceptance,
 webhook delivery or Ethereum endorsement. Restart rediscovers pending work.
 
-With a destination configured, `AcceptanceDoer` reads the completed result and
-locally accepted issuance anchor without repeating initial checks. Acceptance,
-immutable facts and an outbox event commit in one application transaction. Restart
-recovers results awaiting acceptance; repeated acceptance preserves the original
-event and destination. KERIpy evidence lives in a separate database and is not
-part of this transaction. Missing evidence or already-known revocation prevents
-first acceptance. Once accepted, observation age does not invalidate the record.
+`AcceptanceDoer` reads completed results and locally accepted issuance evidence
+without repeating initial checks. Acceptance permanently binds the exact issuer/nonce
+to one SAID, atomically with immutable facts and any configured outbox obligation.
+Another SAID using that pair becomes locally `rejected` with `NONCE_REUSED`; its
+initial verification remains `verified`. Same-SAID replay is idempotent, and
+revocation/supersession never releases the nonce. See [ADR 0005](adrs/0005-accepted-association-nonces.md).
+
+Acceptance runs with or without webhooks. With no target, public `delivery` is null;
+enabling delivery later does not backfill events for locally accepted records.
+Restart recovers results awaiting acceptance. KERIpy evidence lives in a separate
+database and is not part of the application transaction. Missing evidence or
+already-known revocation prevents first acceptance. Observation age does not
+invalidate an accepted record.
 
 `RetirementDoer` scans bounded pages of accepted records against locally accepted
 association TEL state. KERIpy `rev`/`brv` retires only that SAID and atomically
-creates its second event, preserving original issuance facts, observation and
+creates its second event when an original delivery exists, preserving original issuance facts, observation and
 webhook destination. Duplicate evidence and restart do not create more events or
 revive retirement. A different association for the same wallet is untouched;
 ownership selection belongs to the oracle.

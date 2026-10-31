@@ -49,6 +49,7 @@ def accept_verified_result(baser):
     """Commit one known initial result with minimal association facts and target."""
     return baser.accept(
         "association",
+        nonce="acceptance-nonce",
         association={
             "issuerAid": "issuer",
             "leSaid": "le",
@@ -101,6 +102,7 @@ def test_failed_acceptance_rolls_back_status_and_event(verified_store):
     ):
         accept_verified_result(baser)
     assert baser.associations.get(keys=("association",)) is None
+    assert baser.accepted_nonces.cntAll() == 0
     assert list(baser.outbox.getItemIter()) == []
     assert baser.results.get(keys=("association",)).status == "verified"
     assert accept_verified_result(baser).status == "accepted"
@@ -114,7 +116,7 @@ def test_rejected_result_cannot_create_acceptance_or_event(verified_store):
     with pytest.raises(ValueError, match="verified result"):
         baser.accept(
             "rejected",
-            association={},
+            association={"issuerAid": "issuer"}, nonce="other",
             destination="https://receiver.example/hook",
             peer_aid="peer",
         )
@@ -214,7 +216,7 @@ def test_public_status_does_not_disclose_other_delivery_activity(verified_store)
     baser.enqueue(PendingVerification("other", "grant"))
     baser.finish(VerificationResult("other", "verified", eoaResult=result.eoaResult))
     other = baser.accept(
-        "other", association={}, destination=event.destination, peer_aid=event.peerAid
+        "other", association={"issuerAid": "issuer"}, nonce="other", destination=event.destination, peer_aid=event.peerAid
     )
     baser.record_attempt(other.eventId, next_attempt_at=3000000000)
     schedule = DestinationSchedule(failures=3, nextAttemptAt=4000000000)
@@ -224,3 +226,14 @@ def test_public_status_does_not_disclose_other_delivery_activity(verified_store)
     assert "nextAttemptAt" not in before["delivery"]
     # Operators still have the complete durable schedule through local storage.
     assert baser.destinations.get(keys=(event.destination,)) == schedule
+
+
+def test_missing_original_delivery_cannot_silently_retire_locally(verified_store):
+    """Local-only acceptance is explicit; a lost delivery obligation is corruption."""
+    baser = verified_store
+    accepted = accept_verified_result(baser)
+    baser.outbox.rem(keys=(accepted.eventId,))
+    with pytest.raises(ValueError, match="delivery event is absent"):
+        baser.retire("association")
+    assert baser.associations.get(keys=("association",)) == accepted
+    assert baser.accepted_nonces.cntAll() == 1

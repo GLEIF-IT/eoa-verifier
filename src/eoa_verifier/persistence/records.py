@@ -30,6 +30,16 @@ class VerificationScope:
 
     trustedGedaAid: str
     chainId: int
+    acceptancePolicy: str
+
+
+@dataclass
+class AcceptedNonce:
+    """Permanent exact issuer/nonce ownership by one application-accepted SAID."""
+
+    issuerAid: str
+    nonce: str
+    associationSaid: str
 
 
 @dataclass
@@ -45,6 +55,8 @@ class AssociationStatus:
 
     Acceptance is not oracle ownership selection or an Ethereum endorsement.
     There is no expiry; verified association revocation changes status explicitly.
+    Policy rejections use status rejected, reason NONCE_REUSED and no event ID;
+    the independent initial VerificationResult remains verified.
     """
 
     associationSaid: str

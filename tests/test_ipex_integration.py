@@ -39,7 +39,8 @@ from eoa_verifier.verification.eoa import build_challenge
 
 
 @pytest.mark.parametrize("method", ["POST", "PUT"])
-def test_grant_verification_and_restart(tmp_path, method):
+@pytest.mark.parametrize("delivery", [True, False])
+def test_grant_verification_and_restart(tmp_path, method, delivery):
     """Exercise real witnessed GEDA/QVI/LE issuance, IPEX HTTP delivery and local Anvil.
 
     Own isolated KERIpy stores/processes with ExitStack and all network tasks with
@@ -92,8 +93,8 @@ def test_grant_verification_and_restart(tmp_path, method):
             rpc_url=f"http://127.0.0.1:{rpc_port}",
             head_dir=str(tmp_path),
             http_port=port,
-            webhook_url="http://127.0.0.1:1/hook",
-            webhook_aid=geda.pre,
+            webhook_url="http://127.0.0.1:1/hook" if delivery else None,
+            webhook_aid=geda.pre if delivery else None,
         )
         service_stores = stack.enter_context(ExitStack())
         runtime = service_stores.enter_context(verifier_service(config))
@@ -168,7 +169,7 @@ def test_grant_verification_and_restart(tmp_path, method):
                 assert workflow.tyme < deadline, (expected, status)
                 yield 0.01
 
-        def issue_association(*, signer=KEY, chain=31337, holder=None):
+        def issue_association(*, signer=KEY, chain=31337, holder=None, nonce=None, wallet_key=KEY):
             """Yield through witnessed issuance and return (ACDC, KERI evidence/Grant bytes).
 
             signer, chain and holder select intentional invalid cases. The normal
@@ -180,8 +181,8 @@ def test_grant_verification_and_restart(tmp_path, method):
             challenge = build_challenge(
                 issuer_aid=hab.pre,
                 le_vlei_said=credentials["qvi"].said,
-                ext_id=f"eip155:{chain}:{Account.from_key(KEY).address.lower()}",
-                nonce=str(uuid4()),
+                ext_id=f"eip155:{chain}:{Account.from_key(wallet_key).address.lower()}",
+                nonce=nonce if nonce is not None else str(uuid4()),
             )
             sig = Account.sign_message(
                 encode_typed_data(full_message=challenge), signer
@@ -270,6 +271,7 @@ def test_grant_verification_and_restart(tmp_path, method):
             creder, evidence = yield from issue_association()
             yield from send_incomplete()
             yield from deliver(evidence, creder.said, "pending")
+            assert runtime.baser.accepted_nonces.cntAll() == 0
             aid = runtime.hab.pre
             workflow.remove([runtime, client_doer])
             service_stores.close()
@@ -293,7 +295,9 @@ def test_grant_verification_and_restart(tmp_path, method):
                 "said": le.kever.serder.said,
             }
             assert accepted.accountObservation["chainId"] == 31337
-            assert runtime.baser.outbox.get(keys=(accepted.eventId,)) is not None
+            assert bool(accepted.eventId) == delivery
+            if delivery:
+                assert runtime.baser.outbox.get(keys=(accepted.eventId,)) is not None
             # Replaying the same Grant must retain the completed work record.
             original = runtime.baser.results.get(keys=(creder.said,))
             # EXN deduplication may suppress a new notice entirely. Test application
@@ -314,6 +318,18 @@ def test_grant_verification_and_restart(tmp_path, method):
             assert runtime.baser.results.get(keys=(creder.said,)) == original
             assert runtime.baser.associations.get(keys=(creder.said,)) == accepted
 
+            # Two otherwise valid signed credentials sharing issuer/u: only the first accepts.
+            other_key = "0x" + "0" * 63 + "2"
+            reused, reused_stream = yield from issue_association(
+                signer=other_key, wallet_key=other_key, nonce=creder.sad["u"]
+            )
+            assert reused.said != creder.said
+            result = yield from deliver(reused_stream, reused.said, "verified")
+            rejected = yield from wait_status(reused.said, "rejected")
+            assert result.status == "verified" and rejected.reason == "NONCE_REUSED"
+            assert runtime.baser.outbox.get(keys=(f"{reused.said}:1",)) is None
+            assert runtime.baser.accepted_nonces.cntAll() == 1
+
             # A newer same-LE/address association has independent application status.
             successor, successor_stream = yield from issue_association()
             yield from deliver(successor_stream, successor.said, "verified")
@@ -322,7 +338,7 @@ def test_grant_verification_and_restart(tmp_path, method):
                 newer.association["issuanceAnchor"]["sequenceNumber"]
                 > accepted.association["issuanceAnchor"]["sequenceNumber"]
             )
-            initial_event = runtime.baser.outbox.get(keys=(accepted.eventId,))
+            initial_event = runtime.baser.outbox.get(keys=(accepted.eventId,)) if delivery else None
 
             # A fresh Grant still embeds issuance. Neither it nor unanchored TEL
             # evidence can retire an association; wait for actual KERIpy escrow.
@@ -368,11 +384,13 @@ def test_grant_verification_and_restart(tmp_path, method):
                 retired.association == accepted.association
             )  # Keep issuance, not revocation anchor.
             assert retired.accountObservation == accepted.accountObservation
-            assert retired.eventId == f"{creder.said}:2"
-            assert (
-                runtime.baser.outbox.get(keys=(accepted.eventId,)).body
-                == initial_event.body
-            )
+            assert retired.eventId == (f"{creder.said}:2" if delivery else "")
+            retained = runtime.baser.outbox.get(keys=(accepted.eventId,)) if delivery else None
+            if delivery:
+                # Retry progress may advance; immutable accepted-event bytes must not.
+                assert retained.body == initial_event.body
+            else:
+                assert retained is None
             assert runtime.baser.associations.get(keys=(successor.said,)) == newer
             # Replay both the original Grant and the now-revoked KERI artifacts.
             yield from send(evidence + replay(le, le_rgy, registries["le"], creder))
@@ -406,6 +424,7 @@ def test_grant_verification_and_restart(tmp_path, method):
             coordinator.process_results()
             rejected = runtime.baser.results.get(keys=(raced.said,))
             assert rejected.status == "rejected" and "revoked" in rejected.reason
+            assert runtime.baser.accepted_nonces.get(keys=(runtime.baser.nonce_key(raced.issuer, raced.sad["u"]),)) is None
             coordinator.extend([verifier_loop])
 
             for label, options, reason in [
@@ -416,6 +435,7 @@ def test_grant_verification_and_restart(tmp_path, method):
                 candidate, stream = yield from issue_association(**options)
                 work = yield from deliver(stream, candidate.said, "rejected")
                 assert reason in work.reason, (label, work)
+                assert runtime.baser.accepted_nonces.get(keys=(runtime.baser.nonce_key(candidate.issuer, candidate.sad["u"]),)) is None
             assert runtime.baser.associations.get(keys=(creder.said,)) == retired
             assert (
                 len(
@@ -425,7 +445,7 @@ def test_grant_verification_and_restart(tmp_path, method):
                         if event.associationSaid == creder.said
                     ]
                 )
-                == 2
+                == (2 if delivery else 0)
             )
             assert runtime.baser.associations.get(keys=(successor.said,)) == newer
             finished.append(True)

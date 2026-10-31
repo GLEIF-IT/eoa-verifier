@@ -13,7 +13,7 @@ class AcceptanceDoer(doing.Doer):
     recovery. Existing accepted status never expires or gets reverified here.
     """
 
-    def __init__(self, *, baser, rgy, destination, peer_aid, **kwa):
+    def __init__(self, *, baser, rgy, destination=None, peer_aid=None, **kwa):
         self.baser, self.rgy = baser, rgy
         self.destination, self.peer_aid = destination, peer_aid
         self.after = ""
@@ -30,11 +30,13 @@ class AcceptanceDoer(doing.Doer):
                 keys=(self.after,)
             ):
                 continue
-            association = self.issuance_facts(self.after)
-            if association is not None:
+            evidence = self.issuance_facts(self.after)
+            if evidence is not None:
+                association, nonce = evidence
                 self.baser.accept(
                     self.after,
                     association=association,
+                    nonce=nonce,
                     destination=self.destination,
                     peer_aid=self.peer_aid,
                 )
@@ -67,4 +69,4 @@ class AcceptanceDoer(doing.Doer):
                 "sequenceNumber": state.a["s"],
                 "said": state.a["d"],
             },
-        }
+        }, credential.sad["u"]

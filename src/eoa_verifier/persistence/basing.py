@@ -1,5 +1,6 @@
 """Persist verification, acceptance and delivery independently of KERI evidence."""
 
+import hashlib
 import json
 from dataclasses import replace
 from itertools import islice
@@ -7,6 +8,7 @@ from itertools import islice
 from keri.db import dbing, koming
 
 from .records import (
+    AcceptedNonce,
     AssociationStatus,
     Delivery,
     DestinationSchedule,
@@ -34,9 +36,14 @@ class VerifierBaser(dbing.LMDBer):
         self.results = koming.Komer(
             db=self, subkey="results.", schema=VerificationResult
         )
-        self.replay_claims = koming.Komer(db=self, subkey="replay_claims.", schema=ReplayClaim)
+        self.replay_claims = koming.Komer(
+            db=self, subkey="replay_claims.", schema=ReplayClaim
+        )
         self.associations = koming.Komer(
             db=self, subkey="associations.", schema=AssociationStatus
+        )
+        self.accepted_nonces = koming.Komer(
+            db=self, subkey="accepted_nonces.", schema=AcceptedNonce
         )
         self.outbox = koming.Komer(db=self, subkey="outbox.", schema=Delivery)
         self.destinations = koming.Komer(
@@ -46,14 +53,20 @@ class VerifierBaser(dbing.LMDBer):
 
     def bind_verification_scope(self, *, trusted_geda_aid, chain_id):
         """Refuse another policy or previously completed results with unknown provenance."""
-        scope = VerificationScope(trusted_geda_aid, chain_id)
-        existing = self.scope.get(keys=("verification",))
+        scope = VerificationScope(trusted_geda_aid, chain_id, "issuer-nonce-v1")
+        try:
+            existing = self.scope.get(keys=("verification",))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("unsupported verifier policy; use a fresh store") from exc
         if existing is not None and existing != scope:
-            raise ValueError("verifier store belongs to another GEDA root or chain")
+            raise ValueError(
+                "verifier store belongs to another GEDA root, chain or acceptance policy"
+            )
         if existing is None and (
             self.results.cntAll() or self.associations.cntAll() or self.outbox.cntAll()
         ):
             raise ValueError("verifier store has unscoped results; use separate stores")
+        self.validate_nonce_history()
         self.scope.put(keys=("verification",), val=scope)
 
     def enqueue(self, work):
@@ -133,13 +146,81 @@ class VerifierBaser(dbing.LMDBer):
                 table.deserializer(raw) for _, raw in islice(cursor.iternext(), limit)
             ]
 
-    def accept(self, said, *, association, destination, peer_aid):
-        """Atomically persist acceptance and one outbox obligation for a verified result.
+    @staticmethod
+    def nonce_key(issuer, nonce):
+        """Hash an unambiguous pair without Unicode or whitespace normalization."""
+        if (
+            not isinstance(issuer, str)
+            or not issuer
+            or not isinstance(nonce, str)
+            or not 1 <= len(nonce) <= 256
+        ):
+            raise ValueError("issuer and exact nonce are required for acceptance")
+        return (
+            hashlib.sha256(
+                json.dumps(
+                    [issuer, nonce], ensure_ascii=False, separators=(",", ":")
+                ).encode("utf-8")
+            )
+            .hexdigest()
+            .encode("ascii")
+        )
 
-        The caller supplies verified issuance facts; storage does not verify credentials.
-        Repeated acceptance returns the original status without changing its event,
-        body or destination. A failure rolls back all new application records.
-        KERIpy stores are outside this LMDB transaction.
+    def _read_claim(self, txn, key, raw):
+        """Fail closed on corrupt claims, digest collisions or orphaned ownership."""
+        try:
+            claim = self.accepted_nonces.deserializer(raw)
+            if not isinstance(claim.associationSaid, str) or not claim.associationSaid:
+                raise ValueError("missing accepted SAID")
+            if self.nonce_key(claim.issuerAid, claim.nonce) != key:
+                raise ValueError("claim key mismatch")
+            owner = self.associations.deserializer(
+                txn.get(claim.associationSaid.encode(), db=self.associations.sdb)
+            )
+            if (
+                owner is None
+                or owner.status not in ("accepted", "revoked")
+                or owner.associationSaid != claim.associationSaid
+                or owner.association["issuerAid"] != claim.issuerAid
+            ):
+                raise ValueError("claim has no accepted owner")
+            return claim
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise ValueError("inconsistent accepted nonce claim") from exc
+
+    def validate_nonce_history(self):
+        """Require complete acceptance history at startup; never backfill old stores."""
+        with self.env.begin() as txn:
+            owners = set()
+            with txn.cursor(db=self.accepted_nonces.sdb) as cursor:
+                for key, raw in cursor:
+                    claim = self._read_claim(txn, key, raw)
+                    if claim.associationSaid in owners:
+                        raise ValueError(
+                            "multiple nonce claims for one accepted association"
+                        )
+                    owners.add(claim.associationSaid)
+            with txn.cursor(db=self.associations.sdb) as cursor:
+                for key, raw in cursor:
+                    status = self.associations.deserializer(raw)
+                    if status.associationSaid.encode() != key:
+                        raise ValueError("inconsistent association key")
+                    if (
+                        status.status in ("accepted", "revoked")
+                        and status.associationSaid not in owners
+                    ):
+                        raise ValueError(
+                            "accepted associations lack nonce history; use a fresh store"
+                        )
+
+    def accept(self, said, *, association, nonce, destination=None, peer_aid=None):
+        """Commit nonce ownership, local acceptance and optional delivery together.
+
+        Facts and the exact nonce come from already verified native evidence.
+        Another SAID owning this issuer/nonce produces terminal NONCE_REUSED
+        application rejection; initial cryptographic verification stays unchanged.
+        Same-SAID replay returns its original outcome, including after revocation.
+        Native LMDB transactions supply all writer coordination and durability.
         """
         key = said.encode()
         with self.env.begin(write=True) as txn:
@@ -150,29 +231,66 @@ class VerifierBaser(dbing.LMDBer):
             result = self.results.deserializer(raw) if raw is not None else None
             if result is None or result.status != "verified":
                 raise ValueError("acceptance requires a completed verified result")
-            event_id = f"{said}:1"
-            observation = dict(
-                result.eoaResult["accountObservation"], wallet=result.eoaResult["wallet"]
+            if bool(destination) != bool(peer_aid):
+                raise ValueError("delivery requires both destination and peer AID")
+            claim = AcceptedNonce(association["issuerAid"], nonce, said)
+            nonce_key = self.nonce_key(claim.issuerAid, nonce)
+            inserted = txn.put(
+                nonce_key,
+                self.accepted_nonces.serializer(claim),
+                db=self.accepted_nonces.sdb,
+                overwrite=False,
             )
-            accepted = AssociationStatus(said, "accepted", event_id, association, observation)
-            event = _status_delivery(
-                accepted,
-                status_revision=1,
-                destination=destination,
-                peer_aid=peer_aid,
+            observation = dict(
+                result.eoaResult["accountObservation"],
+                wallet=result.eoaResult["wallet"],
+            )
+            if not inserted:
+                existing = self._read_claim(
+                    txn, nonce_key, txn.get(nonce_key, db=self.accepted_nonces.sdb)
+                )
+                if (existing.issuerAid, existing.nonce) != (
+                    claim.issuerAid,
+                    claim.nonce,
+                ) or existing.associationSaid == said:
+                    raise ValueError("inconsistent accepted nonce claim")
+                rejected = AssociationStatus(
+                    said, "rejected", "", association, observation, "NONCE_REUSED"
+                )
+                txn.put(
+                    key,
+                    self.associations.serializer(rejected),
+                    db=self.associations.sdb,
+                )
+                return rejected
+            accepted = AssociationStatus(
+                said,
+                "accepted",
+                f"{said}:1" if destination else "",
+                association,
+                observation,
             )
             txn.put(
                 key, self.associations.serializer(accepted), db=self.associations.sdb
             )
-            txn.put(
-                event_id.encode(), self.outbox.serializer(event), db=self.outbox.sdb
-            )
-            txn.put(
-                destination.encode(),
-                self.destinations.serializer(DestinationSchedule()),
-                db=self.destinations.sdb,
-                overwrite=False,
-            )
+            if destination:
+                event = _status_delivery(
+                    accepted,
+                    status_revision=1,
+                    destination=destination,
+                    peer_aid=peer_aid,
+                )
+                txn.put(
+                    event.eventId.encode(),
+                    self.outbox.serializer(event),
+                    db=self.outbox.sdb,
+                )
+                txn.put(
+                    destination.encode(),
+                    self.destinations.serializer(DestinationSchedule()),
+                    db=self.destinations.sdb,
+                    overwrite=False,
+                )
             return accepted
 
     def retire(self, said):
@@ -192,26 +310,36 @@ class VerifierBaser(dbing.LMDBer):
                 raise ValueError("retirement requires an accepted association")
             if current.status == "revoked":
                 return current
-            original = self.outbox.deserializer(
-                txn.get(current.eventId.encode(), db=self.outbox.sdb)
-            )
+            if current.status != "accepted":
+                raise ValueError("retirement requires an accepted association")
+            original = None
+            if current.eventId:
+                original = self.outbox.deserializer(
+                    txn.get(current.eventId.encode(), db=self.outbox.sdb)
+                )
+                if original is None:
+                    raise ValueError("accepted delivery event is absent")
             retired = replace(
-                current, status="revoked", eventId=f"{said}:2", reason="REVOKED"
-            )
-            event = _status_delivery(
-                retired,
-                status_revision=2,
-                destination=original.destination,
-                peer_aid=original.peerAid,
+                current,
+                status="revoked",
+                eventId=f"{said}:2" if original else "",
+                reason="REVOKED",
             )
             txn.put(
                 key, self.associations.serializer(retired), db=self.associations.sdb
             )
-            txn.put(
-                event.eventId.encode(),
-                self.outbox.serializer(event),
-                db=self.outbox.sdb,
-            )
+            if original is not None:
+                event = _status_delivery(
+                    retired,
+                    status_revision=2,
+                    destination=original.destination,
+                    peer_aid=original.peerAid,
+                )
+                txn.put(
+                    event.eventId.encode(),
+                    self.outbox.serializer(event),
+                    db=self.outbox.sdb,
+                )
             return retired
 
     def record_attempt(self, event_id, *, next_attempt_at=None):

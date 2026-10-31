@@ -27,10 +27,13 @@ Foundry 1.5.1.
 
 Reuse name, base, alias, store root and passcode on restart. `--incept-file` supplies
 KERIpy options for a new identity only. The application store is bound to its
-GEDA root and chain ID before workers start, including verification-only mode.
+GEDA root and chain ID before workers start, including operation without webhook delivery.
 Changing either requires separate stores. Existing stores with completed results
-but no recorded scope are refused; preserve them and use fresh stores rather than guessing their original policy. Enabling webhook delivery
-with the same root/chain remains supported. Preserve the entire KERIpy/application
+but no recorded scope are refused; preserve them and use fresh stores rather than guessing their original policy. Pre-policy stores are also refused: acceptance now requires permanent issuer/nonce
+history under policy `issuer-nonce-v1`. Use a deliberate fresh store set; there is
+no migration or backfill. Never reset accepted history to evade nonce rejection.
+Enabling webhook delivery with the same root/chain remains supported, but does not
+create deliveries for associations accepted without a configured target. Preserve the entire KERIpy/application
 store set together; do not copy live LMDB files or share writable stores between
 processes. Stop the process before copying/reopening stores for maintenance.
 
@@ -61,13 +64,20 @@ liveness defect. Complete preceding messages can already have entered KERIpy sta
 request processing is not an atomic batch. Missing verification evidence still
 uses KERIpy escrows.
 Initial checks must finish before acceptance. Without webhook configuration, the
-service retains verification-only results and does not create delivery obligations.
+service accepts locally and consumes the exact issuer/nonce, but creates no delivery
+obligation. Public `delivery` is null. Another SAID reusing an accepted pair becomes
+locally rejected with `NONCE_REUSED`, even after revocation or supersession. Initial
+verification remains visible separately in the application store. See
+[ADR 0005](../adrs/0005-accepted-association-nonces.md) for transaction boundaries and
+the per-store scope of this policy.
 
 Accepted status remains valid indefinitely. To retire it, deliver the association's
 revocation TEL and its anchored/witnessed issuer KEL evidence through the
 same CESR HTTP transport. Grant receipt or ACDC bytes alone are not revocation proof.
 KERIpy validation/escrows must accept the revocation. Retirement persists across
-restart and creates its own immutable event requiring its own authenticated ACK.
+restart and creates its own immutable event requiring its own authenticated ACK
+when the association had an original outbox obligation. Local-only acceptance
+retires locally without an event.
 Retiring an old association does not retire its replacement.
 
 ## Delivery failures

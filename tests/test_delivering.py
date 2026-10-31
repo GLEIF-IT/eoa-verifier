@@ -132,7 +132,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
             )
         )
         accepted = baser.accept(
-            "association", association={}, destination=target, peer_aid=receiver_hab.pre
+            "association", association={"issuerAid": "issuer"}, nonce="other", destination=target, peer_aid=receiver_hab.pre
         )
         if reply.startswith("retirement"):
             # Initial delivery is already acknowledged; retirement needs its own
@@ -236,7 +236,7 @@ def test_malformed_chunk_response_preserves_pending_delivery(tmp_path):
             )
         )
         status = baser.accept(
-            "association", association={},
+            "association", association={"issuerAid": "issuer"}, nonce="other",
             destination=f"http://127.0.0.1:{server.ha[1]}/hook", peer_aid=hab.pre,
         )
         original = baser.outbox.get(keys=(status.eventId,))

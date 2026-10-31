@@ -144,17 +144,15 @@ class VerifierService(doing.DoDoer):
                 backoff_base=config.webhook_backoff_base,
                 backoff_cap=config.webhook_backoff_cap,
             )
-            doers.extend(
-                [
-                    AcceptanceDoer(
-                        baser=baser,
-                        rgy=rgy,
-                        destination=config.webhook_url,
-                        peer_aid=config.webhook_aid,
-                    ),
-                    self.sender,
-                ]
+            doers.append(self.sender)
+        doers.append(
+            AcceptanceDoer(
+                baser=baser,
+                rgy=rgy,
+                destination=config.webhook_url,
+                peer_aid=config.webhook_aid,
             )
+        )
         self.hby, self.hab, self.rgy, self.baser, self.app = (
             hby,
             hab,
