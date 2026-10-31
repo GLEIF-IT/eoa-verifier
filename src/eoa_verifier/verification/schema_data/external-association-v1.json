@@ -1,5 +1,5 @@
 {
-  "$id": "EKeFW-30joNrTXUmq7Dpp2kExZgveYlsLfWrDml8hRYt",
+  "$id": "EOgZ5tOZ0f7U-4H004zKoz75Pi8XwUM2FjKoMYrkBnmu",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "vLEI External Association v1",
   "description": "An untargeted credential issued by a Legal Entity to associate its AID with an external identifier.",
@@ -16,10 +16,13 @@
       "pattern": "^E[A-Za-z0-9_-]{43}$"
     },
     "u": {
-      "description": "Unique nonce from any entropy source, reserved by the issuer and signed unchanged in the external challenge.",
+      "description": "Issuer-scoped nonce of 1–128 ASCII letters, digits, underscores or hyphens, signed unchanged and consumed by the verifier at association acceptance.",
       "type": "string",
       "minLength": 1,
-      "maxLength": 256
+      "maxLength": 128,
+      "not": {
+        "pattern": "[^A-Za-z0-9_-]"
+      }
     },
     "i": {
       "description": "AID of the issuing Legal Entity that holds the referenced LE vLEI credential.",

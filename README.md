@@ -93,17 +93,25 @@ first Grant and never re-enqueue completed work. Verified results retain the
 wallet and initial account observation; they do not mean application acceptance,
 webhook delivery or Ethereum endorsement. Restart rediscovers pending work.
 
-With a destination configured, `AcceptanceDoer` reads the completed result and
-locally accepted issuance anchor without repeating initial checks. Acceptance,
-immutable facts and an outbox event commit in one application transaction. Restart
-recovers results awaiting acceptance; repeated acceptance preserves the original
-event and destination. KERIpy evidence lives in a separate database and is not
-part of this transaction. Missing evidence or already-known revocation prevents
-first acceptance. Once accepted, observation age does not invalidate the record.
+`AcceptanceDoer` reads completed results and locally accepted issuance evidence
+without repeating initial checks. Acceptance permanently binds the exact issuer/nonce
+to one SAID, atomically with immutable facts and any configured outbox obligation.
+Another SAID using that pair becomes locally `rejected` with `NONCE_REUSED`; its
+initial verification remains `verified`. Same-SAID replay is idempotent, and
+revocation/supersession never releases the nonce.
+Nonces contain 1–128 ASCII characters from `[A-Za-z0-9_-]`; storage uses ordinary
+`issuer.nonce` Komer keys. See [ADR 0005](adrs/0005-accepted-association-nonces.md).
+
+Acceptance runs with or without webhooks. With no target, public `delivery` is null;
+enabling delivery later does not backfill events for locally accepted records.
+Restart recovers results awaiting acceptance. KERIpy evidence lives in a separate
+database and is not part of the application transaction. Missing evidence or
+already-known revocation prevents first acceptance. Observation age does not
+invalidate an accepted record.
 
 `RetirementDoer` scans bounded pages of accepted records against locally accepted
 association TEL state. KERIpy `rev`/`brv` retires only that SAID and atomically
-creates its second event, preserving original issuance facts, observation and
+creates its second event when an original delivery exists, preserving original issuance facts, observation and
 webhook destination. Duplicate evidence and restart do not create more events or
 revive retirement. A different association for the same wallet is untouched;
 ownership selection belongs to the oracle.
@@ -152,7 +160,7 @@ uses real IPEX/CESR, HTTP and a local chain. It never uses existing identities.
 
 Verification was extracted from [vlei-oracle](https://github.com/GLEIF-IT/vlei-oracle/tree/77849caae048381aee96b42f75053368d8d24c53).
 Packaged LE/QVI schemas come from [vLEI](https://github.com/GLEIF-IT/vLEI/tree/743622abc9a3b3684552e439efc5c8b6fda2f645/schema/acdc);
-the association schema retains the existing oracle protocol SAID.
+the association schema and its new SAID enforce the 1–128 ASCII nonce contract.
 See the [service design](protocol/verifier-api-v1/README.md) and
 [workflow diagrams](docs/README.md).
 

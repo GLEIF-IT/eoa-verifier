@@ -23,14 +23,22 @@ class StatusEnd:
         pending = self.baser.pending.get(keys=(said,))
         if accepted is not None:
             data = asdict(accepted)
-            event = self.baser.outbox.get(keys=(accepted.eventId,))
-            data["delivery"] = {
-                "eventId": event.eventId,
-                "acknowledged": event.acknowledged,
-                "attempts": event.attempts,
-                "error": event.error,
-                "blocked": event.blocked,
-            }
+            event = (
+                self.baser.outbox.get(keys=(accepted.eventId,))
+                if accepted.eventId
+                else None
+            )
+            data["delivery"] = (
+                {
+                    "eventId": event.eventId,
+                    "acknowledged": event.acknowledged,
+                    "attempts": event.attempts,
+                    "error": event.error,
+                    "blocked": event.blocked,
+                }
+                if event is not None
+                else None
+            )
         elif result is not None:
             data = {
                 "associationSaid": said,
@@ -38,7 +46,8 @@ class StatusEnd:
                 "reason": result.reason,
                 "accountObservation": (
                     dict(
-                        result.eoaResult["accountObservation"], wallet=result.eoaResult["wallet"]
+                        result.eoaResult["accountObservation"],
+                        wallet=result.eoaResult["wallet"],
                     )
                     if result.eoaResult
                     else None

@@ -160,7 +160,7 @@ def test_saved_verification_keeps_its_trust_scope_when_enabling_delivery(config)
         replace(delivery, trusted_geda_aid=core.Signer().verfer.qb64),
         replace(delivery, chain_id=1),
     ):
-        with pytest.raises(ValueError, match="another GEDA root or chain"):
+        with pytest.raises(ValueError, match="another GEDA root, chain or acceptance policy"):
             with verifier_service(changed):
                 pass
     with entered_service(delivery) as reopened:

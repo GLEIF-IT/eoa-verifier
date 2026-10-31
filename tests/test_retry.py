@@ -31,7 +31,7 @@ def accept(baser, said):
         )
     )
     return baser.accept(
-        said, association={}, destination="https://receiver.example/hook", peer_aid="peer"
+        said, association={"issuerAid": "issuer"}, nonce=said, destination="https://receiver.example/hook", peer_aid="peer"
     )
 
 

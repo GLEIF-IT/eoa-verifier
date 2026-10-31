@@ -33,7 +33,14 @@ do not assess delegated-code safety or prove against later wallet-key theft.
 
 Initial evidence or RPC unavailability leaves work `pending`; established failure
 produces `rejected`, and completed initial checks produce `verified`. With a
-webhook configured, acceptance commits status and an event. Only acceptance
+webhook configured, acceptance commits status and an event. Without a webhook,
+acceptance commits locally without an outbox obligation (`delivery` is null).
+Association nonces contain 1–128 ASCII characters from `[A-Za-z0-9_-]`.
+In either mode, acceptance permanently consumes the exact issuer/nonce for that
+SAID. Another SAID reusing the pair is locally `rejected` with `NONCE_REUSED`;
+initial verification remains `verified`. Revocation and supersession do not
+release claims. See [ADR 0005](../../adrs/0005-accepted-association-nonces.md).
+Only acceptance
 (`status: "accepted"`) and later association retirement (`status: "revoked"`,
 `reasonCode: "REVOKED"`) are webhook events; initial rejection/unavailability is
 available through public stored status, not sent as a status event.
