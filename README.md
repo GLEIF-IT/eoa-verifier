@@ -76,8 +76,7 @@ account checks run, and Ethereum publication remains the oracle's responsibility
 These are sibling leaf component packages. Runtime composes them; workflow
 components depend on persistence and KERIpy evidence, not on runtime or each
 other. Persistence owns no network or verification policy. See
-[ADR 0004](adrs/0004-component-organization.md) for boundaries, import migration
-and the architecture check.
+[ADR 0004](adrs/0004-component-organization.md) for boundaries and import migration.
 
 Initial flow: IPEX Grant acceptance → embed replay and durable work → KERIpy
 credential checks → wallet proof and chain/block/code observation → final local

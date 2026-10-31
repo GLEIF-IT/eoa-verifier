@@ -34,8 +34,8 @@ Runtime may import all components. Receiving, verification, associations and
 delivery may import persistence, but do not import runtime or one another.
 Persistence does not import other application components. These are application
 import rules, not a claim of runtime isolation: injected stores, decks and native
-KERIpy evidence remain explicit shared contracts. Run `python tools/check_architecture.py`
-to check the component edges, leaf layout and module cycles; CI runs it too.
+KERIpy evidence remain explicit shared contracts. Review component edges, leaf
+responsibilities and dependency cycles when changing imports.
 
 ServiceConfig lives in runtime/config.py; service composition and store lifetime
 remain together in runtime/serving.py. Persistent dataclasses live in

@@ -27,7 +27,7 @@ import other test modules. The 20 former mixed nonce cases split into validation
 and persistence cases with every parameter/assertion preserved: 134 becomes 154.
 Other scenarios move whole.
 
-Run python tools/check_architecture.py, then python -m pytest. Full tests require
+Run python -m pytest. Full tests require
 Foundry 1.5.1 including Anvil. CI builds a fresh wheel and copies tests plus
 pytest.ini outside the checkout before running python -m pytest. Test support is
 excluded from wheels. Run one repository's test package per invocation. The sole
