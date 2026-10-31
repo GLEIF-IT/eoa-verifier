@@ -54,6 +54,11 @@ key events before resuming delivery. Missing keys leave events blocked.
 Present the untargeted association through IPEX Grant with its source credentials,
 KEL/TEL and witnessed issuance evidence. `POST /` accepts native CESR JSON/header
 framing; `PUT /` accepts a finite CESR stream. HTTP 204 acknowledges intake only.
+Each request is parsed independently as remote evidence. Incomplete message or
+attachment bytes are discarded at its boundary, so they cannot block later
+deliveries. Complete preceding messages can already have entered native state;
+request processing is not an atomic batch. Missing verification evidence still
+uses native escrows.
 Initial checks must finish before acceptance. Without webhook configuration, the
 service retains verification-only results and does not create delivery obligations.
 

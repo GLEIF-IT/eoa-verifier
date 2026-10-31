@@ -5,18 +5,20 @@ from unittest.mock import patch
 import falcon
 import pytest
 from falcon import testing
+from hio.base import doing
+from hio.help import decking
 from keri.app import habbing, httping, indirecting, storing
 from keri.core import eventing
 
 from eoa_verifier.receiving.directing import CesrEnd, Receiver
 from eoa_verifier.receiving.grants import GrantNotificationDoer
-from native_helpers import entered_service
+from native_helpers import entered_service, verifier_service
 
 
 @pytest.fixture
 def endpoint():
-    """Return an in-process Falcon client and the byte buffer intake appends to."""
-    incoming = bytearray()
+    """Return an in-process Falcon client and its completed-request deck."""
+    incoming = decking.Deck()
     app = falcon.App()
     app.add_route("/", CesrEnd(incoming))
     return testing.TestClient(app), incoming
@@ -37,7 +39,7 @@ def test_post_preserves_native_message_and_attachments(endpoint):
             },
         )
         assert response.status_code == 204
-        assert incoming == stream
+        assert incoming.popleft() == stream
         assert response.headers["cache-control"] == "no-cache"
 
 
@@ -74,7 +76,7 @@ def test_queries_have_no_http_stream_but_put_remains_unfiltered(endpoint):
     stream = query + query
     response = client.simulate_put("/", body=stream)
     assert response.status_code == 204
-    assert incoming == stream
+    assert incoming.popleft() == stream
     assert response.headers.get("content-type") != "text/event-stream"
     assert client.simulate_get("/").status_code == 405
 
@@ -102,3 +104,48 @@ def test_runtime_has_one_receiver_and_no_mailbox(config):
                 d for d in service.doers if isinstance(d, GrantNotificationDoer)
             )
             assert grants.parser is receivers[0].parser
+
+
+@pytest.mark.parametrize("method", ["POST", "PUT"])
+def test_incomplete_request_does_not_block_later_messages(config, method):
+    """Discard incomplete request bytes; parse both messages in the next valid PUT."""
+    with verifier_service(config) as service, habbing.openHab(
+        name="sender", temp=True
+    ) as (_, hab):
+        client = testing.TestClient(service.app)
+        inception = hab.makeOwnInception()
+        if method == "POST":
+            # Declare a controller-signature attachment but omit its signature.
+            response = client.simulate_post(
+                "/", body=hab.kever.serder.raw,
+                headers={"Content-Type": httping.CESR_CONTENT_TYPE,
+                         "CESR-ATTACHMENT": "-AAB"},
+            )
+        else:
+            # A finite request cannot satisfy the serialization length it declares.
+            response = client.simulate_put(
+                "/", body=b'{"v":"KERI10JSONffffff_","t":"ixn"}'
+            )
+        assert response.status_code == 204  # Intake, not evidence acceptance.
+        interaction = hab.interact()
+        assert client.simulate_put("/", body=inception + interaction).status_code == 204
+
+        doing.Doist(tock=0.01, limit=0.2).do(doers=[service])
+
+        assert service.hby.kevers[hab.pre].sn == 1
+
+
+def test_http_cannot_advance_the_services_own_kel(config):
+    """A correctly signed own-AID event from HTTP remains native misfit evidence."""
+    with verifier_service(config) as service:
+        hab = service.hab
+        event = eventing.interact(pre=hab.pre, dig=hab.kever.serder.said, sn=1)
+        stream = eventing.messagize(event, sigers=hab.sign(ser=event.raw))
+        assert testing.TestClient(service.app).simulate_put(
+            "/", body=stream
+        ).status_code == 204
+
+        doing.Doist(tock=0.01, limit=0.2).do(doers=[service])
+
+        assert hab.kever.sn == 0
+        assert service.hby.db.misfits.get(keys=(hab.pre, event.snh))
