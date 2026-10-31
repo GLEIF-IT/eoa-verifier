@@ -169,7 +169,7 @@ class VerifierService(doing.DoDoer):
         app = falcon.App()
         ending.loadEnds(app=app, hby=hby, default=hab.pre)
         oobiing.loadEnds(app=app, hby=hby, prefix="/ext")
-        app.add_route("/", CesrEnd(rxbs=parser.ims))
+        app.add_route("/", CesrEnd(msgs=receiver.msgs))
         app.add_route("/health", HealthEnd())
         app.add_route("/v1/associations/{said}/status", StatusEnd(baser))
         server = http.Server(

@@ -45,7 +45,8 @@ def test_native_grant_verification_and_restart(tmp_path, method):
     Own isolated native stores/processes with ExitStack and all network tasks with
     HIO. Missing Anvil fails rather than skips. Test delayed evidence across restart,
     acceptance with native issuance facts, delayed-anchor retirement across restart,
-    duplicate delivery, revocation during initial RPC, and invalid proof/relationships.
+    duplicate delivery, incomplete HTTP input before evidence/revocation, revocation
+    during initial RPC, and invalid proof/relationships.
     """
     anvil_path = shutil.which("anvil")
     assert anvil_path, "Anvil is required for native integration; install Foundry"
@@ -121,6 +122,23 @@ def test_native_grant_verification_and_restart(tmp_path, method):
                 while not client.responses:
                     yield 0.01
                 assert client.responses.popleft()["status"] in (200, 202, 204)
+
+        def send_incomplete():
+            """Submit a truncated native frame; later independent requests must progress."""
+            if method == "POST":
+                client.request(
+                    method="POST", path="/", body=runtime.hab.kever.serder.raw,
+                    headers={"Content-Type": httping.CESR_CONTENT_TYPE,
+                             "CESR-ATTACHMENT": "-AAB"},
+                )
+            else:
+                client.request(
+                    method="PUT", path="/",
+                    body=b'{"v":"KERI10JSONffffff_","t":"ixn"}',
+                )
+            while not client.responses:
+                yield 0.01
+            assert client.responses.popleft()["status"] == 204
 
         def deliver(stream, said, expected):
             """Yield through HTTP delivery and wait up to ten HIO seconds for the expected durable row; return it."""
@@ -250,6 +268,7 @@ def test_native_grant_verification_and_restart(tmp_path, method):
 
             # Deliver the association first, then reopen with its sources still absent.
             creder, evidence = yield from issue_association()
+            yield from send_incomplete()
             yield from deliver(evidence, creder.said, "pending")
             aid = runtime.hab.pre
             workflow.remove([runtime, client_doer])
@@ -310,6 +329,7 @@ def test_native_grant_verification_and_restart(tmp_path, method):
             yield from revoke_credential(issuers["le"], registries["le"], creder)
             yield from send(grant(le, le_rgy, creder, runtime.hab.pre))
             revocation = le_rgy.reger.cloneTvtAt(creder.said, sn=1)
+            yield from send_incomplete()
             yield from send(revocation)
             deadline = workflow.tyme + 5
             while runtime.rgy.reger.getTae(dbing.snKey(creder.said, 1)) is None:

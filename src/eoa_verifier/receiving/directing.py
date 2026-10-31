@@ -1,10 +1,15 @@
 """Direct CESR intake and native parser/escrow scheduling."""
 
+import logging
+
 import falcon
 from hio.base import doing
+from hio.help import decking
 from keri import kering
 from keri.app import httping
 from keri.core import coring
+
+logger = logging.getLogger(__name__)
 
 
 class Receiver(doing.DoDoer):
@@ -14,10 +19,13 @@ class Receiver(doing.DoDoer):
     ``msg_tock`` and ``escrow_tock`` are HIO-clock intervals in seconds. The
     service supplies the existing native mailbox timing settings for compatibility;
     this receiver does not poll mailboxes. HTTP intake and Grant replay share the
-    processors. Closing this Doer stops its tasks, not the borrowed stores."""
+    processors. ``msgs`` holds completed HTTP requests in separate bytearrays;
+    it is transient intake, not a durable work queue. Closing this Doer stops its
+    tasks, not the borrowed stores."""
 
     def __init__(self, parser, *, msg_tock, escrow_tock, **kwa):
         self.parser = parser
+        self.msgs = decking.Deck()
         super().__init__(
             doers=[
                 doing.doify(self.msgDo, tock=msg_tock),
@@ -27,19 +35,33 @@ class Receiver(doing.DoDoer):
         )
 
     def msgDo(self, tymth, tock=0.0, **opts):
-        """Delegate stream parsing to KERIpy; closing this task closes its generator."""
+        """Parse one remote message per turn without carrying shortage across requests.
+
+        Native onceParsator yields only when it needs more bytes. Each request is
+        already complete, so discard its incomplete remainder and close the parser.
+        Complete evidence still uses the shared native processors and escrows.
+        """
         self.wind(tymth)
         yield tock
-        parser = self.parser.parsator(local=True)
-        try:
-            while True:
+        frame = bytearray()
+        while True:
+            if not frame and self.msgs:
+                frame = self.msgs.popleft()
+            if frame:
+                parser = self.parser.onceParsator(
+                    ims=frame, framed=True, local=False
+                )
                 try:
-                    next(parser)
-                except StopIteration:
-                    return
-                yield tock
-        finally:
-            parser.close()
+                    try:
+                        next(parser)
+                    except StopIteration:
+                        pass
+                    else:
+                        logger.warning("Discarding incomplete CESR HTTP request")
+                        frame.clear()
+                finally:
+                    parser.close()
+            yield tock
 
     def escrowDo(self, tymth, tock=0.0, **opts):
         """Retry the same native evidence escrows used by the inbound parser."""
@@ -57,14 +79,14 @@ class Receiver(doing.DoDoer):
 class CesrEnd:
     """Accept native CESR POST envelopes and raw PUT streams at ``/``.
 
-    Borrow the parser's mutable bytearray ``rxbs``; handlers append synchronously
-    on the service event loop. A 204 acknowledges only in-memory intake, not
+    Borrow the receiver's ``msgs`` deck; enqueue one bytearray per completed
+    request on the service event loop. A 204 acknowledges only in-memory intake, not
     durable storage, signature verification or association acceptance. Native
     parsing and escrow processing happen later. No signed webhook ACK is emitted.
     There is no SSE/query response service; unsupported methods return Falcon 405."""
 
-    def __init__(self, rxbs):
-        self.rxbs = rxbs
+    def __init__(self, msgs):
+        self.msgs = msgs
 
     def on_post(self, req, rep):
         """Accept one native CESR JSON envelope and enqueue its message plus attachments.
@@ -85,7 +107,8 @@ class CesrEnd:
 
         Returns:
             None. A 204 is not evidence acceptance; native verification runs
-            asynchronously and can reject or escrow the queued material.
+            asynchronously and can reject or escrow the queued material. Incomplete
+            attachments are discarded without borrowing bytes from a later request.
         """
         cr = httping.parseCesrHttpRequest(req)
         if not isinstance(cr.payload, dict):
@@ -116,13 +139,15 @@ class CesrEnd:
 
         Returns:
             None. Bytes are queued unchanged for native parsing. A 204 does not
-            confirm valid framing, signatures or durable acceptance. Embedded
+            confirm valid framing, signatures or durable acceptance. An incomplete
+            remainder is discarded at this request's boundary; complete preceding
+            messages may already have been processed. Embedded
             queries receive no query result or SSE stream from this endpoint.
         """
         self._accept(rep, req.bounded_stream.read())
 
     def _accept(self, rep, msg):
-        self.rxbs.extend(msg)
+        self.msgs.append(bytearray(msg))
         rep.set_header("Cache-Control", "no-cache")
         rep.set_header("connection", "close")
         rep.status = falcon.HTTP_204
