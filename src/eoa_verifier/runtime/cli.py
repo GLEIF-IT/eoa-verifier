@@ -1,11 +1,15 @@
-"""Start the standalone verifier without any Ethereum posting credentials."""
+"""Start a vLEI External Association verifier with the Externally Owned Account profile integration.
+
+Supports verification of both sides of an Ethereum to vLEI association.
+"""
 
 import argparse
 import sys
 
 from keri import kering
 
-from .serving import ServiceConfig, run_service
+from .config import ServiceConfig
+from .serving import run_service
 
 
 def main(argv=None):

@@ -7,7 +7,7 @@ from hio.core import http
 from hio.help import decking
 from keri.help import helping
 
-from eoa_verifier.rpc import RpcClientDoer, request_rpc
+from eoa_verifier.verification.rpc import RpcClientDoer, request_rpc
 from eoa_verifier.verification.eoa import (
     ext_id_chain,
     verify_eoa_account,

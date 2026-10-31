@@ -3,7 +3,7 @@
 import pytest
 from keri import core
 
-from eoa_verifier.serving import ServiceConfig
+from eoa_verifier.runtime.config import ServiceConfig
 
 
 @pytest.fixture

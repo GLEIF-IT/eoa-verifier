@@ -18,6 +18,8 @@ jobs:
         with:
           version: v1.5.1
           cache: false
+      - name: Check component architecture
+        run: python tools/check_architecture.py
       - name: Build and install wheel
         run: |
           python -m pip wheel --no-deps --wheel-dir dist .

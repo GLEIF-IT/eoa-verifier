@@ -10,13 +10,13 @@ import pytest
 from falcon.testing import TestClient
 from keri.db import dbing
 
-from eoa_verifier.basing import (
+from eoa_verifier.persistence.basing import VerifierBaser
+from eoa_verifier.persistence.records import (
     DestinationSchedule,
     PendingVerification,
     VerificationResult,
-    VerifierBaser,
 )
-from eoa_verifier.statusing import StatusEnd
+from eoa_verifier.associations.statusing import StatusEnd
 
 
 @pytest.fixture

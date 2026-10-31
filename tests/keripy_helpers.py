@@ -324,8 +324,8 @@ def verifier_service(config):
     from keri.app import keeping, configing, notifying
     from keri.db import basing, dbing
     from keri.vdr import viring, credentialing
-    from eoa_verifier.basing import VerifierBaser
-    from eoa_verifier.serving import VerifierService
+    from eoa_verifier.persistence.basing import VerifierBaser
+    from eoa_verifier.runtime.serving import VerifierService
 
     options = dict(name=config.name, base=config.base, headDirPath=config.head_dir)
     with (

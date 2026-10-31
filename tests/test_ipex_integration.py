@@ -32,8 +32,8 @@ from keripy_helpers import (
     verifier_service,
 )
 
-from eoa_verifier.serving import ServiceConfig
-from eoa_verifier.retiring import RetirementDoer
+from eoa_verifier.runtime.config import ServiceConfig
+from eoa_verifier.associations.retiring import RetirementDoer
 from eoa_verifier.verification.constants import LE_SCHEMA, QVI_SCHEMA
 from eoa_verifier.verification.eoa import build_challenge
 

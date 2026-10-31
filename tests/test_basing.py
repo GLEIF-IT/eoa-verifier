@@ -4,7 +4,8 @@ from unittest.mock import patch
 
 import pytest
 from keri.db import dbing
-from eoa_verifier.basing import PendingVerification, VerificationResult, VerifierBaser
+from eoa_verifier.persistence.basing import VerifierBaser
+from eoa_verifier.persistence.records import PendingVerification, VerificationResult
 
 
 def test_duplicates_completion_and_restart(tmp_path):

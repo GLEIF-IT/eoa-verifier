@@ -2,7 +2,8 @@
 
 Run `python -m pytest -q tests` with the package and test extra installed. Anvil
 must be available on PATH; KERI/IPEX integration fails rather than skips without it.
-CI builds a wheel and tests it outside the source checkout on Python 3.12.
+CI checks component dependencies with `python tools/check_architecture.py`, then
+builds a wheel and tests it outside the source checkout on Python 3.12.
 
 Read the suite in this order:
 

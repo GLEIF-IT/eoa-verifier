@@ -20,7 +20,7 @@ Documentation = "https://github.com/GLEIF-IT/eoa-verifier/blob/master/docs/opera
 test = ["pytest>=9"]
 
 [project.scripts]
-eoa-verifier = "eoa_verifier.cli:main"
+eoa-verifier = "eoa_verifier.runtime.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
