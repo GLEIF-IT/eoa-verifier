@@ -5,7 +5,8 @@ from __future__ import annotations
 from hio.base import doing
 from keri import kering
 
-from eoa_verifier.basing import PendingVerification, VerificationResult, VerifierBaser
+from eoa_verifier.persistence.basing import VerifierBaser
+from eoa_verifier.persistence.records import PendingVerification, VerificationResult
 from eoa_verifier.verification.credentials import grant_candidate, verify_association
 from eoa_verifier.verification.errors import (
     MissingCredentialArtifactsError,

@@ -94,7 +94,7 @@ retry request as its current reason; it does not mark an ACK:
 
 ```python
 from keri.db import dbing
-from eoa_verifier.basing import VerifierBaser
+from eoa_verifier.persistence.basing import VerifierBaser
 
 with dbing.openLMDB(cls=VerifierBaser, name="verifier", base="",
                    headDirPath="/var/lib/eoa-verifier", temp=False) as store:

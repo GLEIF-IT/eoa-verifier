@@ -8,8 +8,9 @@ import pytest
 from hio.base import doing
 from keri.db import dbing
 
-from eoa_verifier.basing import PendingVerification, VerificationResult, VerifierBaser
-from eoa_verifier.delivering import WebhookSender, _TransientFailure, _retry_after
+from eoa_verifier.persistence.basing import VerifierBaser
+from eoa_verifier.persistence.records import PendingVerification, VerificationResult
+from eoa_verifier.delivery.delivering import WebhookSender, _TransientFailure, _retry_after
 
 
 @pytest.fixture

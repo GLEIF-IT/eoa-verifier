@@ -64,19 +64,20 @@ account checks run, and Ethereum publication remains the oracle's responsibility
 
 ## Maintainer orientation
 
-| Module                                   | Responsibility                                                                              |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `cli`, `serving`                         | Configuration, KERIpy stores, shared parser and HIO task/resource ownership.                |
-| `receiving/directing`                    | Receive CESR POST/PUT and schedule shared KERIpy parsing and escrows.                       |
-| `authing`                                | Authenticate service messages and ACKs; claim durable transport nonces.                     |
-| `receiving/grants`                       | Decode authenticated IPEX Grants, replay embeds and create duplicate-safe work.             |
-| `basing`                                 | Atomic verification, acceptance/outbox and delivery records.                                |
-| `accepting`, `retiring`, `statusing`     | Accept verified results, reconcile verified association revocation and serve stored status. |
-| `delivering`                             | Own webhook attempts, ACK validation and delivery completion.                               |
-| `verification/coordinating`              | Scan bounded work pages, dispatch one association and apply results.                        |
-| `verification/credentials`               | Check locally accepted ACDC/TEL/KEL evidence and LE/QVI relationships.                      |
-| `verification/eoa`, `worker`, `rpc`      | Check the wallet proof and observe the configured Ethereum account.                         |
-| `verification/constants`, `schema_cache` | Pin the existing credential schemas and load packaged resources.                            |
+| Component | Modules and responsibility |
+| --- | --- |
+| `runtime` | `cli`, `config`, `serving`: arguments, validated configuration, KERIpy stores and HIO task/resource ownership. |
+| `receiving` | `directing`, `grants`: finite CESR HTTP intake, shared parser/escrows, IPEX replay and duplicate-safe work creation. |
+| `verification` | `coordinating`, `credentials`, `eoa`, `worker`, `rpc`: initial credential/wallet/account verification; `constants`, `schema_cache`, `errors` support that contract. |
+| `associations` | `accepting`, `retiring`, `statusing`: application acceptance, verified association revocation and public stored status. |
+| `delivery` | `authing`, `delivering`: signed transport/replay protection and webhook attempts, retry pacing and ACK policy. |
+| `persistence` | `records`, `basing`: durable record schemas and atomic verification, acceptance/outbox and delivery transitions. |
+
+These are sibling leaf component packages. Runtime composes them; workflow
+components depend on persistence and KERIpy evidence, not on runtime or each
+other. Persistence owns no network or verification policy. See
+[ADR 0004](adrs/0004-component-organization.md) for boundaries, import migration
+and the architecture check.
 
 Initial flow: IPEX Grant acceptance → embed replay and durable work → KERIpy
 credential checks → wallet proof and chain/block/code observation → final local
@@ -128,7 +129,7 @@ parser and escrows. There is no mailbox polling, mailbox store or SSE query serv
 
 ## Service authentication primitives
 
-`authing.ServiceAuthenticator` signs and authenticates exact HTTP body bytes with
+`delivery.authing.ServiceAuthenticator` signs and authenticates exact HTTP body bytes with
 the KERIpy service habitat and one configured peer AID. It uses the pinned KERI
 `Signature-Input`/`Signature` format, checks locally accepted current keys, and
 stores nonce claims in `VerifierBaser` across restart. Single-key transferable

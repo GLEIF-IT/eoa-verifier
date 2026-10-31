@@ -9,9 +9,10 @@ from hio.core import http, tcp
 from keri.app import habbing
 from keri.db import dbing
 
-from eoa_verifier.authing import ServiceAuthenticator
-from eoa_verifier.basing import PendingVerification, VerificationResult, VerifierBaser
-from eoa_verifier.delivering import WebhookSender
+from eoa_verifier.delivery.authing import ServiceAuthenticator
+from eoa_verifier.persistence.basing import VerifierBaser
+from eoa_verifier.persistence.records import PendingVerification, VerificationResult
+from eoa_verifier.delivery.delivering import WebhookSender
 from keripy_helpers import free_port
 
 

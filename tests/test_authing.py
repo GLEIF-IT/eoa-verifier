@@ -8,8 +8,8 @@ from keri.app import habbing
 from keri.db import dbing
 from keri.help import helping
 
-from eoa_verifier.authing import AuthenticationError, ServiceAuthenticator
-from eoa_verifier.basing import VerifierBaser
+from eoa_verifier.delivery.authing import AuthenticationError, ServiceAuthenticator
+from eoa_verifier.persistence.basing import VerifierBaser
 
 
 @pytest.fixture
@@ -172,7 +172,7 @@ def test_malformed_or_changed_headers_fail_closed(peers, header, value):
 def test_rotated_peer_state_survives_service_restart(tmp_path):
     """Reopen actual service stores and authenticate with persisted rotated peer key state."""
     from keri import core
-    from eoa_verifier.serving import ServiceConfig
+    from eoa_verifier.runtime.config import ServiceConfig
     from keripy_helpers import entered_service
 
     config = ServiceConfig(

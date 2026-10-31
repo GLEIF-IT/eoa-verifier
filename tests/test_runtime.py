@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
-from eoa_verifier.cli import main
-from eoa_verifier.serving import run_service
+from eoa_verifier.runtime.cli import main
+from eoa_verifier.runtime.serving import run_service
 from keripy_helpers import entered_service, verifier_service
 
 
@@ -15,7 +15,7 @@ def test_setup_failure_releases_all_previously_opened_stores(config, failure):
     """Inject late setup failure; reopening the same paths detects leaked LMDB handles."""
     with (
         patch(
-            f"eoa_verifier.serving.{failure}",
+            f"eoa_verifier.runtime.serving.{failure}",
             side_effect=RuntimeError("setup failure"),
         ),
         pytest.raises(RuntimeError, match="setup failure"),
@@ -44,7 +44,7 @@ def test_children_stop_before_borrowed_stores_close(config, mode):
     """Cancellation and partial entry stop children before stores close."""
     from hio.base import doing
     from hio.core import http
-    from eoa_verifier.serving import VerifierService
+    from eoa_verifier.runtime.serving import VerifierService
 
     stopped = []
 
@@ -74,7 +74,7 @@ def test_children_stop_before_borrowed_stores_close(config, mode):
                 self.doers.append(BrokenEntry())
 
     with (
-        patch("eoa_verifier.serving.VerifierService", Service),
+        patch("eoa_verifier.runtime.serving.VerifierService", Service),
         verifier_service(config) as service,
     ):
         scheduler = doing.Doist(tock=0.01, limit=0.02)
@@ -146,7 +146,7 @@ def test_webhook_timings_reach_sender_and_reject_invalid_config(config):
 def test_saved_verification_keeps_its_trust_scope_when_enabling_delivery(config):
     """Restart may enable delivery, but cannot reinterpret saved results under another root/chain."""
     from keri import core
-    from eoa_verifier.basing import VerificationResult
+    from eoa_verifier.persistence.records import VerificationResult
 
     with entered_service(config) as service:
         # Isolate storage policy: KERIpy verification itself is covered by test_ipex_integration.
@@ -169,7 +169,7 @@ def test_saved_verification_keeps_its_trust_scope_when_enabling_delivery(config)
 
 def test_unscoped_saved_results_are_preserved_and_refused(config):
     """Old stores lack proof of their verification policy; do not silently adopt them."""
-    from eoa_verifier.basing import VerificationResult
+    from eoa_verifier.persistence.records import VerificationResult
 
     with entered_service(config) as service:
         service.baser.results.put(keys=("saved",), val=VerificationResult("saved", "verified"))
@@ -178,7 +178,7 @@ def test_unscoped_saved_results_are_preserved_and_refused(config):
         with verifier_service(config):
             pass
     from keri.db import dbing
-    from eoa_verifier.basing import VerifierBaser
+    from eoa_verifier.persistence.basing import VerifierBaser
 
     with dbing.openLMDB(cls=VerifierBaser, name=config.name, base=config.base,
                        headDirPath=config.head_dir, temp=False) as store:

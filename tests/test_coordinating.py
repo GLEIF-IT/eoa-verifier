@@ -5,7 +5,8 @@ from unittest.mock import patch
 from hio.base import tyming
 from keri.db import dbing
 
-from eoa_verifier.basing import VerifierBaser, PendingVerification, VerificationResult
+from eoa_verifier.persistence.basing import VerifierBaser
+from eoa_verifier.persistence.records import PendingVerification, VerificationResult
 from eoa_verifier.verification.constants import ASSOCIATION_SCHEMA
 from eoa_verifier.verification.coordinating import VerificationCoordinator
 from eoa_verifier.verification.errors import MissingCredentialArtifactsError

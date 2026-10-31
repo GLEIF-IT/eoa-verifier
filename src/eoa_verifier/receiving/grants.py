@@ -11,7 +11,8 @@ from keri import kering
 from keri.core import serdering
 from keri.peer import exchanging
 
-from eoa_verifier.basing import PendingVerification, VerifierBaser
+from eoa_verifier.persistence.basing import VerifierBaser
+from eoa_verifier.persistence.records import PendingVerification
 
 
 class GrantNotReadyError(Exception):
