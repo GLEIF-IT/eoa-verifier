@@ -201,24 +201,37 @@ def test_cancellation_closes_in_flight_client_without_result():
     assert not any(isinstance(d, http.ClientDoer) for d in worker.doers)
 
 
-def test_tls_failure_becomes_retry_without_stopping_scheduler():
-    """A real peer speaking plaintext to a TLS client fails only this observation."""
+@pytest.mark.parametrize("failure", ["tls", "chunk-size"])
+def test_bad_rpc_response_fails_only_this_observation(failure):
+    """TLS and malformed chunk responses fail the observation while sibling tasks continue."""
 
-    class PlaintextPeer(tcp.ServerDoer):
-        """Return plaintext after the ClientHello to trigger a TLS error."""
+    clients = []
+
+    class BadResponsePeer(tcp.ServerDoer):
+        """Reply to the real connection with the selected protocol failure."""
 
         def recur(self, tyme):
+            """Wait for the client, then send the selected invalid response."""
             super().recur(tyme)
             for peer in self.server.ixes.values():
                 if peer.rxbs:
+                    clients.extend(
+                        d.client for d in worker.doers if isinstance(d, http.ClientDoer)
+                    )
                     peer.rxbs.clear()
-                    peer.tx(b"HTTP/1.1 400 Bad Request\r\n\r\n")
+                    peer.tx(
+                        b"HTTP/1.1 400 Bad Request\r\n\r\n"
+                        if failure == "tls"
+                        else b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nZ\r\n"
+                    )
 
     server = tcp.Server(host="127.0.0.1", port=free_port())
     worker = EoaVerifierDoer(
-        rpc_url=f"https://127.0.0.1:{server.ha[1]}", chain_id=31337
+        rpc_url=f"{'https' if failure == 'tls' else 'http'}://127.0.0.1:{server.ha[1]}",
+        chain_id=31337,
     )
     worker.msgs.append(candidate())
     # The parent watcher must still run and observe cleanup after the child fails.
-    cue = run_worker(worker, PlaintextPeer(server=server))
+    cue = run_worker(worker, BadResponsePeer(server=server))
+    assert clients and all(not client.connector.opened for client in clients)
     assert cue["kin"] == "retry" and "transport failed" in cue["error"]

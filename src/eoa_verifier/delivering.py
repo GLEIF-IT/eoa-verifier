@@ -15,7 +15,7 @@ from .authing import AuthenticationError, ServiceAuthenticator
 
 
 class _ClientDoer(http.ClientDoer):
-    """Contain socket failure in one attempt; HIO exit still owns socket cleanup."""
+    """Contain socket/framing failure in one attempt; HIO exit still owns socket cleanup."""
 
     error = None
 
@@ -23,7 +23,8 @@ class _ClientDoer(http.ClientDoer):
         """Let the sender record a failed attempt instead of stopping the service."""
         try:
             return super().recur(tyme)
-        except OSError as error:
+        except (OSError, ValueError) as error:
+            # HIO chunk-size parsing raises ValueError outside its HTTPException path.
             self.error = error
             return True
 
