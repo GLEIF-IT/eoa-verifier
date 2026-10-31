@@ -90,10 +90,10 @@ from eoa_verifier.basing import VerifierBaser
 
 with dbing.openLMDB(cls=VerifierBaser, name="verifier", base="",
                    headDirPath="/var/lib/eoa-verifier", temp=False) as store:
-    event_id = "<association-said>:<revision>"  # From the public status response.
+    event_id = "<association-said>:<status-revision>"  # From the public status response.
     event = store.outbox.get(keys=(event_id,))
-    if event is None or event.delivered:
-        raise ValueError("event is unknown or already delivered")
+    if event is None or event.acknowledged:
+        raise ValueError("event is unknown or already acknowledged")
     status = store.associations.get(keys=(event.associationSaid,))
     if status.eventId != event_id:
         raise ValueError("only the current association event can resume")
