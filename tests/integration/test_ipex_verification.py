@@ -1,12 +1,12 @@
-"""Real witnessed KERI/IPEX verification with isolated stores and local Anvil."""
+"""integration/test_ipex_verification.py."""
 
-import pytest
 import shutil
 import subprocess
 from contextlib import ExitStack
 from importlib.resources import files
 from uuid import uuid4
 
+import pytest
 from eth_account import Account
 from eth_account.messages import encode_typed_data
 from hio.base import doing
@@ -15,9 +15,13 @@ from keri.app import habbing, httping, indirecting, oobiing, signing
 from keri.core import coring, scheming
 from keri.db import basing, dbing
 from keri.help import helping
-from keripy_helpers import (
+
+from eoa_verifier.associations.retiring import RetirementDoer
+from eoa_verifier.runtime.config import ServiceConfig
+from eoa_verifier.verification.constants import LE_SCHEMA, QVI_SCHEMA
+from eoa_verifier.verification.eoa import build_challenge
+from tests.support.issuers import (
     KEY,
-    free_port,
     IssuerEscrows,
     anchor,
     approve_qvi,
@@ -29,13 +33,9 @@ from keripy_helpers import (
     replay,
     revoke_credential,
     rules,
-    verifier_service,
 )
-
-from eoa_verifier.runtime.config import ServiceConfig
-from eoa_verifier.associations.retiring import RetirementDoer
-from eoa_verifier.verification.constants import LE_SCHEMA, QVI_SCHEMA
-from eoa_verifier.verification.eoa import build_challenge
+from tests.support.network import free_port
+from tests.support.services import verifier_service
 
 
 @pytest.mark.parametrize("method", ["POST", "PUT"])
@@ -128,13 +128,18 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             """Submit a truncated CESR frame; later independent requests must progress."""
             if method == "POST":
                 client.request(
-                    method="POST", path="/", body=runtime.hab.kever.serder.raw,
-                    headers={"Content-Type": httping.CESR_CONTENT_TYPE,
-                             "CESR-ATTACHMENT": "-AAB"},
+                    method="POST",
+                    path="/",
+                    body=runtime.hab.kever.serder.raw,
+                    headers={
+                        "Content-Type": httping.CESR_CONTENT_TYPE,
+                        "CESR-ATTACHMENT": "-AAB",
+                    },
                 )
             else:
                 client.request(
-                    method="PUT", path="/",
+                    method="PUT",
+                    path="/",
                     body=b'{"v":"KERI10JSONffffff_","t":"ixn"}',
                 )
             while not client.responses:
@@ -169,7 +174,9 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
                 assert workflow.tyme < deadline, (expected, status)
                 yield 0.01
 
-        def issue_association(*, signer=KEY, chain=31337, holder=None, nonce=None, wallet_key=KEY):
+        def issue_association(
+            *, signer=KEY, chain=31337, holder=None, nonce=None, wallet_key=KEY
+        ):
             """Yield through witnessed issuance and return (ACDC, KERI evidence/Grant bytes).
 
             signer, chain and holder select intentional invalid cases. The normal
@@ -338,7 +345,9 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
                 newer.association["issuanceAnchor"]["sequenceNumber"]
                 > accepted.association["issuanceAnchor"]["sequenceNumber"]
             )
-            initial_event = runtime.baser.outbox.get(keys=(accepted.eventId,)) if delivery else None
+            initial_event = (
+                runtime.baser.outbox.get(keys=(accepted.eventId,)) if delivery else None
+            )
 
             # A fresh Grant still embeds issuance. Neither it nor unanchored TEL
             # evidence can retire an association; wait for actual KERIpy escrow.
@@ -349,9 +358,9 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             yield from send(revocation)
             deadline = workflow.tyme + 5
             while runtime.rgy.reger.getTae(dbing.snKey(creder.said, 1)) is None:
-                assert workflow.tyme < deadline, (
-                    "revocation did not enter KERIpy anchor escrow"
-                )
+                assert (
+                    workflow.tyme < deadline
+                ), "revocation did not enter KERIpy anchor escrow"
                 yield 0.01
             retirement = next(d for d in runtime.doers if isinstance(d, RetirementDoer))
             retirement.recur(workflow.tyme)
@@ -368,9 +377,9 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             while (
                 runtime.rgy.reger.tevers[creder.regi].vcState(creder.said).et != "rev"
             ):
-                assert workflow.tyme < deadline, (
-                    "verified revocation escrow did not resolve"
-                )
+                assert (
+                    workflow.tyme < deadline
+                ), "verified revocation escrow did not resolve"
                 yield 0.01
             assert runtime.baser.associations.get(keys=(creder.said,)) == accepted
             workflow.remove([runtime, client_doer])
@@ -385,7 +394,9 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             )  # Keep issuance, not revocation anchor.
             assert retired.accountObservation == accepted.accountObservation
             assert retired.eventId == (f"{creder.said}:2" if delivery else "")
-            retained = runtime.baser.outbox.get(keys=(accepted.eventId,)) if delivery else None
+            retained = (
+                runtime.baser.outbox.get(keys=(accepted.eventId,)) if delivery else None
+            )
             if delivery:
                 # Retry progress may advance; immutable accepted-event bytes must not.
                 assert retained.body == initial_event.body
@@ -424,7 +435,12 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             coordinator.process_results()
             rejected = runtime.baser.results.get(keys=(raced.said,))
             assert rejected.status == "rejected" and "revoked" in rejected.reason
-            assert runtime.baser.accepted_nonces.get(keys=(runtime.baser.nonce_key(raced.issuer, raced.sad["u"]),)) is None
+            assert (
+                runtime.baser.accepted_nonces.get(
+                    keys=(runtime.baser.nonce_key(raced.issuer, raced.sad["u"]),)
+                )
+                is None
+            )
             coordinator.extend([verifier_loop])
 
             for label, options, reason in [
@@ -435,18 +451,24 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
                 candidate, stream = yield from issue_association(**options)
                 work = yield from deliver(stream, candidate.said, "rejected")
                 assert reason in work.reason, (label, work)
-                assert runtime.baser.accepted_nonces.get(keys=(runtime.baser.nonce_key(candidate.issuer, candidate.sad["u"]),)) is None
-            assert runtime.baser.associations.get(keys=(creder.said,)) == retired
-            assert (
-                len(
-                    [
-                        event
-                        for _, event in runtime.baser.outbox.getItemIter()
-                        if event.associationSaid == creder.said
-                    ]
+                assert (
+                    runtime.baser.accepted_nonces.get(
+                        keys=(
+                            runtime.baser.nonce_key(
+                                candidate.issuer, candidate.sad["u"]
+                            ),
+                        )
+                    )
+                    is None
                 )
-                == (2 if delivery else 0)
-            )
+            assert runtime.baser.associations.get(keys=(creder.said,)) == retired
+            assert len(
+                [
+                    event
+                    for _, event in runtime.baser.outbox.getItemIter()
+                    if event.associationSaid == creder.said
+                ]
+            ) == (2 if delivery else 0)
             assert runtime.baser.associations.get(keys=(successor.said,)) == newer
             finished.append(True)
             workflow.remove([d for d in workflow.doers if d is not task])

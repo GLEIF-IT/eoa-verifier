@@ -1,46 +1,51 @@
-# Regression tests
+# Find and run verifier tests
 
-Run `python -m pytest -q tests` with the package and test extra installed. Anvil
-must be available on PATH; KERI/IPEX integration fails rather than skips without it.
-CI checks component dependencies with `python tools/check_architecture.py`, then
-builds a wheel and tests it outside the source checkout on Python 3.12.
+Run from the repository root with the installed verifier and pytest. Tests are an
+explicit tests package; pytest.ini selects importlib mode. No PYTHONPATH or
+sys.path edits are required. Production components and imports are unchanged.
 
-Read the suite in this order:
+| Production subject | Test location / example |
+|---|---|
+| runtime/cli.py | python -m pytest tests/runtime/test_cli.py |
+| runtime/config.py | python -m pytest tests/runtime/test_config.py |
+| runtime/serving.py | python -m pytest tests/runtime/test_serving.py -k cleanup |
+| receiving/directing.py and grants.py | tests/receiving/test_directing.py and test_grants.py |
+| verification/eoa.py | python -m pytest tests/verification/test_eoa.py |
+| EoaVerifierDoer / timeout | python -m pytest tests/verification/test_worker.py -k timeout |
+| verification/coordinating.py | tests/verification/test_coordinating.py |
+| StatusEnd | python -m pytest tests/associations/test_statusing.py |
+| VerifierBaser.accept | python -m pytest tests/persistence/test_basing.py -k acceptance |
+| Native nonce claims/durability | tests/persistence/test_accepted_nonces.py |
+| Delivery authentication and sender | tests/delivery/test_authing.py and test_delivering.py |
+| Acceptance/retirement workers with witnessed evidence | tests/integration/test_ipex_verification.py |
+| Atomic retirement plus public visibility | tests/integration/test_acceptance_status.py |
 
-| File                       | Contract protected                                                                             |
-| -------------------------- | ---------------------------------------------------------------------------------------------- |
-| `test_ipex_integration.py` | Witnessed issuance, delayed-anchor retirement/restart and critical rejections over POST/PUT.   |
-| `test_account.py`          | Wallet/account outcomes, canonical-block RPC observation and client lifetime.                  |
-| `test_authing.py`          | KERIpy signatures, covered HTTP context, rotation and durable replay protection.               |
-| `test_intake.py`           | Decode/replay/enqueue boundaries, malformed-input containment and coordinator-owned rejection. |
-| `test_coordinating.py`     | Bounded work discovery, retry pacing and completion.                                           |
-| `test_basing.py`           | Duplicate-safe records and atomic completion.                                                  |
-| `test_accepting.py`        | Atomic acceptance/retirement outbox, rollback/reopen and public stored status.                 |
-| `test_delivering.py`       | Signed HTTP/ACK boundaries, retirement ACKs and fresh signatures after a lost ACK.             |
-| `test_directing.py`        | CESR HTTP framing and direct receiver wiring.                                                  |
-| `test_retry.py`            | Controlled-clock pacing, backoff/cap, Retry-After, cooldown restart and permanent errors.      |
-| `test_runtime.py`          | Store/task lifetime and CLI configuration.                                                     |
+Use ::test_function_name for one function and -k expression for a class or method.
+Reusable issuer, service ownership, network and acceptance construction is in
+tests/support. Fixtures live in their narrowest common conftest. Tests never
+import other test modules. The 20 former mixed nonce cases split into validation
+and persistence cases with every parameter/assertion preserved: 134 becomes 154.
+Other scenarios move whole.
 
-`keripy_helpers.py` constructs real issuer evidence and owns test resource contexts.
-Its `entered_service` fixture enters HIO tasks but does not advance the scheduler.
-The RPC test endpoint supplies deterministic network responses; it is not a substitute
-for the Anvil integration. Failure injection is limited to boundaries whose error
-handling belongs to this application.
+Run python tools/check_architecture.py, then python -m pytest. Full tests require
+Foundry 1.5.1 including Anvil. CI builds a fresh wheel and copies tests plus
+pytest.ini outside the checkout before running python -m pytest. Test support is
+excluded from wheels. Run one repository's test package per invocation. The sole
+paired-system scenario belongs to the oracle; launchers invoke it without copies.
 
-Prefer observable outcomes over exact scheduling traces, helper call counts or
-incidental cleanup counts. Keep a representative malformed input per behavior;
-do not expand permutations without a concrete regression or new production path.
-A synthetic input is useful when it isolates a real contract, not merely because
-we can imagine another possible failure.
+## Regression discipline
 
-## Paired system qualification
+The issuer support constructs real evidence; services.entered_service enters HIO
+tasks without advancing the scheduler. Deterministic RPC endpoints isolate the
+HTTP boundary and do not replace the Anvil integration. Failure injection stays
+at boundaries whose error handling belongs to this application.
 
-The oracle's [two-service test](https://github.com/GLEIF-IT/vlei-oracle/blob/7d82d04cd444cb21e1da1e6ec0408cc40105d4f4/docs/two-service-qualification.md)
-runs both installed CLIs, witnessed KERIpy issuance, signed webhooks, Anvil
-publication/replacement/withdrawal and actual USDC balances. Keep contract and
-consumer-selection assertions there rather than duplicating them in this package.
+Prefer observable outcomes over exact scheduler traces or incidental cleanup
+counts. Keep representative malformed inputs; expand matrices only for a concrete
+regression or production path. Do not add broad parser fuzzing, exhaustive
+exception permutations or a second KERIpy verification simulator. Deferred
+freshness, same-event conflict and advanced Ethereum recovery have no additional
+test obligation in this organization refactor.
 
-Do not add broad parser fuzzing, exhaustive exception matrices or a second KERIpy
-verification simulator to this suite now. Revisit extra malformed-version/RPC
-variants only for a concrete regression. Deferred freshness, same-event conflict
-and advanced Ethereum recovery behavior have no current test obligation.
+The oracle's maintained two-service qualification owns contract and consumer
+selection assertions. Keep them there rather than duplicating the workflow here.

@@ -1,4 +1,4 @@
-"""Bounded scheduling over real persisted work, with controlled KERIpy outcomes."""
+"""verification/test_coordinating.py."""
 
 from unittest.mock import patch
 
@@ -7,10 +7,13 @@ from keri.db import dbing
 
 from eoa_verifier.persistence.basing import VerifierBaser
 from eoa_verifier.persistence.records import PendingVerification, VerificationResult
+from eoa_verifier.receiving.grants import GrantNotificationDoer
 from eoa_verifier.verification.constants import ASSOCIATION_SCHEMA
 from eoa_verifier.verification.coordinating import VerificationCoordinator
 from eoa_verifier.verification.errors import MissingCredentialArtifactsError
 from eoa_verifier.verification.worker import EoaVerifierDoer
+from tests.support.issuers import candidate, signed_notice
+from tests.support.services import entered_service
 
 
 def test_pending_scan_excludes_results_and_bounds_pages():
@@ -99,3 +102,43 @@ def test_rpc_retry_and_success_move_only_on_completion():
             coordinator.process_results()
         assert baser.pending.get(keys=("a",)) is None
         assert baser.results.get(keys=("a",)).eoaResult == observation
+
+
+def test_wrong_schema_is_coordinator_rejection_without_keripy_acceptance(config):
+    """A real signed Grant supplies rejection evidence, never KERIpy credential acceptance."""
+    from keri.app import habbing
+    from keri.core import serdering
+
+    from eoa_verifier.verification.constants import LE_SCHEMA
+    from eoa_verifier.verification.coordinating import VerificationCoordinator
+
+    with (
+        entered_service(config) as runtime,
+        habbing.openHby(name="sender", temp=True) as hby,
+    ):
+        grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
+        coordinator = next(
+            d for d in runtime.doers if isinstance(d, VerificationCoordinator)
+        )
+        sad = candidate()
+        sad["s"] = LE_SCHEMA
+        creder = serdering.SerderACDC(sad=sad, makify=True)
+        sender = hby.makeHab(name="sender")
+        grant_said = signed_notice(runtime, grants, sender, creder.sad)
+        attrs = {"d": grant_said}
+        grants.process_grant_notice(attrs)
+        pending = runtime.baser.pending.get(keys=(creder.said,))
+        assert pending is not None
+        assert runtime.baser.results.get(keys=(creder.said,)) is None
+        assert runtime.rgy.reger.creds.get(keys=(creder.said,)) is None
+        assert runtime.rgy.reger.saved.get(keys=(creder.said,)) is None
+        grants.process_grant_notice(attrs)
+        assert runtime.baser.pending.get(keys=(creder.said,)) == pending
+        coordinator.process_ready()
+        result = runtime.baser.results.get(keys=(creder.said,))
+        assert result.status == "rejected"
+        assert "unexpected schema" in result.reason
+        assert runtime.baser.pending.get(keys=(creder.said,)) is None
+        grants.process_grant_notice(attrs)
+        assert runtime.baser.results.get(keys=(creder.said,)) == result
+        assert runtime.baser.pending.get(keys=(creder.said,)) is None
