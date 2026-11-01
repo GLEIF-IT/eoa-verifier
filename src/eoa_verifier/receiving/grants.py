@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import traceback
-from itertools import islice
+import time
 from typing import Any
 
 from hio.base import doing
@@ -29,7 +28,7 @@ class GrantNotificationDoer(doing.Doer):
     Accepted Grant signatures authenticate delivery; they do not establish KERIpy
     ACDC acceptance. Embedded evidence is replayed through the shared parser,
     which may escrow it. The coordinator separately checks credential acceptance.
-    Missing Grant material leaves its notice pending for a later HIO turn.
+    Missing Grant material moves to durable waiting with a finite retry budget.
     """
 
     def __init__(
@@ -39,6 +38,9 @@ class GrantNotificationDoer(doing.Doer):
         hby,
         notifier,
         parser,
+        clock=time.time,
+        retry_delay=5.0,
+        max_attempts=3,
         **kwa,
     ):
         """Borrow a work store, Habery, KERIpy Notifier and shared inbound parser.
@@ -50,7 +52,11 @@ class GrantNotificationDoer(doing.Doer):
         self.hby = hby
         self.notifier = notifier
         self.parser = parser
-        self.scan_after = b""  # KERIpy notice key; scheduling hint only.
+        self.clock, self.retry_delay, self.max_attempts = (
+            clock,
+            retry_delay,
+            max_attempts,
+        )
         super().__init__(**kwa)
 
     def recur(self, tyme):
@@ -61,53 +67,44 @@ class GrantNotificationDoer(doing.Doer):
         return False
 
     def process_notes(self) -> None:
-        """Consume KERIpy notices with attrs.r routing and attrs.d naming the Grant EXN.
+        """Handoff and replay at most one notice; missing material cannot block fresh notices.
 
-        Remove unrelated, successfully processed and invalid notices through Noter so
-        indexes/signatures are cleaned together. Report invalid input with a traceback;
-        retain missing material and advance past it. Read at most 32 notices per turn.
-        Unexpected parser/storage errors propagate and leave
-        the failing notice intact. Return None; KERIpy notification storage is borrowed.
-        """
-
-        batch = self._notice_batch()
-        if not batch:
-            self.scan_after = b""
-        for key, notice in batch:
-            self.scan_after = key
-            attrs = notice.attrs
-            if attrs.get("r") != "/exn/ipex/grant":
-                self.notifier.noter.rem(notice.rid)
-                continue
-
-            try:
-                self.process_grant_notice(attrs)
-            except GrantNotReadyError:
-                continue
-            except InvalidGrantError:
-                traceback.print_exc()
-                self.notifier.noter.rem(notice.rid)
-            else:
-                self.notifier.noter.rem(notice.rid)
-
-    def _notice_batch(self):
-        """Seek past the last KERIpy key and copy at most 32 notices before mutation.
-
-        Use a key cursor, not offset pagination that rescans the retained backlog.
-        No read transaction survives processing; an empty page wraps next turn.
+        Active work is durable before the native notice is removed. Replay and
+        enqueue are idempotent if interruption occurs before acknowledgement.
+        Missing material waits on a persistent UTC deadline; three attempts exhaust
+        the budget. Invalid material goes directly to a diagnostic dead letter.
         """
         noter = self.notifier.noter
-        with noter.env.begin(db=noter.notes.sdb) as txn:
-            with txn.cursor() as cursor:
-                if not cursor.set_range(self.scan_after):
-                    return []
-                if self.scan_after and cursor.key() == self.scan_after:
-                    if not cursor.next():
-                        return []
-                return [
-                    (bytes(key), noter.notes.klas(raw=bytes(raw)))
-                    for key, raw in islice(cursor.iternext(), 32)
-                ]
+        with noter.env.begin(db=noter.notes.sdb) as txn, txn.cursor() as cursor:
+            notice = (
+                noter.notes.klas(raw=bytes(cursor.value())) if cursor.first() else None
+            )
+        work = self.baser.begin_grant(
+            notice, now=self.clock(), max_attempts=self.max_attempts
+        )
+        if work is None:
+            # Recover interruption before acknowledging a notice whose final
+            # replay attempt was already charged and subsequently dead-lettered.
+            if notice is not None and self.baser.grant_dead.get(keys=(notice.rid,)):
+                noter.rem(notice.rid)
+            return
+        noter.rem(work.noticeId)
+        try:
+            if work.attrs.get("r") == "/exn/ipex/grant":
+                self.process_grant_notice(work.attrs)
+        except GrantNotReadyError as exc:
+            self.baser.settle_grant(
+                work,
+                reason=str(exc) or type(exc).__name__,
+                next_attempt_at=self.clock() + self.retry_delay,
+                max_attempts=self.max_attempts,
+            )
+        except InvalidGrantError as exc:
+            self.baser.settle_grant(
+                work, reason=str(exc) or type(exc).__name__, invalid=True
+            )
+        else:
+            self.baser.settle_grant(work)
 
     def _replay_embed(self, ims):
         """Advance KERIpy parsing once for a complete, fixed embed frame.

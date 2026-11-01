@@ -16,8 +16,9 @@ def verifier_service(config):
     """
     from keri.app import configing, keeping, notifying
     from keri.db import basing, dbing
-    from keri.vdr import credentialing, viring
+    from keri.vdr import credentialing
 
+    from eoa_verifier.persistence.registry import VerifierReger
     from eoa_verifier.persistence.basing import VerifierBaser
     from eoa_verifier.runtime.serving import VerifierService
 
@@ -26,7 +27,7 @@ def verifier_service(config):
         keeping.openKS(temp=config.temp, **options) as ks,
         basing.openDB(temp=config.temp, **options) as db,
         configing.openCF(temp=config.temp, **options) as cf,
-        viring.openReger(temp=config.temp, db=db, **options) as reger,
+        dbing.openLMDB(cls=VerifierReger, temp=config.temp, db=db, **options) as reger,
         dbing.openLMDB(cls=VerifierBaser, temp=config.temp, **options) as baser,
         dbing.openLMDB(cls=notifying.Noter, temp=config.temp, **options) as noter,
     ):

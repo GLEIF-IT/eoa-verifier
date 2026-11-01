@@ -46,12 +46,15 @@ Retain one VerifierBaser and one application LMDB transaction boundary. Completi
 writes results/removes pending work atomically. Acceptance and retirement each
 commit association status and its immutable outbox event together. Event creation
 stays beside these transitions; delivery sends stored bytes. KERIpy evidence
-stores remain separate, with bounded recovery scans bridging commit gaps.
+stores remain separate. Durable phase queues bridge commit gaps; the native
+accepted-TEL index and its revocation handoff commit atomically in VerifierReger.
+No completed-result or association-history scans schedule work.
 
 Keep authentication separate from ACK policy, verification separate from
 acceptance, and oracle ownership/chain publication outside this application.
 Preserve the coordinator's native-state recheck after RPC waits and the existing
-HIO task/store lifetime. Table names, record fields and wire formats do not change.
+HIO task/store lifetime. The subsequent durable-phase refactor changes storage
+without compatibility readers; the authenticated event format remains unchanged.
 
 ## Import migration
 

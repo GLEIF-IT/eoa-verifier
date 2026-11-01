@@ -44,7 +44,7 @@ def test_consumed_notification_removes_note_and_signal(config, kind):
 
 
 @pytest.mark.parametrize("boundary", ["parser", "storage"])
-def test_internal_failure_preserves_notification(config, boundary):
+def test_internal_failure_preserves_active_handoff(config, boundary):
     """Inject parser/storage errors after valid decoding and prove the KERIpy notice remains retryable."""
     lifetime = ExitStack()
     runtime = lifetime.enter_context(entered_service(config))
@@ -71,13 +71,13 @@ def test_internal_failure_preserves_notification(config, boundary):
             pytest.raises(ValueError, match="internal failure"),
         ):
             grants.process_notes()
-        assert grants.notifier.noter.get(notice.rid)[0].raw == notice.raw
+        assert runtime.baser.grant_active.get(keys=("receiver",)).noticeId == notice.rid
         assert runtime.baser.pending.get(keys=(association["d"],)) is None
     finally:
         lifetime.close()
 
 
-def test_missing_grant_retains_notification_until_available(config):
+def test_missing_grant_waits_durably_without_blocking_native_notices(config):
     """An absent EXN leaves its persisted notification available for a later attempt."""
     lifetime = ExitStack()
     runtime = lifetime.enter_context(entered_service(config))
@@ -86,7 +86,8 @@ def test_missing_grant_retains_notification_until_available(config):
         grants.notifier.add({"r": "/exn/ipex/grant", "d": "missing"})
         notice, _ = grants.notifier.noter.getNotes()[0]
         grants.process_notes()
-        assert grants.notifier.noter.get(notice.rid)[0].raw == notice.raw
+        assert runtime.baser.grant_waiting.get(keys=(notice.rid,)).attempts == 1
+        assert grants.notifier.noter.getNoteCnt() == 0
     finally:
         lifetime.close()
 
@@ -135,17 +136,15 @@ def test_signed_bad_embed_is_consumed_and_valid_work_progresses(config, bad):
         lifetime.close()
 
 
-def test_notice_pages_advance_past_retained_work(config):
-    """Real KERIpy storage retains early notices without starving later work or siblings."""
+def test_one_notice_per_turn_and_bounded_missing_material(config):
+    """A missing Grant leaves the native queue; later notices and HIO siblings progress."""
     from hio.base import doing
 
-    lifetime = ExitStack()
-    runtime = lifetime.enter_context(entered_service(config))
-    try:
+    with entered_service(config) as runtime:
         grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
-        for i in range(65):
-            grants.notifier.add({"r": "/exn/ipex/grant", "d": f"missing-{i}"})
-        grants.notifier.add({"r": "/unrelated", "d": "last"})
+        grants.clock = lambda: 100
+        grants.notifier.add({"r": "/exn/ipex/grant", "d": "missing"})
+        grants.notifier.add({"r": "/unrelated", "d": "later"})
         counts = []
 
         class Heartbeat(doing.Doer):
@@ -153,12 +152,38 @@ def test_notice_pages_advance_past_retained_work(config):
                 counts.append(grants.notifier.noter.getNoteCnt())
                 return len(counts) == 3
 
-        with patch.object(
-            grants, "process_grant_notice", wraps=grants.process_grant_notice
-        ) as process:
-            doing.Doist(tock=0.01, limit=0.03).do(doers=[grants, Heartbeat()])
-            assert process.call_count <= 3 * 32
-        assert counts[-1] < counts[0]
-        assert grants.notifier.noter.getNoteCnt() == 65
-    finally:
-        lifetime.close()
+        doing.Doist(tock=0.01, limit=0.03).do(doers=[grants, Heartbeat()])
+        assert counts[:2] == [1, 0]
+        assert runtime.baser.grant_waiting.cntAll() == 1
+        for now in (105, 110):
+            grants.clock = lambda now=now: now
+            grants.process_notes()
+        assert runtime.baser.grant_waiting.cntAll() == 0
+        assert runtime.baser.grant_dead.cntAll() == 1
+        key, work = next(runtime.baser.grant_dead.getItemIter())
+        assert work.attempts == 3 and "missing" in work.reason
+        runtime.baser.retry_grant(work.noticeId)
+        assert runtime.baser.grant_dead.cntAll() == 0
+        assert runtime.baser.grant_waiting.get(keys=key).attempts == 0
+
+
+def test_interrupted_handoff_reopens_without_native_notice(config):
+    """A removed native notice is recoverable entirely from the application's active phase."""
+    with entered_service(config) as runtime:
+        grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
+        grants.notifier.add({"r": "/exn/ipex/grant", "d": "missing"})
+        with (
+            patch.object(
+                grants, "process_grant_notice", side_effect=RuntimeError("interrupted")
+            ),
+            pytest.raises(RuntimeError),
+        ):
+            grants.process_notes()
+        assert grants.notifier.noter.getNoteCnt() == 0
+        work = runtime.baser.grant_active.get(keys=("receiver",))
+        assert work.attempts == 1
+    with entered_service(config) as runtime:
+        grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
+        grants.process_notes()
+        assert runtime.baser.grant_active.cntAll() == 0
+        assert runtime.baser.grant_waiting.get(keys=(work.noticeId,)).attempts == 2

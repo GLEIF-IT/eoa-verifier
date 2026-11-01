@@ -107,7 +107,9 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
                 status = (
                     500
                     if reply == "signed-error"
-                    else 401 if reply == "unauthorized" else 200
+                    else 401
+                    if reply == "unauthorized"
+                    else 200
                 )
                 headers, _ = receiver.sign(
                     method=req.method,
@@ -131,6 +133,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
             server = http.Server(host="127.0.0.1", port=port, app=app)
             server_doer = http.ServerDoer(server=server)
         baser.enqueue(PendingVerification("association", "grant"))
+        baser.next_verification(now=0)
         baser.finish(
             VerificationResult(
                 "association",
@@ -161,7 +164,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
             backoff_base=0.05,
             backoff_cap=0.05,
         )
-        # The sender discovers the committed event; intake need not enqueue it again.
+        # Acceptance atomically queued this event; the sender reads only its work phase.
 
         def wait_for_attempt(tymth, tock=0.0, **kwa):
             """Stop after one recorded result so failed ACKs cannot be hidden by retries."""
@@ -245,6 +248,7 @@ def test_malformed_chunk_response_preserves_pending_delivery(tmp_path):
         server = tcp.Server(host="127.0.0.1", port=free_port())
         peer = BadResponsePeer(server=server)
         baser.enqueue(PendingVerification("association", "grant"))
+        baser.next_verification(now=0)
         baser.finish(
             VerificationResult(
                 "association",
@@ -294,6 +298,7 @@ def test_malformed_chunk_response_preserves_pending_delivery(tmp_path):
 def accept(baser, said):
     """Create a completed result and its event at one shared destination."""
     baser.enqueue(PendingVerification(said, "grant"))
+    baser.next_verification(now=0)
     baser.finish(
         VerificationResult(
             said, "verified", eoaResult={"wallet": "wallet", "accountObservation": {}}
@@ -321,7 +326,9 @@ def test_retry_backoff_caps_and_paces_successes(outbox):
         ranges.append((lower, upper))
         return lower
 
-    sender = WebhookSender(baser=outbox, hab=None, clock=clock, uniform=lower_bound)
+    sender = WebhookSender(
+        baser=outbox, hab=None, clock=clock, uniform=lower_bound, max_attempts=12
+    )
 
     def attempt(event):
         """Hold each attempt open over scheduler turns, then fail ten times before succeeding."""
@@ -419,7 +426,7 @@ def test_permanent_failure_waits_for_explicit_resumption(outbox):
     with patch.object(resumed, "_send", corrected):
         scheduler.do(doers=[resumed], tyme=4)
     delivered = outbox.outbox.get(keys=(accepted.eventId,))
-    assert delivered.acknowledged and not delivered.blocked and delivered.attempts == 2
+    assert delivered.acknowledged and not delivered.blocked and delivered.attempts == 1
 
 
 def test_retry_after_supports_seconds_and_http_date():
@@ -442,3 +449,50 @@ def test_retry_after_supports_seconds_and_http_date():
         assert caught.value.retry_after == 600
     assert _retry_after("nonsense", now) == _retry_after("-1", now) == 0
     assert _retry_after(future, 1700) == 0
+
+
+def test_transient_attempt_budget_moves_to_dead_letter_without_history_scan(outbox):
+    """A finite sender stops after three failures and restart never discovers it again."""
+    accepted = accept(outbox, "bounded")
+    sender = WebhookSender(
+        baser=outbox,
+        hab=None,
+        interval=0.01,
+        backoff_base=0.01,
+        backoff_cap=0.01,
+        clock=lambda: 1000,
+        uniform=lambda low, high: low,
+    )
+
+    def unavailable(event):
+        yield 0.0
+        raise TimeoutError("unavailable")
+
+    for attempt in range(3):
+        event = outbox.next_delivery()
+        assert event.eventId == accepted.eventId
+        with patch.object(sender, "_send", unavailable):
+            list(sender._attempt(event))
+    event = outbox.outbox.get(keys=(accepted.eventId,))
+    assert event.blocked and not event.acknowledged and event.attempts == 3
+    assert outbox.delivery_dead.get(keys=(accepted.eventId,)) is not None
+    outbox.close()
+    outbox.reopen()
+    assert outbox.next_delivery() is None
+    outbox.retry_delivery(accepted.eventId)
+    assert outbox.next_delivery().attempts == 0
+
+
+def test_delivery_phase_resumes_active_and_releases_completed(outbox):
+    """A crash retains the active event; ACK atomically removes its scheduling reference."""
+    accepted = accept(outbox, "phase")
+    event = outbox.next_delivery()
+    assert event.eventId == accepted.eventId
+    assert outbox.delivery_ready.cntAll() == 0
+    outbox.close()
+    outbox.reopen()
+    assert outbox.next_delivery() == event
+    outbox.delivery_result(event.eventId)
+    assert outbox.delivery_active.cntAll() == 0
+    assert outbox.next_delivery() is None
+    assert outbox.outbox.get(keys=(event.eventId,)).acknowledged

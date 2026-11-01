@@ -2,6 +2,7 @@
 
 import shutil
 import subprocess
+import time
 from contextlib import ExitStack
 from importlib.resources import files
 from uuid import uuid4
@@ -17,8 +18,10 @@ from keri.db import basing, dbing
 from keri.help import helping
 
 from eoa_verifier.associations.retiring import RetirementDoer
+from eoa_verifier.receiving.grants import GrantNotificationDoer
 from eoa_verifier.runtime.config import ServiceConfig
 from eoa_verifier.verification.constants import LE_SCHEMA, QVI_SCHEMA
+from eoa_verifier.verification.coordinating import VerificationCoordinator
 from eoa_verifier.verification.eoa import build_challenge
 from scripts.integration.issuers import (
     KEY,
@@ -97,7 +100,23 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             webhook_aid=geda.pre if delivery else None,
         )
         service_stores = stack.enter_context(ExitStack())
-        runtime = service_stores.enter_context(verifier_service(config))
+        epoch = time.time()
+
+        def open_service():
+            """Keep persistent retry deadlines on the test's HIO timeline across restart.
+
+            Real Doist catches up after blocking setup/store work. Its virtual
+            deadlines can otherwise run ahead of a recently started UTC cooldown.
+            Use one epoch for every reopened worker; keep all retry budgets and
+            ten-second progress assertions unchanged.
+            """
+            service = service_stores.enter_context(verifier_service(config))
+            for doer in service.doers:
+                if isinstance(doer, (GrantNotificationDoer, VerificationCoordinator)):
+                    doer.clock = lambda: epoch + workflow.tyme
+            return service
+
+        runtime = open_service()
         client = http.Client(hostname="127.0.0.1", port=port)
         client_doer = http.ClientDoer(client=client)
         doers = [
@@ -151,17 +170,20 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             yield from send(stream)
             deadline = workflow.tyme + 10
             while True:
-                store = (
-                    runtime.baser.pending
+                work = (
+                    runtime.baser.verification_progress(said)[1]
                     if expected == "pending"
-                    else runtime.baser.results
+                    else runtime.baser.results.get(keys=(said,))
                 )
-                work = store.get(keys=(said,))
                 if work is not None and (
                     expected == "pending" or work.status == expected
                 ):
                     return work
-                assert workflow.tyme < deadline, (expected, work)
+                assert workflow.tyme < deadline, (
+                    expected,
+                    work,
+                    runtime.baser.verification_progress(said),
+                )
                 yield 0.01
 
         def wait_status(said, expected):
@@ -282,12 +304,12 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             aid = runtime.hab.pre
             workflow.remove([runtime, client_doer])
             service_stores.close()
-            runtime = service_stores.enter_context(verifier_service(config))
+            runtime = open_service()
             client = http.Client(hostname="127.0.0.1", port=port)
             client_doer = http.ClientDoer(client=client)
             workflow.extend([runtime, client_doer])
             assert runtime.hab.pre == aid
-            assert runtime.baser.pending.get(keys=(creder.said,)) is not None
+            assert runtime.baser.verification_progress(creder.said)[1] is not None
             # Supporting evidence alone resumes persisted work; no new Grant required.
             yield from deliver(
                 streams["geda"] + streams["qvi"], creder.said, "verified"
@@ -311,7 +333,6 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             # replay explicitly after the HTTP redelivery, rather than observing the
             # already-existing result before the duplicate has been processed.
             yield from send(evidence)
-            from eoa_verifier.receiving.grants import GrantNotificationDoer
 
             intake = next(
                 d for d in runtime.doers if isinstance(d, GrantNotificationDoer)
@@ -384,7 +405,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             assert runtime.baser.associations.get(keys=(creder.said,)) == accepted
             workflow.remove([runtime, client_doer])
             service_stores.close()
-            runtime = service_stores.enter_context(verifier_service(config))
+            runtime = open_service()
             client = http.Client(hostname="127.0.0.1", port=port)
             client_doer = http.ClientDoer(client=client)
             workflow.extend([runtime, client_doer])
@@ -409,7 +430,6 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             # Hold completion after a real RPC observation, then deliver KERIpy
             # revocation before applying the result. The final KERIpy recheck
             # must prevent initial success without asking RPC a second time.
-            from eoa_verifier.verification.coordinating import VerificationCoordinator
 
             coordinator = next(
                 d for d in runtime.doers if isinstance(d, VerificationCoordinator)

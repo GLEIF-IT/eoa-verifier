@@ -5,10 +5,23 @@ from dataclasses import dataclass, field
 
 @dataclass
 class PendingVerification:
-    """Unfinished initial verification; membership in pending is the only workflow state."""
+    """One verification attempt; table membership identifies its durable phase."""
 
     associationSaid: str
     grantSaid: str
+    reason: str = ""
+    attempts: int = 0
+    nextAttemptAt: float = 0.0
+
+
+@dataclass
+class GrantWork:
+    """Authenticated notice retained until replay succeeds or an operator intervenes."""
+
+    noticeId: str
+    attrs: dict
+    attempts: int = 0
+    nextAttemptAt: float = 0.0
     reason: str = ""
 
 
@@ -92,3 +105,10 @@ class DestinationSchedule:
 
     failures: int = 0
     nextAttemptAt: float = 0.0
+
+
+@dataclass
+class DeliveryReference:
+    """One event's membership in a delivery phase; bytes remain in the outbox."""
+
+    eventId: str

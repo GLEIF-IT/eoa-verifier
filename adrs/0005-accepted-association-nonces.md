@@ -17,7 +17,7 @@ owns nonce syntax and signed commitments.
 obligation in one native synchronous LMDB write transaction. Insert without
 overwrite and inspect existing data in the same transaction. Inconsistent or
 orphaned claims abort acceptance. Native LMDB supplies process coordination; no
-application locks, threads, queues or additional environment are needed.
+application locks, threads or additional environment are needed for nonce claims.
 
 The typed `AcceptedNonce` record stores issuer, exact nonce and accepted SAID.
 Komer's ordinary issuer.nonce key is unambiguous under the credential profile and
@@ -25,14 +25,14 @@ at most 173 bytes, within the pinned environment's 511-byte key limit. Hashing
 or custom key encodings add no value. Standard name/base/head-dir selects the
 existing application store. Persistent closure retains all claims.
 
-KERIpy evidence and application state use separate transactions. A bounded
-acceptance scan recovers completed verified results; invalid, pending or revoked
+KERIpy evidence and application state use separate transactions. A dedicated
+`accepting.` phase recovers completed verified results one at a time; invalid, pending or revoked
 evidence cannot burn a nonce. Target-free acceptance still claims the nonce,
 without an event. Later enabling delivery does not backfill those acceptances.
 
 ## Store and operational limits
 
-The `issuer-nonce-ascii-v1` scope requires complete claim history. Startup rejects
+The `durable-phases-v1` scope requires complete claim history. Startup rejects
 pre-policy or inconsistent acceptance stores; it does not migrate, backfill or
 recreate missing claims. The history audit currently holds accepted SAIDs in
 memory. Uniqueness applies within one preserved verifier store, not globally

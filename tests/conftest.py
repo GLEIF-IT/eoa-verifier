@@ -28,6 +28,7 @@ def verified_store(tmp_path):
         cls=VerifierBaser, name="acceptance", headDirPath=str(tmp_path), temp=False
     ) as baser:
         baser.enqueue(PendingVerification("association", "grant"))
+        baser.next_verification(now=0)
         baser.finish(
             VerificationResult(
                 "association",

@@ -8,7 +8,6 @@ from hio.core.http import httping as hio_httping
 from keri.core import coring
 
 
-
 @dataclass(frozen=True)
 class ServiceConfig:
     """Service identity, local storage and initial-verification network settings."""
@@ -41,6 +40,7 @@ class ServiceConfig:
     webhook_url: str | None = None
     webhook_aid: str | None = None
     # Operational seconds: one in-flight request; backoff range is [lower, 2 * lower].
+    webhook_max_attempts: int = 3
     webhook_timeout: float = 10.0
     webhook_interval: float = 1.0
     webhook_backoff_base: float = 1.0
@@ -48,6 +48,8 @@ class ServiceConfig:
 
     def __post_init__(self):
         """Reject invalid verification configuration before opening resources."""
+        if type(self.webhook_max_attempts) is not int or self.webhook_max_attempts < 1:
+            raise ValueError("webhook max attempts must be a positive integer")
         timings = (
             self.webhook_timeout,
             self.webhook_interval,

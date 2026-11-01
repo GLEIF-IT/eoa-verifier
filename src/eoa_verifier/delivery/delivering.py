@@ -9,7 +9,6 @@ from email.utils import parsedate_to_datetime
 
 from hio.base import doing
 from hio.core import http
-from hio.help import decking
 
 from .authing import AuthenticationError, ServiceAuthenticator
 
@@ -40,8 +39,8 @@ class _TransientFailure(Exception):
 class WebhookSender(doing.DoDoer):
     """Own sequential attempts, destination pacing and authenticated completion.
 
-    Scan pending outbox events across restart. Transient failures cool down every
-    event for that destination; permanent failures wait for correction and explicit
+    Resume the durable active delivery across restart. Transient failures cool
+    down every event for that destination; permanent failures wait for correction and explicit
     request(event_id). Reuse stored bytes/target but sign every attempt anew.
     The injected UTC clock and uniform random source permit deterministic policy tests.
     """
@@ -57,6 +56,7 @@ class WebhookSender(doing.DoDoer):
         backoff_cap=150.0,
         clock=time.time,
         uniform=random.uniform,
+        max_attempts=3,
         **kwa,
     ):
         self.baser, self.hab, self.timeout = baser, hab, timeout
@@ -66,31 +66,24 @@ class WebhookSender(doing.DoDoer):
             backoff_cap,
         )
         self.clock, self.uniform = clock, uniform
-        self.requests = decking.Deck()
-        self.after = ""
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be positive")
+        self.max_attempts = max_attempts
         super().__init__(doers=[doing.doify(self.send_do)], **kwa)
 
     def request(self, event_id):
         """Resume an event after correcting its failure; still respect destination cooldown."""
-        if event_id not in self.requests:
-            self.requests.append(event_id)
+        self.baser.retry_delivery(event_id)
 
     def send_do(self, tymth, tock=0.0, **opts):
-        """Process requests sequentially; HIO child removal closes each HTTP client."""
+        """Advance only durable delivery phases, closing each client before the next."""
         yield tock
         while True:
-            if not self.requests:
-                page = self.baser.delivery_batch(after=self.after)
-                self.after = page[-1].eventId if page else ""
-                for event in page:
-                    if not event.acknowledged and not event.blocked:
-                        self.request(event.eventId)
+            event = self.baser.next_delivery()
+            if event is None:
                 yield self.tock
                 continue
-            event_id = self.requests.popleft()
-            event = self.baser.outbox.get(keys=(event_id,))
-            if event is None or event.acknowledged:
-                continue
+            event_id = event.eventId
             status = self.baser.associations.get(keys=(event.associationSaid,))
             if (
                 status is None
@@ -105,7 +98,6 @@ class WebhookSender(doing.DoDoer):
                 continue
             schedule = self.baser.destinations.get(keys=(event.destination,))
             if schedule.nextAttemptAt > self.clock():
-                self.request(event_id)
                 yield self.tock
                 continue
             yield from self._attempt(event)
@@ -113,7 +105,12 @@ class WebhookSender(doing.DoDoer):
 
     def _attempt(self, event):
         """Persist pacing before I/O, then atomically record the result and cooldown."""
-        self.baser.record_attempt(
+        if event.attempts >= self.max_attempts:
+            self.baser.delivery_result(
+                event.eventId, error="delivery attempt limit reached", blocked=True
+            )
+            return
+        event = self.baser.record_attempt(
             event.eventId, next_attempt_at=self.clock() + self.interval
         )
         try:
@@ -125,7 +122,7 @@ class WebhookSender(doing.DoDoer):
         except (_TransientFailure, OSError) as error:
             schedule = self.baser.destinations.get(keys=(event.destination,))
             schedule.failures += 1
-            # Clamp the exponent before computing it; failures can accumulate indefinitely.
+            # Bound the exponent independently of the configured attempt budget.
             exponent = min(
                 schedule.failures - 1,
                 math.ceil(math.log2(self.backoff_cap / self.backoff_base)),
@@ -139,6 +136,7 @@ class WebhookSender(doing.DoDoer):
                 event.eventId,
                 error=str(error) or type(error).__name__,
                 schedule=schedule,
+                blocked=event.attempts >= self.max_attempts,
             )
         else:
             self.baser.delivery_result(event.eventId)
@@ -211,7 +209,9 @@ class WebhookSender(doing.DoDoer):
             or ack["eventId"] != event.eventId
             or ack["stored"] is not True
         ):
-            raise ValueError("webhook ACK does not confirm storage of the expected event")
+            raise ValueError(
+                "webhook ACK does not confirm storage of the expected event"
+            )
 
 
 def _retry_after(value, now):

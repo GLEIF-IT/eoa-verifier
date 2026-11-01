@@ -21,13 +21,15 @@ from keri.db import basing, dbing
 from keri.end import ending
 from keri.peer import exchanging
 from keri.vc import protocoling
-from keri.vdr import credentialing, eventing as veventing, verifying, viring
+from keri.vdr import credentialing, verifying
+from keri.vdr import eventing as veventing
 
 from ..associations.accepting import AcceptanceDoer
 from ..associations.retiring import RetirementDoer
 from ..associations.statusing import StatusEnd
 from ..delivery.delivering import WebhookSender
 from ..persistence.basing import VerifierBaser
+from ..persistence.registry import VerifierReger
 from ..receiving.directing import CesrEnd, Receiver
 from ..receiving.grants import GrantNotificationDoer
 from ..verification.constants import ASSOCIATION_SCHEMA
@@ -140,6 +142,7 @@ class VerifierService(doing.DoDoer):
                 baser=baser,
                 hab=hab,
                 timeout=config.webhook_timeout,
+                max_attempts=config.webhook_max_attempts,
                 interval=config.webhook_interval,
                 backoff_base=config.webhook_backoff_base,
                 backoff_cap=config.webhook_backoff_cap,
@@ -208,7 +211,7 @@ def run_service(config: ServiceConfig, *, expire: float = 0.0):
         keeping.openKS(temp=config.temp, **options) as ks,
         basing.openDB(temp=config.temp, **options) as db,
         configing.openCF(temp=config.temp, **options) as cf,
-        viring.openReger(temp=config.temp, db=db, **options) as reger,
+        dbing.openLMDB(cls=VerifierReger, temp=config.temp, db=db, **options) as reger,
         dbing.openLMDB(cls=VerifierBaser, temp=config.temp, **options) as baser,
         dbing.openLMDB(cls=notifying.Noter, temp=config.temp, **options) as noter,
     ):
