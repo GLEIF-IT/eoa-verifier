@@ -9,19 +9,22 @@ from falcon.testing import TestClient
 from keri.db import dbing
 
 from eoa_verifier.associations.statusing import StatusEnd, StatusQuery
+from eoa_verifier.persistence.associations import AssociationReader
 from eoa_verifier.persistence.basing import VerifierBaser
+from eoa_verifier.persistence.delivery import DeliveryReader
 from eoa_verifier.persistence.keys import nonce_key
-from eoa_verifier.persistence.reading import ApplicationReader
 from eoa_verifier.persistence.records import (
     VerificationRecord,
     VerificationResult,
 )
-from eoa_verifier.persistence.writing import ApplicationWriter
+from eoa_verifier.persistence.scope import ScopeStore
+from eoa_verifier.persistence.verification import VerificationReader
 from tests.support.acceptance import (
     acceptance_service,
     revocation_service,
 )
 from tests.support.issuers import candidate
+from tests.support.persistence import enqueue_verification
 from tests.support.services import verification_service
 
 WORKER = """
@@ -29,8 +32,9 @@ import os, sys
 from keri.db import dbing
 from eoa_verifier.persistence.basing import VerifierBaser
 from eoa_verifier.associations.accepting import AcceptanceService
-from eoa_verifier.persistence.reading import ApplicationReader
-from eoa_verifier.persistence.writing import ApplicationWriter
+from eoa_verifier.persistence.associations import AssociationReader, AssociationWriter
+from eoa_verifier.persistence.verification import VerificationReader
+
 root, said, mode = sys.argv[1:]
 with dbing.openLMDB(cls=VerifierBaser, name="process", headDirPath=root, temp=False) as baser:
     if mode == "race":
@@ -54,7 +58,7 @@ with dbing.openLMDB(cls=VerifierBaser, name="process", headDirPath=root, temp=Fa
                 return result
         baser.env = SimpleNamespace(begin=lambda **kwargs: InterruptedTransaction()
                                     if kwargs.get("write") else env.begin(**kwargs))
-    status = AcceptanceService(ApplicationReader(baser), ApplicationWriter(baser)).accept(said, associationFacts={"issuerAid":"issuer"}, nonce="process-nonce",
+    status = AcceptanceService(AssociationReader(baser), AssociationWriter(baser), verification_reader=VerificationReader(baser)).accept(said, associationFacts={"issuerAid":"issuer"}, nonce="process-nonce",
                           destination="https://receiver.example/hook", peer_aid="peer")
     if mode == "commit":
         os._exit(24)
@@ -64,7 +68,7 @@ with dbing.openLMDB(cls=VerifierBaser, name="process", headDirPath=root, temp=Fa
 
 def verify(baser, said):
     """Seed only initial verification for storage-boundary tests, not intake qualification."""
-    ApplicationWriter(baser).enqueue_verification(VerificationRecord(said, "grant"))
+    enqueue_verification(baser, VerificationRecord(said, "grant"))
     verificationService = verification_service(baser)
     verificationService.start_pending(verificationService.next_pending())
     verification_service(baser).finish(
@@ -120,7 +124,13 @@ def test_global_nonce_rejection_survives_revocation_and_reopen(tmp_path, deliver
         app = falcon.App()
         app.add_route(
             "/v1/associations/{said}/status",
-            StatusEnd(StatusQuery(ApplicationReader(baser))),
+            StatusEnd(
+                StatusQuery(
+                    AssociationReader(baser),
+                    VerificationReader(baser),
+                    DeliveryReader(baser),
+                )
+            ),
         )
         client = TestClient(app)
         response = client.simulate_get("/v1/associations/second/status")
@@ -180,14 +190,14 @@ def test_scope_reopen_does_not_audit_nonce_or_association_values():
     from eoa_verifier.runtime.bootstrap import bind_verification_scope
 
     with dbing.openLMDB(cls=VerifierBaser) as baser:
-        reader, writer = ApplicationReader(baser), ApplicationWriter(baser)
-        bind_verification_scope(reader, writer, trusted_geda_aid="geda", chain_id=1)
+        scope_store = ScopeStore(baser)
+        bind_verification_scope(scope_store, trusted_geda_aid="geda", chain_id=1)
         with baser.env.begin(write=True) as txn:
             txn.put(b"nonce", b"opaque consumed value", db=baser.accepted_nonces.sdb)
             txn.put(
                 b"credential", b"opaque historical value", db=baser.associations.sdb
             )
-        bind_verification_scope(reader, writer, trusted_geda_aid="geda", chain_id=1)
+        bind_verification_scope(scope_store, trusted_geda_aid="geda", chain_id=1)
 
 
 @pytest.mark.parametrize("same_said", [False, True])
@@ -309,9 +319,7 @@ def test_ascii_boundaries_are_preserved_in_lmdb(nonce):
 def test_invalid_nonce_is_rejected_without_consumption(nonce):
     credential = candidate()
     with dbing.openLMDB(cls=VerifierBaser) as baser:
-        ApplicationWriter(baser).enqueue_verification(
-            VerificationRecord("candidate", "grant")
-        )
+        enqueue_verification(baser, VerificationRecord("candidate", "grant"))
         verificationService = verification_service(baser)
         verificationService.start_pending(verificationService.next_pending())
         verification_service(baser).finish(

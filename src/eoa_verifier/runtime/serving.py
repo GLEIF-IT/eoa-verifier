@@ -1,6 +1,7 @@
 """Compose KERIpy intake, initial verification, revocation and status delivery."""
 
 from collections import deque
+from functools import partial
 
 import falcon
 from hio.base import doing
@@ -22,6 +23,13 @@ from keri.vc import protocoling
 from keri.vdr import credentialing, verifying
 from keri.vdr import eventing as veventing
 
+from eoa_verifier.persistence.associations import AssociationReader, AssociationWriter
+from eoa_verifier.persistence.delivery import DeliveryReader, DeliveryWriter
+from eoa_verifier.persistence.grants import GrantReader, GrantWriter
+from eoa_verifier.persistence.scope import ScopeStore
+from eoa_verifier.persistence.transport import claim_nonce
+from eoa_verifier.persistence.verification import VerificationReader, VerificationWriter
+
 from ..associations.accepting import AcceptanceDoer, AcceptanceService
 from ..associations.evidence import AssociationEvidence
 from ..associations.revoking import RevocationDoer, RevocationService
@@ -29,9 +37,7 @@ from ..associations.statusing import StatusEnd, StatusQuery
 from ..delivery.delivering import WebhookSender
 from ..delivery.keys import ServiceKeys
 from ..persistence.basing import VerifierBaser
-from ..persistence.reading import ApplicationReader
 from ..persistence.registry import VerifierReger
-from ..persistence.writing import ApplicationWriter
 from ..receiving.directing import CesrEnd, Receiver
 from ..receiving.grants import GrantNotificationDoer, IpexGrantAdapter
 from ..receiving.replaying import GrantReplayService
@@ -58,8 +64,8 @@ class VerifierService(doing.DoDoer):
         their sockets. kwa is passed to HIO DoDoer.
         """
         self.config = config
-        reader, writer = ApplicationReader(baser), ApplicationWriter(baser)
-        hab = bootstrap_service(config, hby, reader, writer)
+        scope = ScopeStore(baser)
+        hab = bootstrap_service(config, hby, scope)
         notifier = notifying.Notifier(hby=hby, noter=noter)
         exc = exchanging.Exchanger(hby=hby, handlers=[])
         protocoling.loadHandlers(hby=hby, exc=exc, notifier=notifier)
@@ -91,7 +97,13 @@ class VerifierService(doing.DoDoer):
         app.add_route("/health", HealthEnd())
         app.add_route(
             "/v1/associations/{said}/status",
-            StatusEnd(StatusQuery(reader)),
+            StatusEnd(
+                StatusQuery(
+                    AssociationReader(baser),
+                    VerificationReader(baser),
+                    DeliveryReader(baser),
+                )
+            ),
         )
         server = http.Server(
             host=config.host,
@@ -107,7 +119,9 @@ class VerifierService(doing.DoDoer):
         oobiery = oobiing.Oobiery(hby=hby, clienter=httping.Clienter())
         self.notifier, self.parser = notifier, parser
         self.grant_replay = GrantReplayService(
-            reader, writer, IpexGrantAdapter(hby, notifier, parser)
+            GrantReader(baser),
+            GrantWriter(baser),
+            IpexGrantAdapter(hby, notifier, parser),
         )
         doers = [
             *oobiery.doers,
@@ -116,8 +130,8 @@ class VerifierService(doing.DoDoer):
             GrantNotificationDoer(self.grant_replay),
             VerificationCoordinator(
                 service=VerificationService(
-                    reader,
-                    writer,
+                    VerificationReader(baser),
+                    VerificationWriter(baser),
                     CredentialEvidence(rgy),
                     trusted_geda_aid=config.trusted_geda_aid,
                     association_schema=ASSOCIATION_SCHEMA,
@@ -130,33 +144,37 @@ class VerifierService(doing.DoDoer):
         doers.append(
             RevocationDoer(
                 RevocationService(
-                    reader,
-                    writer,
+                    AssociationReader(baser),
+                    AssociationWriter(baser),
                     AssociationEvidence(rgy),
+                    delivery_reader=DeliveryReader(baser),
                 )
             )
         )
         self.sender = None
         if config.webhook_url:
             self.sender = WebhookSender(
-                reader=reader,
-                writer=writer,
+                reader=DeliveryReader(baser),
+                writer=DeliveryWriter(baser),
+                claim_nonce=partial(claim_nonce, baser),
                 keys=ServiceKeys(hab),
                 timeout=config.webhook_timeout,
                 max_attempts=config.webhook_max_attempts,
                 interval=config.webhook_interval,
                 backoff_base=config.webhook_backoff_base,
                 backoff_cap=config.webhook_backoff_cap,
+                association_reader=AssociationReader(baser),
             )
             doers.append(self.sender)
         doers.append(
             AcceptanceDoer(
                 AcceptanceService(
-                    reader,
-                    writer,
+                    AssociationReader(baser),
+                    AssociationWriter(baser),
                     AssociationEvidence(rgy),
                     destination=config.webhook_url,
                     peer_aid=config.webhook_aid,
+                    verification_reader=VerificationReader(baser),
                 ),
             )
         )

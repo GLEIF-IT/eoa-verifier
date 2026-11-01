@@ -1,6 +1,7 @@
 """delivery/test_authing.py."""
 
 from contextlib import ExitStack
+from functools import partial
 from unittest.mock import patch
 
 import pytest
@@ -9,7 +10,7 @@ from keri.help import helping
 
 from eoa_verifier.delivery.authing import AuthenticationError, ServiceAuthenticator
 from eoa_verifier.delivery.keys import ServiceKeys
-from eoa_verifier.persistence.writing import ApplicationWriter
+from eoa_verifier.persistence.transport import claim_nonce
 
 
 def message():
@@ -173,7 +174,7 @@ def test_rotated_peer_state_survives_service_restart(tmp_path):
             runtime.hby.psr.parse(ims=bytearray(remote.rotate()))
             sender = ServiceAuthenticator(
                 keys=ServiceKeys(remote),
-                claim_nonce=ApplicationWriter(runtime.baser).claim_nonce,
+                claim_nonce=partial(claim_nonce, runtime.baser),
                 peer_aid=runtime.hab.pre,
             )
             headers, _ = sender.sign(**message())
@@ -184,7 +185,7 @@ def test_rotated_peer_state_survives_service_restart(tmp_path):
             assert runtime.hab.pre == aid
             receiver = ServiceAuthenticator(
                 keys=ServiceKeys(runtime.hab),
-                claim_nonce=ApplicationWriter(runtime.baser).claim_nonce,
+                claim_nonce=partial(claim_nonce, runtime.baser),
                 peer_aid=remote.pre,
             )
             receiver.verify(**message(), headers=headers)

@@ -17,7 +17,7 @@ external-association profile conformance suite and reference vectors.
 | VerificationService / VerificationCoordinator | tests/verification/test_coordinating.py |
 | StatusQuery / StatusEnd | python -m pytest tests/associations/test_statusing.py |
 | AcceptanceService and atomic acceptance writes | python -m pytest tests/persistence/test_basing.py -k acceptance |
-| Detached readers | tests/persistence/test_reading.py |
+| Detached readers | tests/integration/test_ipex_verification.py and tests/delivery/test_delivering.py |
 | LMDB nonce claims/durability | tests/persistence/test_accepted_nonces.py |
 | Delivery authentication and sender | tests/delivery/test_authing.py and test_delivering.py |
 | Acceptance/revocation workers with witnessed evidence | tests/integration/test_ipex_verification.py |
@@ -63,3 +63,8 @@ callers, fixtures and assertions. `VerificationRecord`, `GrantReplayRecord`,
 membership supplies their lifecycle state. Use state qualifiers with a noun
 when needed, such as `revokedStatus`, rather than labels such as `handoff` or
 `accepted` that conceal the object or become false as it advances.
+
+Feature persistence lives in grants.py, verification.py, associations.py and
+delivery.py. ScopeStore owns startup binding only; transport.claim_nonce is a
+separate authenticated-message replay operation. Test-only verification setup
+lives in tests/support/persistence.py; production enqueue is GrantWriter.complete_grant.

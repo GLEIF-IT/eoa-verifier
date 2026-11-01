@@ -4,12 +4,12 @@ from dataclasses import replace
 
 from hio.base import doing
 
+from eoa_verifier.persistence.associations import NonceConflict
 from eoa_verifier.persistence.records import (
     AssociationStatus,
     DeliveryReference,
     DestinationSchedule,
 )
-from eoa_verifier.persistence.writing import NonceConflict
 
 from .events import status_delivery
 
@@ -18,10 +18,20 @@ class AcceptanceService:
     """Prepare initial status/event records; persistence only enforces atomic uniqueness."""
 
     def __init__(
-        self, reader, writer, evidence=None, *, destination=None, peer_aid=None
+        self,
+        reader,
+        writer,
+        evidence=None,
+        *,
+        verification_reader,
+        destination=None,
+        peer_aid=None,
     ):
-        """Borrow adapters; KERIpy evidence is required only for scheduled acceptance."""
+        """Borrow association persistence and verification-result reads.
+
+        KERIpy evidence is required only for scheduled acceptance."""
         self.reader, self.writer, self.evidence = reader, writer, evidence
+        self.verification_reader = verification_reader
         self.destination, self.peer_aid = destination, peer_aid
 
     def process_one(self):
@@ -52,7 +62,7 @@ class AcceptanceService:
         previous = self.reader.association(credSaid)
         if previous is not None:
             return previous
-        result = self.reader.verification_result(credSaid)
+        result = self.verification_reader.verification_result(credSaid)
         if result is None or result.status != "verified":
             raise ValueError("acceptance requires a completed verified result")
         if bool(destination) != bool(peer_aid):

@@ -70,8 +70,8 @@ slice; these are responsibility placements, not a one-class-per-file mandate.
 
 - `persistence/basing.py`: LMDBer construction, directory constants, table binding
   and resource lifecycle. No clock, retry limit, business outcome or webhook JSON.
-- `persistence/reading.py`: explicit point/head queries returning detached values.
-- `persistence/writing.py`: concrete atomic save operations over prepared records.
+- `persistence/{grants,verification,associations,delivery}.py`: feature readers return detached point/head records.
+- The same feature modules contain explicit writers for their atomic operations.
   Split by feature only if the actual implementation warrants it, not per table.
 - `persistence/records.py`: retain passive serialization contracts. Services may
   prepare these DTOs; policy functions do not receive database handles. No business
@@ -376,3 +376,33 @@ Review and qualification: [Verifier #33](https://github.com/GLEIF-IT/eoa-verifie
 final variable rename, 23 Oracle selection/receipt/posting cases, and 20 Comply
 wallet-association cases. Those PRs record final installed-wheel and paired test
 results against the exact coordinated pins before merge.
+
+
+## Persistence cohesion follow-up
+
+Feature ownership replaces the application-wide reader/writer interfaces:
+
+| Unit | Consumers and atomic responsibility |
+|---|---|
+| GrantReader / GrantWriter | GrantReplayService; active/waiting/dead notices and atomic replay completion plus verification enqueue. |
+| VerificationReader / VerificationWriter | VerificationService; attempt/retry/result transitions, including atomic acceptance enqueue. AcceptanceService borrows verification-result reads explicitly. |
+| AssociationReader / AssociationWriter | AcceptanceService and RevocationService; permanent nonce consumption, status, and associated delivery obligations remain one commit. |
+| DeliveryReader / DeliveryWriter | DeliveryService and WebhookSender; references, progress, scheduling, ACK and recovery. RevocationService borrows delivery reads explicitly. DeliveryService borrows association reads explicitly before sending. |
+| ScopeStore | Startup scope/history-existence checks and immutable scope binding only. |
+| transport.claim_nonce | Authentication replay claim only; bound as a callable at composition. |
+
+StatusQuery explicitly composes association, verification and delivery readers.
+No application-wide facade, transaction object passed through services, or
+independently committing cross-feature calls replaces an atomic write.
+
+Production verification enqueue is GrantWriter.complete_grant. The former
+standalone enqueue method was test-only and fixture setup now lives in tests.
+Fresh pending work and manual retry both initialize attempts/deadline to zero.
+Invalid pending state is rejected unchanged; pending-to-dead is removed.
+Verifying exhaustion survives interrupted work, and waiting exhaustion remains
+necessary when a restarted service has a lower configured attempt budget.
+Deferral and activation retain separate deadline insertion/removal operations.
+
+VerifierReger's atomic TEL projection, evidence/Grant/key adapters and integration
+ReceiptStore retain their focused responsibilities. Storage keys, wire contracts,
+nonce-only consumption, revocation naming and queue priority are unchanged.

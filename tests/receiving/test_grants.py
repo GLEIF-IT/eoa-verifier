@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from eoa_verifier.persistence.writing import ApplicationWriter
+from eoa_verifier.persistence.grants import GrantWriter
 from eoa_verifier.receiving.grants import GrantNotificationDoer, IpexGrantAdapter
 from tests.support.issuers import candidate, signed_notice
 from tests.support.services import entered_service
@@ -55,7 +55,7 @@ def test_internal_failure_preserves_active_grant_record(config, boundary):
         target, method = (
             (runtime.parser, "onceParsator")
             if boundary == "parser"
-            else (ApplicationWriter, "complete_grant")
+            else (GrantWriter, "complete_grant")
         )
         # Include an embed stream only when exercising the parser boundary.
         with (
@@ -220,7 +220,7 @@ def test_completion_rollback_preserves_active_grant(config):
             ),
             pytest.raises(RuntimeError, match="after enqueue"),
         ):
-            ApplicationWriter(runtime.baser).complete_grant(
+            GrantWriter(runtime.baser).complete_grant(
                 record, VerificationRecord("cred", "grant")
             )
         assert runtime.baser.pending.get(keys=("cred",)) is None

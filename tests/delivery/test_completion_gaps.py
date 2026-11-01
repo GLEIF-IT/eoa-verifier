@@ -1,5 +1,7 @@
 """Producer recovery at durable receiver and sender completion boundaries."""
 
+from functools import partial
+
 import falcon
 import pytest
 from hio.base import doing
@@ -9,8 +11,9 @@ from keri.app import habbing
 from eoa_verifier.delivery.authing import ServiceAuthenticator
 from eoa_verifier.delivery.delivering import DeliveryService, WebhookSender
 from eoa_verifier.delivery.keys import ServiceKeys
-from eoa_verifier.persistence.reading import ApplicationReader
-from eoa_verifier.persistence.writing import ApplicationWriter
+from eoa_verifier.persistence.associations import AssociationReader
+from eoa_verifier.persistence.delivery import DeliveryReader, DeliveryWriter
+from eoa_verifier.persistence.transport import claim_nonce
 from scripts.integration.receiver import ReceiptService, ReceiptStore, Receiver
 from tests.support.acceptance import acceptance_service
 from tests.support.network import free_port
@@ -60,10 +63,12 @@ def test_real_sender_recovers_commit_ack_gaps(
         def attempt(*, expect_failure=False):
             """Own HIO HTTP tasks until exactly one durable sender attempt settles."""
             sender = WebhookSender(
-                reader=ApplicationReader(baser),
-                writer=ApplicationWriter(baser),
+                reader=DeliveryReader(baser),
+                writer=DeliveryWriter(baser),
                 keys=ServiceKeys(sender_hab),
                 timeout=1,
+                claim_nonce=partial(claim_nonce, baser),
+                association_reader=AssociationReader(baser),
             )
             starting = baser.outbox.get(keys=(associationStatus.eventId,)).attempts
 

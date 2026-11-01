@@ -94,15 +94,11 @@ class VerificationService:
         return active
 
     def start_pending(self, record):
-        """Charge one pending attempt, or dead-letter exhausted pending work."""
-        if record.attempts >= self.max_attempts:
-            dead = replace(
-                record,
-                reason=record.reason
-                or "verification interrupted; attempt budget exhausted",
+        """Charge the first attempt of valid fresh pending work."""
+        if record.attempts != 0 or record.nextAttemptAt != 0 or self.max_attempts < 1:
+            raise ValueError(
+                "pending verification requires a fresh attempt and positive budget"
             )
-            self.writer.pending_to_dead_letter(record, dead)
-            return None
         active = replace(
             record,
             attempts=record.attempts + 1,

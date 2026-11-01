@@ -34,6 +34,7 @@ class DeliveryService:
         writer,
         transport=None,
         *,
+        association_reader,
         interval=1.0,
         backoff_base=1.0,
         backoff_cap=150.0,
@@ -43,6 +44,7 @@ class DeliveryService:
     ):
         """Borrow adapters; transport is unnecessary for offline recovery operations."""
         self.reader, self.writer, self.transport = reader, writer, transport
+        self.association_reader = association_reader
         self.interval, self.backoff_base, self.backoff_cap = (
             interval,
             backoff_base,
@@ -145,7 +147,7 @@ class DeliveryService:
             if delivery is None:
                 return
             self.start_ready(delivery)
-        status = self.reader.association(delivery.associationSaid)
+        status = self.association_reader.association(delivery.associationSaid)
         if (
             status is None
             or status.status not in ("accepted", "revoked")
@@ -254,6 +256,8 @@ class WebhookSender(doing.DoDoer):
         reader,
         writer,
         keys,
+        claim_nonce,
+        association_reader,
         timeout=10.0,
         interval=1.0,
         backoff_base=1.0,
@@ -263,11 +267,14 @@ class WebhookSender(doing.DoDoer):
         max_attempts=3,
         **kwa,
     ):
-        """Compose the delivery service with this scheduler's HTTP client adapter."""
+        """Borrow delivery persistence and a transport replay-claim callable.
+
+        Compose the delivery service with this scheduler's HTTP client adapter."""
         self.service = DeliveryService(
             reader,
             writer,
-            WebhookHttp(self, keys, writer.claim_nonce, timeout=timeout),
+            WebhookHttp(self, keys, claim_nonce, timeout=timeout),
+            association_reader=association_reader,
             interval=interval,
             backoff_base=backoff_base,
             backoff_cap=backoff_cap,

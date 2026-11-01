@@ -4,14 +4,16 @@ import falcon
 from falcon.testing import TestClient
 
 from eoa_verifier.associations.statusing import StatusEnd, StatusQuery
-from eoa_verifier.persistence.reading import ApplicationReader
+from eoa_verifier.persistence.associations import AssociationReader
+from eoa_verifier.persistence.delivery import DeliveryReader
 from eoa_verifier.persistence.records import (
     DestinationSchedule,
     VerificationRecord,
     VerificationResult,
 )
-from eoa_verifier.persistence.writing import ApplicationWriter
+from eoa_verifier.persistence.verification import VerificationReader
 from tests.support.acceptance import accept_verified_result, acceptance_service
+from tests.support.persistence import enqueue_verification
 from tests.support.services import delivery_service, verification_service
 
 
@@ -21,19 +23,23 @@ def test_public_get_returns_stored_status_and_old_observation(verified_store):
     app = falcon.App()
     app.add_route(
         "/v1/associations/{said}/status",
-        StatusEnd(StatusQuery(ApplicationReader(baser))),
+        StatusEnd(
+            StatusQuery(
+                AssociationReader(baser),
+                VerificationReader(baser),
+                DeliveryReader(baser),
+            )
+        ),
     )
     client = TestClient(app)
-    ApplicationWriter(baser).enqueue_verification(
-        VerificationRecord("rejected", "grant")
-    )
+    enqueue_verification(baser, VerificationRecord("rejected", "grant"))
     verificationService = verification_service(baser)
     verificationService.start_pending(verificationService.next_pending())
     verification_service(baser).finish(
         VerificationResult("rejected", "rejected", "wrong schema")
     )
-    ApplicationWriter(baser).enqueue_verification(
-        VerificationRecord("pending", "grant", "missing source")
+    enqueue_verification(
+        baser, VerificationRecord("pending", "grant", "missing source")
     )
     for said, status in (
         ("pending", "pending"),
@@ -61,7 +67,13 @@ def test_public_status_does_not_disclose_other_delivery_activity(verified_store)
     app = falcon.App()
     app.add_route(
         "/v1/associations/{said}/status",
-        StatusEnd(StatusQuery(ApplicationReader(baser))),
+        StatusEnd(
+            StatusQuery(
+                AssociationReader(baser),
+                VerificationReader(baser),
+                DeliveryReader(baser),
+            )
+        ),
     )
     client = TestClient(app)
     path = "/v1/associations/association/status"
@@ -69,7 +81,7 @@ def test_public_status_does_not_disclose_other_delivery_activity(verified_store)
 
     # A different association's event shares this destination.
     result = baser.results.get(keys=("association",))
-    ApplicationWriter(baser).enqueue_verification(VerificationRecord("other", "grant"))
+    enqueue_verification(baser, VerificationRecord("other", "grant"))
     verificationService = verification_service(baser)
     verificationService.start_pending(verificationService.next_pending())
     verification_service(baser).finish(
@@ -104,12 +116,16 @@ def test_waiting_and_dead_letter_are_passive_statuses(verified_store):
     app = falcon.App()
     app.add_route(
         "/v1/associations/{said}/status",
-        StatusEnd(StatusQuery(ApplicationReader(baser))),
+        StatusEnd(
+            StatusQuery(
+                AssociationReader(baser),
+                VerificationReader(baser),
+                DeliveryReader(baser),
+            )
+        ),
     )
     client = falcon.testing.TestClient(app)
-    ApplicationWriter(baser).enqueue_verification(
-        VerificationRecord("waiting", "grant")
-    )
+    enqueue_verification(baser, VerificationRecord("waiting", "grant"))
     verificationService = verification_service(baser, clock=lambda: 100)
     verification = verificationService.start_pending(verificationService.next_pending())
     verification_service(baser).defer_verification(
