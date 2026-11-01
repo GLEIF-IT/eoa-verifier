@@ -1,6 +1,6 @@
 # Separate application work from persistence and transport
 
-Status: Five implementation slices prepared; final installed-wheel and paired qualification gates completion.
+Status: Implemented in five slices; installed-wheel CI and paired qualification passed.
 Scope: eoa-verifier application code, its tests and affected integration tooling.
 Source reviewed: `3a36fe33642de0ae8c2bdc1f940417eb13301f54` (runtime tree from the merged naming refactor).
 Dependency reference: installed GLEIF KERI 1.2.19 and HIO 0.6.22, as pinned in pyproject.toml.
@@ -285,7 +285,14 @@ qualification and the qualified contract revision.
 
 - Slice 4: [PR #31](https://github.com/GLEIF-IT/eoa-verifier/pull/31), delivery service with explicit outcomes, owned HTTP adapter, pure signature codec and KERIpy key adapter. Focused checks: 106 passed; late-completion and public retirement checks passed.
 
-- Slice 5: bootstrap and fixture receipt separation, final documentation, and explicit named persistence transitions throughout. Removed the intermediate `move_grant`, `move_verification`, directional acceptance and flag-driven delivery saves. Focused transition/lifecycle checks: 89 passed. Final adapter/runtime/receipt checks: 26 passed. Final installed-wheel and paired evidence is recorded in the PRs.
+- Slice 5: [PR #32](https://github.com/GLEIF-IT/eoa-verifier/pull/32), bootstrap and fixture receipt separation, final documentation, and explicit named persistence transitions throughout. Removed the intermediate `move_grant`, `move_verification`, directional acceptance and flag-driven delivery saves. Focused transition/lifecycle checks: 89 passed. Final adapter/runtime/receipt checks: 26 passed. Installed-wheel CI: 249 passed. Tests use explicit runtime notifier/parser/replay-service handles; the duplicate-Grant lookup closes its reader before replay.
+
+Final coordinated qualification: [Oracle PR #59](https://github.com/GLEIF-IT/vlei-oracle/pull/59)
+pins verifier `a778f865d6c1df17fb1e8bc7d5c03ff946732435` and retains contract
+`d6083e34fbe57641cdc0e7253db18f14ce1e4a35`. Oracle's full installed-wheel suite,
+including the maintained paired scenario, passed all 73 tests both locally and in
+CI. The verifier follow-up after that producer commit changes only test reader
+lifetime and this evidence record; package and integration tooling are unchanged.
 
 ## Validation and completion criteria
 
