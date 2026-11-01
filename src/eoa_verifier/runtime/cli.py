@@ -121,6 +121,10 @@ def main(argv=None):
 
         from eoa_verifier.persistence.basing import VerifierBaser
 
+        from eoa_verifier.persistence.reading import ApplicationReader
+        from eoa_verifier.persistence.writing import ApplicationWriter
+        from eoa_verifier.receiving.replaying import GrantReplayService
+
         try:
             with dbing.openLMDB(
                 cls=VerifierBaser,
@@ -132,7 +136,9 @@ def main(argv=None):
                 actions = {
                     "retry-delivery": baser.retry_delivery,
                     "retry-verification": baser.retry_verification,
-                    "retry-grant": baser.retry_grant,
+                    "retry-grant": GrantReplayService(
+                        ApplicationReader(baser), ApplicationWriter(baser)
+                    ).retry,
                     "retry-acceptance": baser.retry_acceptance,
                 }
                 actions[args["command"]](args["identifier"])

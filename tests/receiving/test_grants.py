@@ -21,8 +21,8 @@ def test_consumed_notification_removes_note_and_signal(config, kind):
         attrs = {"r": "/exn/ipex/grant", "d": "grant"}
         if kind == "unrelated":
             attrs["r"] = "/exn/ipex/offer"
-        grants.notifier.add(attrs)
-        noter = grants.notifier.noter
+        grants.service.native.notifier.add(attrs)
+        noter = grants.service.native.notifier.noter
         notice, _ = noter.getNotes()[0]
         association = candidate()
         if kind == "malformed":
@@ -32,7 +32,7 @@ def test_consumed_notification_removes_note_and_signal(config, kind):
             "eoa_verifier.receiving.grants.exchanging.cloneMessage",
             return_value=(SimpleNamespace(ked={"e": {"acdc": association}}), {}),
         ):
-            grants.process_notes()
+            grants.service.process_one()
         assert noter.getNotes() == []
         assert noter.nidx.get(keys=(notice.rid,)) is None
         assert noter.ncigs.get(keys=(notice.rid,)) is None
@@ -50,13 +50,13 @@ def test_internal_failure_preserves_active_grant_record(config, boundary):
     runtime = lifetime.enter_context(entered_service(config))
     try:
         grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
-        grants.notifier.add({"r": "/exn/ipex/grant", "d": "grant"})
-        notice, _ = grants.notifier.noter.getNotes()[0]
+        grants.service.native.notifier.add({"r": "/exn/ipex/grant", "d": "grant"})
+        notice, _ = grants.service.native.notifier.noter.getNotes()[0]
         association = candidate()
         target, method = (
-            (grants.parser, "onceParsator")
+            (grants.service.native.parser, "onceParsator")
             if boundary == "parser"
-            else (runtime.baser, "enqueue")
+            else (grants.service.writer, "complete_grant")
         )
         # Include an embed stream only when exercising the parser boundary.
         with (
@@ -70,7 +70,7 @@ def test_internal_failure_preserves_active_grant_record(config, boundary):
             patch.object(target, method, side_effect=ValueError("internal failure")),
             pytest.raises(ValueError, match="internal failure"),
         ):
-            grants.process_notes()
+            grants.service.process_one()
         assert runtime.baser.grant_active.get(keys=("receiver",)).noticeId == notice.rid
         assert runtime.baser.pending.get(keys=(association["d"],)) is None
     finally:
@@ -83,11 +83,11 @@ def test_missing_grant_waits_durably_without_blocking_native_notices(config):
     runtime = lifetime.enter_context(entered_service(config))
     try:
         grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
-        grants.notifier.add({"r": "/exn/ipex/grant", "d": "missing"})
-        notice, _ = grants.notifier.noter.getNotes()[0]
-        grants.process_notes()
+        grants.service.native.notifier.add({"r": "/exn/ipex/grant", "d": "missing"})
+        notice, _ = grants.service.native.notifier.noter.getNotes()[0]
+        grants.service.process_one()
         assert runtime.baser.grant_waiting.get(keys=(notice.rid,)).attempts == 1
-        assert grants.notifier.noter.getNoteCnt() == 0
+        assert grants.service.native.notifier.noter.getNoteCnt() == 0
     finally:
         lifetime.close()
 
@@ -122,16 +122,16 @@ def test_signed_bad_embed_is_consumed_and_valid_work_progresses(config, bad):
 
             scheduler = doing.Doist(tock=0.01, limit=0.02)
             scheduler.do(doers=[grants, Heartbeat()])
-            assert ticks and grants.notifier.noter.getNotes() == []
+            assert ticks and grants.service.native.notifier.noter.getNotes() == []
             good = candidate()
             signed_notice(runtime, grants, sender, good)
-            grants.process_notes()
+            grants.service.process_one()
             assert runtime.baser.pending.get(keys=(good["d"],)) is not None
         lifetime.close()
         lifetime = ExitStack()
         runtime = lifetime.enter_context(entered_service(config))
         grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
-        assert grants.notifier.noter.getNotes() == []
+        assert grants.service.native.notifier.noter.getNotes() == []
     finally:
         lifetime.close()
 
@@ -142,27 +142,27 @@ def test_one_notice_per_turn_and_bounded_missing_material(config):
 
     with entered_service(config) as runtime:
         grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
-        grants.clock = lambda: 100
-        grants.notifier.add({"r": "/exn/ipex/grant", "d": "missing"})
-        grants.notifier.add({"r": "/unrelated", "d": "later"})
+        grants.service.clock = lambda: 100
+        grants.service.native.notifier.add({"r": "/exn/ipex/grant", "d": "missing"})
+        grants.service.native.notifier.add({"r": "/unrelated", "d": "later"})
         counts = []
 
         class Heartbeat(doing.Doer):
             def recur(self, tyme):
-                counts.append(grants.notifier.noter.getNoteCnt())
+                counts.append(grants.service.native.notifier.noter.getNoteCnt())
                 return len(counts) == 3
 
         doing.Doist(tock=0.01, limit=0.03).do(doers=[grants, Heartbeat()])
         assert counts[:2] == [1, 0]
         assert runtime.baser.grant_waiting.cntAll() == 1
         for now in (105, 110):
-            grants.clock = lambda now=now: now
-            grants.process_notes()
+            grants.service.clock = lambda now=now: now
+            grants.service.process_one()
         assert runtime.baser.grant_waiting.cntAll() == 0
         assert runtime.baser.grant_dead.cntAll() == 1
         key, grantRecord = next(runtime.baser.grant_dead.getItemIter())
         assert grantRecord.attempts == 3 and "missing" in grantRecord.reason
-        runtime.baser.retry_grant(grantRecord.noticeId)
+        grants.service.retry(grantRecord.noticeId)
         assert runtime.baser.grant_dead.cntAll() == 0
         assert runtime.baser.grant_waiting.get(keys=key).attempts == 0
 
@@ -171,21 +171,61 @@ def test_interrupted_grant_record_reopens_without_native_notice(config):
     """A removed native notice is recoverable entirely from the application's active phase."""
     with entered_service(config) as runtime:
         grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
-        grants.notifier.add({"r": "/exn/ipex/grant", "d": "missing"})
+        grants.service.native.notifier.add({"r": "/exn/ipex/grant", "d": "missing"})
         with (
             patch.object(
-                grants, "process_grant_notice", side_effect=RuntimeError("interrupted")
+                grants.service.native, "replay", side_effect=RuntimeError("interrupted")
             ),
             pytest.raises(RuntimeError),
         ):
-            grants.process_notes()
-        assert grants.notifier.noter.getNoteCnt() == 0
+            grants.service.process_one()
+        assert grants.service.native.notifier.noter.getNoteCnt() == 0
         grantRecord = runtime.baser.grant_active.get(keys=("receiver",))
         assert grantRecord.attempts == 1
     with entered_service(config) as runtime:
         grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
-        grants.process_notes()
+        grants.service.process_one()
         assert runtime.baser.grant_active.cntAll() == 0
         assert (
             runtime.baser.grant_waiting.get(keys=(grantRecord.noticeId,)).attempts == 2
         )
+
+
+def test_completion_rollback_preserves_active_grant(config):
+    """Failure after enqueue aborts both writes, so restart can safely replay."""
+    from eoa_verifier.persistence.records import GrantReplayRecord, VerificationRecord
+
+    with entered_service(config) as runtime:
+        grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
+        record = GrantReplayRecord("notice", {}, attempts=1)
+        runtime.baser.grant_active.pin(keys=("receiver",), val=record)
+        env = runtime.baser.env
+
+        class Transaction:
+            def __enter__(self):
+                self.txn = env.begin(write=True)
+                return self
+
+            def __exit__(self, kind, value, traceback):
+                self.txn.abort() if kind else self.txn.commit()
+
+            def get(self, *args, **kwa):
+                return self.txn.get(*args, **kwa)
+
+            def put(self, *args, **kwa):
+                return self.txn.put(*args, **kwa)
+
+            def delete(self, *args, **kwa):
+                raise RuntimeError("after enqueue")
+
+        with (
+            patch.object(
+                runtime.baser, "env", SimpleNamespace(begin=lambda **kwa: Transaction())
+            ),
+            pytest.raises(RuntimeError, match="after enqueue"),
+        ):
+            grants.service.writer.complete_grant(
+                record, VerificationRecord("cred", "grant")
+            )
+        assert runtime.baser.pending.get(keys=("cred",)) is None
+        assert runtime.baser.grant_active.get(keys=("receiver",)) == record

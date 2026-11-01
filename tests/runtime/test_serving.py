@@ -213,4 +213,4 @@ def test_runtime_has_one_receiver_and_no_mailbox(config):
             grants = next(
                 d for d in service.doers if isinstance(d, GrantNotificationDoer)
             )
-            assert grants.parser is receivers[0].parser
+            assert grants.service.native.parser is receivers[0].parser

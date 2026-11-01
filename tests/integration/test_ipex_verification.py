@@ -342,7 +342,10 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             )
             for _, exn in runtime.hby.db.exns.getItemIter():
                 if exn.ked.get("e", {}).get("acdc", {}).get("d") == creder.said:
-                    intake.process_grant_notice({"d": exn.said})
+                    intake.service.native.notifier.add(
+                        {"r": "/exn/ipex/grant", "d": exn.said}
+                    )
+                    intake.service.process_one()
                     break
             else:
                 raise AssertionError("accepted Grant not found")

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
 from hio.base import doing
@@ -10,8 +9,7 @@ from keri import kering
 from keri.core import serdering
 from keri.peer import exchanging
 
-from eoa_verifier.persistence.basing import VerifierBaser
-from eoa_verifier.persistence.records import VerificationRecord
+from eoa_verifier.persistence.records import GrantReplayRecord, VerificationRecord
 
 
 class GrantNotReadyError(Exception):
@@ -23,88 +21,38 @@ class InvalidGrantError(ValueError):
 
 
 class GrantNotificationDoer(doing.Doer):
-    """Turn authenticated IPEX notifications into durable verification work.
+    """Schedule one application replay operation per HIO turn."""
 
-    Accepted Grant signatures authenticate delivery; they do not establish KERIpy
-    ACDC acceptance. Embedded evidence is replayed through the shared parser,
-    which may escrow it. The coordinator separately checks credential acceptance.
-    Missing Grant material moves to durable waiting with a finite retry budget.
-    """
-
-    def __init__(
-        self,
-        *,
-        baser: VerifierBaser,
-        hby,
-        notifier,
-        parser,
-        clock=time.time,
-        retry_delay=5.0,
-        max_attempts=3,
-        **kwa,
-    ):
-        """Borrow a work store, Habery, KERIpy Notifier and shared inbound parser.
-
-        The outer resource contexts own stores; the service schedules parser/escrows;
-        this Doer only consumes notifications and creates work. kwa supplies HIO options.
-        """
-        self.baser = baser
-        self.hby = hby
-        self.notifier = notifier
-        self.parser = parser
-        self.clock, self.retry_delay, self.max_attempts = (
-            clock,
-            retry_delay,
-            max_attempts,
-        )
+    def __init__(self, service, **kwa):
+        """Borrow the replay service; resource ownership remains with the runtime."""
+        self.service = service
         super().__init__(**kwa)
 
     def recur(self, tyme):
-        """Process notices synchronously on this HIO turn and return False to remain scheduled."""
-
-        _ = tyme
-        self.process_notes()
+        """Advance one item and remain scheduled."""
+        self.service.process_one()
         return False
 
-    def process_notes(self) -> None:
-        """Handoff and replay at most one notice; missing material cannot block fresh notices.
 
-        Active work is durable before the native notice is removed. Replay and
-        enqueue are idempotent if interruption occurs before acknowledgement.
-        Missing material waits on a persistent UTC deadline; three attempts exhaust
-        the budget. Invalid material goes directly to a diagnostic dead letter.
-        """
+class NativeGrantAdapter:
+    """Read native notices and replay authenticated EXN embeds through KERIpy."""
+
+    def __init__(self, hby, notifier, parser):
+        """Borrow native stores and parser without assuming their lifecycle."""
+        self.hby, self.notifier, self.parser = hby, notifier, parser
+
+    def next_notice(self):
+        """Detach the oldest native notice into an application Grant record."""
         noter = self.notifier.noter
         with noter.env.begin(db=noter.notes.sdb) as txn, txn.cursor() as cursor:
             notice = (
                 noter.notes.klas(raw=bytes(cursor.value())) if cursor.first() else None
             )
-        grantRecord = self.baser.begin_grant(
-            notice, now=self.clock(), max_attempts=self.max_attempts
-        )
-        if grantRecord is None:
-            # Recover interruption before acknowledging a notice whose final
-            # replay attempt was already charged and subsequently dead-lettered.
-            if notice is not None and self.baser.grant_dead.get(keys=(notice.rid,)):
-                noter.rem(notice.rid)
-            return
-        noter.rem(grantRecord.noticeId)
-        try:
-            if grantRecord.attrs.get("r") == "/exn/ipex/grant":
-                self.process_grant_notice(grantRecord.attrs)
-        except GrantNotReadyError as exc:
-            self.baser.settle_grant(
-                grantRecord,
-                reason=str(exc) or type(exc).__name__,
-                next_attempt_at=self.clock() + self.retry_delay,
-                max_attempts=self.max_attempts,
-            )
-        except InvalidGrantError as exc:
-            self.baser.settle_grant(
-                grantRecord, reason=str(exc) or type(exc).__name__, invalid=True
-            )
-        else:
-            self.baser.settle_grant(grantRecord)
+        return GrantReplayRecord(notice.rid, notice.attrs) if notice else None
+
+    def remove_notice(self, notice_id):
+        """Acknowledge a native notice only after application work is durable."""
+        self.notifier.noter.rem(notice_id)
 
     def _replay_embed(self, ims):
         """Advance KERIpy parsing once for a complete, fixed embed frame.
@@ -125,8 +73,8 @@ class GrantNotificationDoer(doing.Doer):
         finally:
             parser.close()
 
-    def process_grant_notice(self, attrs: dict[str, Any]) -> None:
-        """Replay a decoded Grant’s embeds and enqueue a candidate for verification.
+    def replay(self, attrs: dict[str, Any]) -> VerificationRecord:
+        """Replay a decoded Grant’s embeds and return detached verification work.
 
         Only supplied embeds with attachments are replayed. KERIpy parsing may escrow
         evidence; creating work does not assert acceptance. Repeated matching Grants
@@ -144,7 +92,7 @@ class GrantNotificationDoer(doing.Doer):
             except kering.ValidationError as exc:
                 raise InvalidGrantError(str(exc)) from exc
 
-        self.baser.enqueue(VerificationRecord(creder.said, grant_said))
+        return VerificationRecord(creder.said, grant_said)
 
     def _read_grant(self, attrs):
         """Return (Grant SAID, KERIpy ACDC, replay bytearrays) from notification attributes.
