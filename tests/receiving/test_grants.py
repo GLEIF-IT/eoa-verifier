@@ -44,7 +44,7 @@ def test_consumed_notification_removes_note_and_signal(config, kind):
 
 
 @pytest.mark.parametrize("boundary", ["parser", "storage"])
-def test_internal_failure_preserves_active_handoff(config, boundary):
+def test_internal_failure_preserves_active_grant_record(config, boundary):
     """Inject parser/storage errors after valid decoding and prove the KERIpy notice remains retryable."""
     lifetime = ExitStack()
     runtime = lifetime.enter_context(entered_service(config))
@@ -167,7 +167,7 @@ def test_one_notice_per_turn_and_bounded_missing_material(config):
         assert runtime.baser.grant_waiting.get(keys=key).attempts == 0
 
 
-def test_interrupted_handoff_reopens_without_native_notice(config):
+def test_interrupted_grant_record_reopens_without_native_notice(config):
     """A removed native notice is recoverable entirely from the application's active phase."""
     with entered_service(config) as runtime:
         grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
