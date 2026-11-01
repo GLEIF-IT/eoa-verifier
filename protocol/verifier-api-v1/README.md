@@ -55,93 +55,74 @@ reassessments. Initial source-chain validation remains mandatory.
 
 ## Delivery and revocation
 
-The sender resumes explicit LMDB delivery phases across restart, validates HTTP success,
-the signed request reference and event-storage acknowledgment before completion, and
-signs every retry anew. Permanent failures stay blocked until correction and
-explicit resumption; transient failures retry up to a finite attempt budget. Acceptance events replaced by terminal revocation
-remain stored but are not sent after revocation.
+A webhook requires only `--webhook-url`. The target can be entirely KERI unaware:
+Verifier signs requests with its own AID, and the target chooses whether to verify.
+No receiver AID, shared secret, registration or signed response is required.
+Oracle chooses to verify requests and authorize its configured Verifier AID.
 
-Completed verification queues acceptance atomically. Acceptance consumes that
-phase and queues its webhook obligation atomically. Delivery references move from
-ready to one active slot, then leave active work on ACK or move to dead letters.
-Completed results and outbox history are never scanned to discover delivery work.
+Verification queues acceptance atomically. Acceptance consumes its phase and
+queues its immutable event/destination atomically. One HIO sender advances durable
+ready/active/dead references; it never scans completed history for work. A complete
+2xx response completes delivery after verification of any supplied signature.
+The response body can be empty or arbitrary; no common JSON ACK is required.
+Public `delivery.delivered` means HTTP success, not independently proven storage
+or Ethereum publication. Oracle returns success only after its durable commit.
 
-Persist acceptance and its webhook obligation together. Deliver after commit;
-the receiver durably stores the status before acknowledging. Retry unacknowledged
-events across restart, preserving event identity and duplicate-safe processing.
+Keep one request in flight, at least one second between starts, a ten-second
+request timeout and three attempts by default. Transient errors use persisted
+jittered backoff and Retry-After; permanent errors require correction and manual
+resumption. Retry identical event bytes. No implicit redirects. A valid signed
+error is still an error; an invalid signature never falls back to unsigned success.
 
-Use one HIO sender per configured destination. Configurable defaults are one
-request in flight, at least one second between starts (including successes),
-a 10-second overall request timeout, and three attempts per event before dead-lettering. Transient failures use jittered
-exponential backoff from 1–2 seconds to a 150–300-second cap; valid `Retry-After`
-can extend that delay. Persist destination-wide cooldown across restart, reset
-failures only on an authenticated ACK, and retain permanent errors for correction.
-Retry the immutable event with a fresh signature; never discard failed events.
-Only the worker retries, using yielding waits. These are operational defaults,
-not cryptographic requirements; the authenticated ACK protocol is unchanged.
-
-Associations arrive through IPEX Grant with supporting KERI evidence.
-Receiving a Grant or credential bytes alone do not prove revocation. The issuer issues
-the credential TEL revocation. After KERIpy validates that evidence, the verifier
-records revoked association status and a separate webhook obligation requiring its own
-acknowledgement. Revocation survives restart and duplicate/reordered delivery;
-an older success event cannot restore a revoked association.
-
-Sign outbound requests with the EOA Verifier AID using KERI HTTP
-`Signature-Input`/`Signature` headers and authenticated body-digest coverage.
-The configured target is assumed capable of verification; vlei-oracle is the
-initial consumer. Authenticate service requests/replies and acknowledgements
-against configured AIDs, binding the payload, peer/action and request/response.
-Preserve transport expiry/replay protection and same-AID rotation across restart.
-Initially support single-key transferable service AIDs with threshold one.
-Transport-message expiry does not expire an accepted association. The public
-status route below is outside this authenticated service protocol.
+After KERIpy validates the issuer's credential TEL revocation, Verifier records
+revoked association status and a separate delivery obligation. Do not send an
+older acceptance after local revocation. Duplicate/reordered status events cannot
+restore a revoked Oracle association. Permanent association nonce consumption is
+unchanged and independent of HTTP signatures.
 
 ## Transport signature profile
 
-`ServiceAuthenticator` implements this profile with the pinned KERIpy
-`Signature-Input` and CESR `Signature` primitives. This is the KERIpy signing
-format, not a general RFC 9421 implementation. The webhook sender uses these
-primitives; the oracle owns its durable receiver endpoint. The caller
-supplies exact body bytes, actual HTTP method
-and absolute target URL (including query), matched to its configured destination.
-Expected action and peer trust come from configuration/operation, not incoming headers.
+`HttpSignatures` uses pinned KERIpy `Signature-Input` and CESR `Signature` helpers.
+It is not a general RFC 9421 implementation. Label `sig0` covers, in order,
+`@method`, `@path`, and `content-digest`. Content-Digest is SHA-256 over the exact
+transmitted bytes. Signature-Input `keyid` declares the source AID; `created` and
+`alg=ed25519` are KERIpy signature parameters. No application-specific headers,
+attempt nonces, expiry, audience or request-reference fields are used.
 
-Configuration rejects path/query spellings that the pinned HIO client rewrites.
-For example, `?memo=a+b&path=%2F` is preserved; `?memo=a%20b`, repeated parameter
-names, bare parameters and percent-escaped paths are rejected before startup.
-Include an explicit path (`/` for the root endpoint); leading `//` paths are unsupported.
-Use the same supported URL on both peers. Existing event destinations stay immutable.
+For responses, method/path refer to the initiating HTTP request, following KERIA's
+signed-header pattern. Signature coverage does not include HTTP status, origin,
+query or a unique attempt. `created` is metadata, not a freshness requirement.
+These are signed contents, not portable per-attempt storage receipts. Use HTTPS
+for target authentication and transport integrity. Accepting unsigned responses
+necessarily permits signature stripping outside an authenticated transport.
 
-Signature label `sig0` covers, in order: `@method`, `@path`, `content-digest`,
-`content-type`, `eoa-target`, `eoa-audience`, `eoa-action`, `eoa-request`,
-`eoa-status`. The digest is SHA-256 over the exact bytes; content type is
-`application/json`. Target is the full URL; audience is the receiving AID.
-Action identifies the expected operation. Requests use an empty request reference
-and status `0`; ACKs use action `ack`, HTTP status `200` and the original
-`nonce:Content-Digest` reference. The actual response status must also be `200`.
-ACK policy belongs to the webhook delivery components, which use the common
-`sign()` and `verify()` operations. The webhook receiver signs after durable
-storage; the sender validates response status, request/event correlation and
-application ACK payload before completing delivery. Authentication alone can
-succeed for a signed error response and does not imply delivery success.
+Verifier checks signatures whenever either Signature or Signature-Input is
+present. Both must be complete and valid; digest mismatch, unknown signing key
+state, malformed signatures and invalid signatures fail delivery. With neither
+header, normal HTTP result handling applies. A digest header alone does not opt
+into signature verification. There is no target-specific authentication mode.
 
-KERIpy signature parameters include the sender AID as key ID, context
-`eoa-verifier/v1`, algorithm `ed25519`, a random 128-bit hexadecimal attempt nonce,
-and created/expiry UTC seconds. The configurable maximum lifetime defaults to
-60 seconds, with no clock-skew allowance. Expired or future-created messages fail;
-transport expiry has no effect on association validity.
+Resolve `keyid` only against locally accepted current KERI key state. The header
+never authorizes an arbitrary Oracle producer or supplies a trusted public key.
+Oracle checks the signer against `--verifier-aid`. Verifier verifies response
+signers without a required destination-AID setting; operators opting into signed
+responses provide their KEL through existing CESR intake and update it on rotation.
+Unknown keys are not fetched automatically. Initially support single-key,
+threshold-one transferable service AIDs; retain rotation/restart verification.
 
-Verify only the configured peer's locally accepted current key. Rotation needs
-KERIpy event acceptance; after rotation, old-key attempts fail and a retry signs
-anew. There is no network key refresh in this helper. After authentication, an
-insert-only peer/nonce claim rejects replay across restart. Claims are retained persistently. A lost ACK is retried with a fresh nonce and the same immutable
-application event; event deduplication remains separate. Missing keys or invalid
-signatures never consume a nonce or establish application acceptance.
+Exact replay can verify. Oracle deduplicates durably by eventId and exact body,
+checks revision order and terminal revocation, and adds no work on redelivery.
+There is no transport nonce database. Signature verification does not claim
+application persistence or Ethereum publication.
+
+HIO URL rendering restrictions remain: use an explicit path and a spelling the
+client preserves. Percent-escaped paths, leading //, duplicate query names and
+other rewritten query spellings remain rejected. Query parameters are transported
+but not signed; Oracle's configured route/query validation remains separate.
 
 ## Downstream consumers
 
-Durable delivery ACK, Oracle selection and confirmed on-chain endorsement are
+HTTP delivery completion, Oracle selection and confirmed on-chain endorsement are
 separate milestones. Oracle owns [oracle-api-v1](https://github.com/GLEIF-IT/vlei-oracle/blob/main/protocol/oracle-api-v1/README.md),
 including ownership, replacement and withdrawal. Oracle supersession is not a
 verifier status and cannot revoke acceptance here. Contracts own their
@@ -163,7 +144,7 @@ selection decision, not a verifier status.
 
 [carrier]: ../external-association-v1/eoa-v1/README.md
 
-## Status event and application ACK
+## Status event and HTTP completion
 
 The initial acceptance shape is:
 
@@ -200,19 +181,22 @@ Verified association revocation creates a second event: `statusRevision: 2`,
 `reasonCode: "REVOKED"`. Keep the original `association` and `accountObservation` objects;
 the issuance anchor must not become the revocation anchor. Commit revocation and
 this event together, using the original delivery destination. Revocation is terminal
-for that SAID and requires its own ACK; the initial event’s ACK cannot complete it.
+for that SAID and requires its own successful delivery; completion of the initial
+event cannot complete the revocation event.
 
 POST the exact stored bytes to the configured destination with the service
-signature profile. Completion requires an authenticated HTTP 200 response bound
-to that attempt, with exactly this JSON object (`stored` is a boolean):
+signature profile. Any complete HTTP 2xx response completes delivery after any
+supplied signature verifies. There is no required response body. Oracle returns
+a signed storage result like this after committing (`stored` is a boolean):
 
 ```json
 {"eventId": "example-association:1", "stored": true}
 ```
 
-The receiver signs only after durable status-event storage. Redelivery keeps the event/body
-and gets a fresh transport signature; the receiver acknowledges duplicates without
-repeating effects. A signature on an error response does not complete delivery.
+Oracle signs only after durable status-event storage. Redelivery keeps the event/body
+and gets a fresh transport signature; Oracle accepts duplicates without repeating
+effects. Other targets may return unsigned success. A signature on an error
+response does not complete delivery.
 
 
 ## Evidence intake

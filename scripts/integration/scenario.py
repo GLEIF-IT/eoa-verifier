@@ -109,7 +109,7 @@ def _assert_delivery_mode(configuration: dict, associationStatus: dict) -> None:
     if configuration["localOnly"]:
         assert associationStatus["delivery"] is None
     else:
-        assert associationStatus["delivery"]["acknowledged"]
+        assert associationStatus["delivery"]["delivered"]
         assert (
             associationStatus["delivery"]["attempts"] >= 2
         )  # Receiver deliberately drops its first ACK.

@@ -16,7 +16,7 @@ python -m venv /opt/eoa-verifier/venv
 /opt/eoa-verifier/venv/bin/eoa-verifier server start \
   --name verifier --alias verifier --head-dir /var/lib/eoa-verifier \
   --trusted-geda-aid "$GEDA_AID" --chain-id 31337 --rpc-url "$RPC_URL" \
-  --webhook-url "$WEBHOOK_URL" --webhook-aid "$RECEIVER_AID"
+  --webhook-url "$WEBHOOK_URL"
 ```
 
 Use writable paths appropriate to the service account. Start from any working
@@ -65,14 +65,16 @@ Normal configuration syntax, credential verification, nonce rejection and peer
 authentication still apply. This warning only replaces rejection of changed
 startup settings; it does not grant trust to invalid credentials or messages.
 
-## Introduce the webhook peer and present evidence
+## Optional signer key state and credential evidence
 
-Configure the peer AID explicitly. Deliver its public KEL messages with CESR attachments through `PUT /`, or resolve its OOBI through the supported
-KERIpy endpoint. A header-provided key is never trusted. The receiver likewise
-needs this verifier's accepted current key state; export it from
-`GET /oobi/<verifier-aid>/controller`. Current service authentication supports one
-transferable Ed25519 key at threshold one. On rotation, introduce the new KERI
-key events before resuming delivery. Missing keys leave events blocked.
+A plain webhook target needs only its URL. If it signs responses, deliver its
+public KEL with CESR attachments through `PUT /` before delivery and after key
+rotation. Verifier accepts only KERIpy-validated key state, never a header-provided
+key or an arbitrary discovery URL. Unknown response signers leave delivery blocked
+for operator correction and retry. A receiver choosing request verification needs
+Verifier's accepted key state, available from `GET /oobi/<verifier-aid>/controller`.
+No receiver AID setting is required. Current signatures support a single
+transferable Ed25519 key at threshold one.
 
 Present the untargeted association through IPEX Grant with its source credentials,
 KEL/TEL and witnessed issuance evidence. `POST /` accepts JSON body/CESR-attachment header
@@ -98,7 +100,7 @@ and its anchored/witnessed issuer KEL evidence through the
 same CESR HTTP transport. Receiving a Grant or ACDC bytes alone are not revocation proof.
 KERIpy must validate the evidence before the verifier records revoked status.
 The verifier does not issue the TEL revocation. Revoked status persists across
-restart and creates its own immutable event requiring its own authenticated ACK
+restart and creates its own immutable event requiring its own successful delivery
 when the association had an original outbox obligation. Local-only acceptance
 becomes revoked locally without an event.
 Revoking an old association does not revoke its replacement.
@@ -144,11 +146,12 @@ that dependency requires checking its accepted-event write order and requalifyin
 
 Transient network/HTTP failures retry automatically with persisted destination
 cooldown, up to `--webhook-max-attempts` (default three). Exhaustion moves the event
-to the durable dead-letter queue. Each attempt signs the same immutable event bytes anew. Only an expected
-authenticated HTTP 200 ACK completes it. Observation age never triggers refresh.
+to the durable dead-letter queue. Each attempt signs the same immutable event bytes
+anew. Any complete HTTP 2xx response completes delivery after verification of any
+supplied signature. Observation age never triggers refresh.
 Malformed HTTP chunk framing closes the affected client without stopping sibling
 tasks. RPC observations use a three-attempt verification budget; malformed webhook responses leave their
-events blocked and unacknowledged for correction and explicit resumption.
+events blocked and undelivered for correction and explicit resumption.
 Permanent failures remain blocked until the cause is corrected; restart alone
 does not unblock them. Inspect public status and fix peer keys, authorization,
 receiver configuration or malformed responses before retrying. Stored events
@@ -172,12 +175,12 @@ eoa-verifier retry-delivery "$EVENT_ID" --name verifier --head-dir /var/lib/eoa-
 ```
 
 Use the same name/base/head directory as startup, then restart. An embedding
-application can call `service.sender.request(event_id)`. Both paths explicitly
+application can call `service.sender.service.retry(event_id)`. Both paths explicitly
 requeue a dead letter and reset its bounded attempt budget, retaining immutable
-event bytes and destination cooldown. They never mark an ACK. An obsolete event
+event bytes and destination cooldown. They never mark delivery complete. An obsolete event
 remains ineligible for delivery even if an operator retries it.
 
-Do not edit event bytes, delete replay records or clear accepted/revoked status to
+Do not edit event bytes, delete consumed association nonces or clear accepted/revoked status to
 retry delivery. There is no retry REST route. Undelivered revocation can leave a
 downstream mapping active until delivery and withdrawal finish. Source-chain
 monitoring, periodic account rechecks and advanced Ethereum recovery are outside
@@ -191,3 +194,18 @@ consumer. Application stores use the current record layout and have no
 old-format readers, migrations or backfill. Preserve operator data and select
 fresh demonstration stores deliberately. Oracle selection/supersession does not
 revoke Verifier acceptance; verified association revocation does.
+
+## Optional webhook verification
+
+Configure only `--webhook-url`. Requests are signed with the Verifier AID and a
+signed body digest, but the target may ignore signatures and return any ordinary
+2xx response. No receiver AID or JSON ACK schema is required. `delivery.delivered`
+means the target returned HTTP success.
+
+If a response supplies either signature header, Verifier requires a valid complete
+signature and matching digest. Provision that signer's KEL through the existing
+CESR intake before enabling signed responses, and supply validated rotations when
+keys change. Unknown keys fail verification; no arbitrary key discovery occurs.
+Unsigned responses require no KERI setup. Use HTTPS for destination authentication
+and transport integrity; optional signatures do not provide downgrade resistance.
+See the [transport contract](../protocol/verifier-api-v1/README.md#transport-signature-profile) for exact coverage and limitations.

@@ -113,7 +113,6 @@ def test_webhook_timings_reach_sender_and_reject_invalid_config(config):
     configured = replace(
         config,
         webhook_url="http://127.0.0.1:9999/hook?memo=a+b&path=%2F",
-        webhook_aid=config.trusted_geda_aid,
         webhook_timeout=7,
         webhook_interval=2,
         webhook_backoff_base=3,
@@ -143,7 +142,6 @@ def test_enabling_delivery_preserves_results_without_config_warning(config, capl
     delivery = replace(
         config,
         webhook_url="http://127.0.0.1:9999/hook",
-        webhook_aid=config.trusted_geda_aid,
     )
     with entered_service(delivery) as reopened:
         assert reopened.sender is not None

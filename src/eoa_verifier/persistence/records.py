@@ -53,13 +53,6 @@ class AcceptedNonce:
 
 
 @dataclass
-class ReplayClaim:
-    """Durable transport nonce claim, independent of application-event deduplication."""
-
-    expiresAt: int
-
-
-@dataclass
 class AssociationStatus:
     """Stored application acceptance and immutable initially verified association.
 
@@ -84,9 +77,8 @@ class Delivery:
     eventId: str
     associationSaid: str
     destination: str
-    peerAid: str
     body: str
-    acknowledged: bool = False
+    delivered: bool = False
     attempts: int = 0
     error: str = ""
     # Permanent failure; requires correction and explicit resumption.

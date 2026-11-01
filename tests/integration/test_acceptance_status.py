@@ -21,7 +21,7 @@ def test_revocation_commits_its_own_event_once_and_preserves_facts(verified_stor
 
     baser = verified_store
     associationStatus = accept_verified_result(baser)
-    delivery_service(baser).acknowledge(
+    delivery_service(baser).complete(
         associationStatus.eventId
     )  # Initial-success ACK is already durable.
     initial = baser.outbox.get(keys=(associationStatus.eventId,))
@@ -47,11 +47,8 @@ def test_revocation_commits_its_own_event_once_and_preserves_facts(verified_stor
     )  # No reacceptance after revocation.
     assert baser.outbox.get(keys=(initial.eventId,)) == initial
     delivery = baser.outbox.get(keys=(revokedStatus.eventId,))
-    assert not delivery.acknowledged and delivery.attempts == 0
-    assert (delivery.destination, delivery.peerAid) == (
-        initial.destination,
-        initial.peerAid,
-    )
+    assert not delivery.delivered and delivery.attempts == 0
+    assert delivery.destination == initial.destination
     assert baser.destinations.get(keys=(delivery.destination,)) == schedule
     payload = json.loads(delivery.body)
     assert (payload["statusRevision"], payload["status"], payload["reasonCode"]) == (
@@ -78,4 +75,4 @@ def test_revocation_commits_its_own_event_once_and_preserves_facts(verified_stor
     assert response.json["reason"] == "REVOKED"
     assert response.json["accountObservation"] == associationStatus.accountObservation
     assert response.json["delivery"]["eventId"] == delivery.eventId
-    assert not response.json["delivery"]["acknowledged"]
+    assert not response.json["delivery"]["delivered"]

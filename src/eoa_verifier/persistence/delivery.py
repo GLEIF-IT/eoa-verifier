@@ -81,8 +81,8 @@ class DeliveryWriter:
             txn.put(key, raw, db=db.outbox.sdb)
             txn.put(schedule_key, schedule_raw, db=db.destinations.sdb)
 
-    def ack(self, previous, delivery, schedule, reference):
-        """Persist authenticated ACK progress and remove the matching ready/active references."""
+    def complete(self, previous, delivery, schedule, reference):
+        """Persist delivery completion and remove the matching ready/active references."""
         db = self._db
         key = delivery.eventId.encode()
         expected, raw = db.outbox.serializer(previous), db.outbox.serializer(delivery)

@@ -1,6 +1,5 @@
 """One-item delivery policy over prepared atomic saves and a signed HTTP effect."""
 
-import json
 import math
 import random
 import ssl
@@ -26,7 +25,7 @@ class _TransientFailure(Exception):
 
 
 class DeliveryService:
-    """Own work selection, attempts, backoff and authenticated ACK policy."""
+    """Own work selection, attempts, backoff and HTTP completion policy."""
 
     def __init__(
         self,
@@ -83,13 +82,13 @@ class DeliveryService:
         previous = self.reader.delivery(event_id)
         if previous is None:
             raise ValueError("unknown delivery event")
-        if previous.acknowledged:
+        if previous.delivered:
             return previous
         delivery = replace(
             previous,
             attempts=previous.attempts + 1,
             blocked=False,
-            error="attempt started; authenticated ACK not recorded",
+            error="attempt started; HTTP success not recorded",
         )
         schedule = self.reader.schedule(delivery.destination)
         if next_attempt_at is not None:
@@ -99,34 +98,30 @@ class DeliveryService:
         self.writer.record_attempt(previous, delivery, schedule)
         return delivery
 
-    def acknowledge(self, event_id):
-        """Prepare authenticated completion and reset destination failure backoff."""
+    def complete(self, event_id):
+        """Prepare HTTP completion and reset destination failure backoff."""
         previous = self._delivery(event_id)
-        if previous.acknowledged:
+        if previous.delivered:
             return
-        delivery = replace(previous, error="", blocked=False, acknowledged=True)
-        schedule = replace(
-            self.reader.schedule(delivery.destination), failures=0
-        )
-        self.writer.ack(
-            previous, delivery, schedule, DeliveryReference(event_id)
-        )
+        delivery = replace(previous, error="", blocked=False, delivered=True)
+        schedule = replace(self.reader.schedule(delivery.destination), failures=0)
+        self.writer.complete(previous, delivery, schedule, DeliveryReference(event_id))
 
     def defer(self, event_id, *, error, schedule=None):
         """Prepare retry progress while retaining the active delivery reference."""
         previous = self._delivery(event_id)
-        if previous.acknowledged:
+        if previous.delivered:
             return
-        delivery = replace(previous, error=error, blocked=False, acknowledged=False)
+        delivery = replace(previous, error=error, blocked=False, delivered=False)
         schedule = schedule or self.reader.schedule(delivery.destination)
         self.writer.defer(previous, delivery, schedule)
 
     def dead_letter(self, event_id, *, error, schedule=None):
         """Prepare a stopped event and its dedicated dead-letter reference."""
         previous = self._delivery(event_id)
-        if previous.acknowledged:
+        if previous.delivered:
             return
-        delivery = replace(previous, error=error, blocked=True, acknowledged=False)
+        delivery = replace(previous, error=error, blocked=True, delivered=False)
         schedule = schedule or self.reader.schedule(delivery.destination)
         self.writer.dead_letter(
             previous, delivery, schedule, DeliveryReference(event_id)
@@ -158,10 +153,7 @@ class DeliveryService:
                 error="event is no longer the current association status",
             )
             return
-        if (
-            self.reader.schedule(delivery.destination).nextAttemptAt
-            <= self.clock()
-        ):
+        if self.reader.schedule(delivery.destination).nextAttemptAt <= self.clock():
             yield from self.attempt(delivery)
 
     def attempt(self, delivery):
@@ -203,15 +195,15 @@ class DeliveryService:
             else:
                 self.defer(delivery.eventId, error=reason, schedule=schedule)
         else:
-            self.acknowledge(delivery.eventId)
+            self.complete(delivery.eventId)
 
     def send(self, delivery):
         """Authenticate and validate the response produced by the signed HTTP adapter."""
-        auth, requestAuth, response = yield from self.transport.send(delivery)
-        self.check_response(delivery, auth, requestAuth, response)
+        response = yield from self.transport.send(delivery)
+        self.check_response(response)
 
-    def check_response(self, delivery, auth, requestAuth, response):
-        """Require HTTP success and the signed ACK for this attempt and event."""
+    def check_response(self, response):
+        """Require a complete HTTP success response; transport checks optional signatures."""
         if response["errored"]:
             raise ValueError(f"webhook HTTP framing: {response['error']}")
         statusCode = response["status"]
@@ -224,27 +216,8 @@ class DeliveryService:
                     response["headers"].get("retry-after"), self.clock()
                 ),
             )
-        if statusCode != 200:
+        if not 200 <= statusCode < 300:
             raise ValueError(f"webhook HTTP {statusCode}")
-        auth.verify(
-            method="POST",
-            target=delivery.destination,
-            action="ack",
-            body=response["body"],
-            headers=response["headers"],
-            request=requestAuth.reference,
-            status=response["status"],
-        )
-        ack = json.loads(response["body"])
-        if (
-            not isinstance(ack, dict)
-            or set(ack) != {"eventId", "stored"}
-            or ack["eventId"] != delivery.eventId
-            or ack["stored"] is not True
-        ):
-            raise ValueError(
-                "webhook ACK does not confirm storage of the expected event"
-            )
 
 
 class WebhookSender(doing.DoDoer):
@@ -256,7 +229,6 @@ class WebhookSender(doing.DoDoer):
         reader,
         writer,
         keys,
-        claim_nonce,
         association_reader,
         timeout=10.0,
         interval=1.0,
@@ -267,13 +239,13 @@ class WebhookSender(doing.DoDoer):
         max_attempts=3,
         **kwa,
     ):
-        """Borrow delivery persistence and a transport replay-claim callable.
+        """Borrow delivery persistence and locally accepted signing keys.
 
         Compose the delivery service with this scheduler's HTTP client adapter."""
         self.service = DeliveryService(
             reader,
             writer,
-            WebhookHttp(self, keys, claim_nonce, timeout=timeout),
+            WebhookHttp(self, keys, timeout=timeout),
             association_reader=association_reader,
             interval=interval,
             backoff_base=backoff_base,

@@ -9,7 +9,6 @@ from .records import (
     DeliveryReference,
     DestinationSchedule,
     GrantReplayRecord,
-    ReplayClaim,
     VerificationRecord,
     VerificationResult,
     VerificationScope,
@@ -17,14 +16,14 @@ from .records import (
 
 
 class VerifierBaser(dbing.LMDBer):
-    """Own atomic application records and replay claims; make no verification decisions."""
+    """Own atomic application records; make no verification decisions."""
 
     TailDirPath = "eoa-verifier/db"
     AltTailDirPath = ".eoa-verifier/db"
     TempPrefix = "eoa_verifier_db_"
 
     def reopen(self, **kwa):
-        """Open verification, acceptance/outbox and transport replay tables in one environment."""
+        """Open verification, acceptance/outbox tables in one environment."""
         super().reopen(**kwa)
         self.scope = koming.Komer(db=self, subkey="startup.", schema=VerificationScope)
         self.pending = koming.Komer(
@@ -55,9 +54,6 @@ class VerifierBaser(dbing.LMDBer):
         )
         self.results = koming.Komer(
             db=self, subkey="results.", schema=VerificationResult
-        )
-        self.replay_claims = koming.Komer(
-            db=self, subkey="replay_claims.", schema=ReplayClaim
         )
         self.associations = koming.Komer(
             db=self, subkey="associations.", schema=AssociationStatus

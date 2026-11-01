@@ -36,9 +36,8 @@ class ServiceConfig:
     incept_file: str | None = None
     # Use disposable KERIpy stores and remove them on close; intended for tests.
     temp: bool = False
-    # Configure both to enable durable acceptance/outbox for one trusted destination.
+    # Optional destination URL; acceptance runs even without webhook delivery.
     webhook_url: str | None = None
-    webhook_aid: str | None = None
     # Operational seconds: one in-flight request; backoff range is [lower, 2 * lower].
     webhook_max_attempts: int = 3
     webhook_timeout: float = 10.0
@@ -60,8 +59,6 @@ class ServiceConfig:
             raise ValueError("webhook timing values must be finite positive seconds")
         if self.webhook_backoff_cap < self.webhook_backoff_base:
             raise ValueError("webhook backoff cap must be at least the base")
-        if bool(self.webhook_url) != bool(self.webhook_aid):
-            raise ValueError("webhook URL and AID must be configured together")
         if self.webhook_url:
             target = urlsplit(self.webhook_url)
             if (
@@ -81,8 +78,6 @@ class ServiceConfig:
                 or query != target.query
             ):
                 raise ValueError("HIO would rewrite the webhook URL path/query")
-            if coring.Prefixer(qb64=self.webhook_aid).qb64 != self.webhook_aid:
-                raise ValueError("webhook peer must be a canonical AID")
         if not self.rpc_url or self.chain_id <= 0:
             raise ValueError("verification requires an RPC URL and positive chain ID")
         if coring.Prefixer(qb64=self.trusted_geda_aid).qb64 != self.trusted_geda_aid:

@@ -59,7 +59,8 @@ records. Nonces are passed unchanged; issuance permits reuse so Verifier policy
 can reject it during acceptance.
 
 A caller owning the full stack can start this fixture with `--rpc-url URL
---webhook-url URL --webhook-aid AID --peer-kel FILE`. The caller owns that chain
+--webhook-url URL`. Add `--peer-kel FILE` only when the target signs responses.
+The caller owns that chain
 and receiver; this mode starts neither Anvil nor the focused status-event fixture.
 Repeat the original options on restart. Configuration changes require a new run.
 

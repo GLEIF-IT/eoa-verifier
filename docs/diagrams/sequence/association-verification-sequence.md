@@ -35,7 +35,7 @@ sequenceDiagram
             opt Webhook configured
                 V->>C: Authenticated immutable acceptance event
                 C->>C: Commit durable status event
-                C-->>V: Authenticated correlated ACK
+                C-->>V: HTTP success with optional signature
                 V->>V: Complete delivery, retry same event if ACK is lost
             end
         end

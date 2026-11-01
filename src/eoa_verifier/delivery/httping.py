@@ -2,7 +2,7 @@
 
 from hio.core import http
 
-from .authing import ServiceAuthenticator
+from .authing import HttpSignatures
 
 
 class _ClientDoer(http.ClientDoer):
@@ -21,25 +21,22 @@ class _ClientDoer(http.ClientDoer):
 
 
 class WebhookHttp:
-    """Perform HTTP effects; leave response/ACK policy to the delivery service."""
+    """Sign HTTP requests and check optional response signatures; leave result policy to the service."""
 
-    def __init__(self, scheduler, keys, claim_nonce, *, timeout=10.0):
-        """Borrow scheduler/signing/replay dependencies and own each temporary client."""
-        self.scheduler, self.keys, self.claim_nonce = scheduler, keys, claim_nonce
+    def __init__(self, scheduler, keys, *, timeout=10.0):
+        """Borrow scheduler/signing dependencies and own each temporary client."""
+        self.scheduler, self.signatures = scheduler, HttpSignatures(keys)
         self.timeout = timeout
 
     def send(self, delivery):
-        """Yield through a signed POST and return authentication context plus raw response.
+        """Send signed bytes, check any response signature, and return the HTTP result.
 
-        The client closes before the application service checks the ACK. Framing,
+        The client closes before the application service decides delivery success. Framing,
         disconnect and timeout failures propagate; no delivery outcome is persisted here.
         """
-        auth = ServiceAuthenticator(
-            keys=self.keys, claim_nonce=self.claim_nonce, peer_aid=delivery.peerAid
-        )
         body = delivery.body.encode("utf-8")
-        headers, requestAuth = auth.sign(
-            method="POST", target=delivery.destination, action="status", body=body
+        headers = self.signatures.sign(
+            method="POST", target=delivery.destination, body=body
         )
         client = http.Client(
             path=delivery.destination, reconnectable=False, redirectable=False
@@ -60,6 +57,12 @@ class WebhookHttp:
                 raise ConnectionError(
                     "webhook connection closed before a complete response"
                 )
-            return auth, requestAuth, response
+            self.signatures.verify_optional(
+                method="POST",
+                target=delivery.destination,
+                body=response["body"],
+                headers=response["headers"],
+            )
+            return response
         finally:
             self.scheduler.remove([child])

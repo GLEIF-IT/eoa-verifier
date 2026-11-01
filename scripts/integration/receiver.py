@@ -12,23 +12,18 @@ from hio.core import http
 from keri.app import habbing
 from keri.db import subing
 
-from eoa_verifier.delivery.authing import AuthenticationError, ServiceAuthenticator
+from eoa_verifier.delivery.authing import AuthenticationError, HttpSignatures
 from eoa_verifier.delivery.keys import ServiceKeys
 
 
 class StatusEventStore:
-    """Borrow a KERIpy database for durable fixture status events and replay claims."""
+    """Borrow a KERIpy database for durable fixture status events."""
 
     def __init__(self, db):
         """Bind disjoint non-duplicate event, attempt and control subdatabases."""
         self.events = subing.Suber(db=db, subkey="fixture.events.")
-        self.replays = subing.Suber(db=db, subkey="fixture.replays.")
         self.attempts = subing.Suber(db=db, subkey="fixture.attempts.")
         self.control = subing.Suber(db=db, subkey="fixture.control.")
-
-    def claim_nonce(self, peer, nonce, expires_at):
-        """Use LMDB no-overwrite insertion for one authentication replay claim."""
-        return self.replays.put(keys=(peer, nonce), val=str(expires_at))
 
     def event_json(self, event_id):
         """Return the retained status-event JSON string for one event ID."""
@@ -122,17 +117,16 @@ class Receiver:
         )
 
     def on_post(self, req, rep):
-        """Commit immutable event bytes before signing an attempt-bound ACK."""
+        """Commit immutable event bytes before signing the storage response."""
         parsed = urlsplit(self.target)
         relative = parsed.path + ("?" + parsed.query if parsed.query else "")
         if req.relative_uri != relative:
             raise falcon.HTTPBadRequest(description="unexpected signed target")
         statusEventBytes = req.bounded_stream.read()
         try:
-            requestAuth = self.auth.verify(
+            self.auth.verify(
                 method="POST",
                 target=self.target,
-                action="status",
                 body=statusEventBytes,
                 headers=req.headers,
             )
@@ -149,13 +143,10 @@ class Receiver:
                 description="fixture dropped post-commit ACK"
             )
         ackBytes = json.dumps({"eventId": event_id, "stored": True}).encode()
-        headers, _ = self.auth.sign(
+        headers = self.auth.sign(
             method="POST",
             target=self.target,
-            action="ack",
             body=ackBytes,
-            request=requestAuth.reference,
-            status=200,
         )
         rep.data = ackBytes
         rep.set_headers(headers)
@@ -178,10 +169,8 @@ def main():
         hab = hby.habByName("receiver")
         hby.psr.parse(ims=bytearray((root / "verifier.cesr").read_bytes()))
         store = StatusEventStore(hby.db)
-        auth = ServiceAuthenticator(
+        auth = HttpSignatures(
             keys=ServiceKeys(hab),
-            claim_nonce=store.claim_nonce,
-            peer_aid=config["verifierAid"],
         )
         app = falcon.App()
         app.add_route(

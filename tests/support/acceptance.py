@@ -17,7 +17,6 @@ def accept_verified_result(baser):
             "issuanceAnchor": {"sequenceNumber": 3, "said": "anchor"},
         },
         destination="https://receiver.example/hook",
-        peer_aid="peer",
     )
 
 

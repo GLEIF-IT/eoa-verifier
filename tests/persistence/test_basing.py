@@ -146,8 +146,8 @@ def test_acceptance_and_delivery_progress_survive_reopen(verified_store):
     assert baser.destinations.get(keys=(delivery.destination,)) == schedule
 
     # The delivery component calls completion only after validating an ACK.
-    delivery_service(baser).acknowledge(associationStatus.eventId)
-    assert baser.outbox.get(keys=(associationStatus.eventId,)).acknowledged
+    delivery_service(baser).complete(associationStatus.eventId)
+    assert baser.outbox.get(keys=(associationStatus.eventId,)).delivered
     assert baser.destinations.get(keys=(delivery.destination,)).failures == 0
 
 
@@ -183,7 +183,6 @@ def test_rejected_result_cannot_create_acceptance_or_event(verified_store):
             associationFacts={"issuerAid": "issuer"},
             nonce="other",
             destination="https://receiver.example/hook",
-            peer_aid="peer",
         )
     assert baser.associations.get(keys=("rejected",)) is None
     assert list(baser.outbox.getItemIter()) == []
