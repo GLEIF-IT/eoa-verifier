@@ -7,6 +7,8 @@ from urllib.parse import quote, urlsplit
 from hio.core.http import httping as hio_httping
 from keri.core import coring
 
+from ..delivery import DEFAULT_INTERVAL
+
 
 @dataclass(frozen=True)
 class ServiceConfig:
@@ -50,7 +52,7 @@ class ServiceConfig:
     # Operational seconds: one in-flight request; backoff range is [lower, 2 * lower].
     webhook_max_attempts: int = 3
     webhook_timeout: float = 10.0
-    webhook_interval: float = 1.0
+    webhook_interval: float = DEFAULT_INTERVAL
     webhook_backoff_base: float = 1.0
     webhook_backoff_cap: float = 150.0
 

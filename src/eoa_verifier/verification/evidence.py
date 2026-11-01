@@ -5,6 +5,7 @@ from keri.core import coring, eventing, serdering
 from keri.db import dbing
 from keri.peer import exchanging
 
+from eoa_verifier.receiving.keying import est_event
 from eoa_verifier.verification.errors import (
     MissingCredentialArtifactsError,
     VerificationError,
@@ -134,14 +135,15 @@ class CredentialEvidence:
             raise MissingCredentialArtifactsError(
                 "association issuance anchor is unavailable"
             )
-        est = self._rgy.hby.kvy.fetchEstEvent(pre=association.issuer, sn=seqner.sn)
+        est = est_event(self._rgy.hby.kvy, association.issuer, seqner.sn)
         if est is None:
             raise MissingCredentialArtifactsError(
                 "issuer establishment event is unavailable"
             )
         if not est.bn:
             raise VerificationError("association issuer has no witnessed KEL")
-        wits = self._rgy.hby.kvy.fetchWitnessState(association.issuer, seqner.sn)
+        # Start at the establishment already found; avoid walking the KEL twice.
+        wits = self._rgy.hby.kvy.fetchWitnessState(association.issuer, est.sn)
         anchor = self._rgy.hby.db.getEvt(dbing.dgKey(association.issuer, saider.qb64))
         wigs = self._rgy.hby.db.getWigs(dbing.dgKey(association.issuer, saider.qb64))
         _, indices = eventing.verifySigs(

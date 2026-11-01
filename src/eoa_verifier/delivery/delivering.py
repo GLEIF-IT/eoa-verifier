@@ -11,6 +11,7 @@ from hio.base import doing
 
 from eoa_verifier.persistence.records import DeliveryReference
 
+from . import DEFAULT_INTERVAL
 from .authing import AuthenticationError
 from .httping import WebhookHttp
 
@@ -34,7 +35,7 @@ class DeliveryService:
         transport=None,
         *,
         association_reader,
-        interval=1.0,
+        interval=DEFAULT_INTERVAL,
         backoff_base=1.0,
         backoff_cap=150.0,
         clock=time.time,
@@ -231,7 +232,7 @@ class WebhookSender(doing.DoDoer):
         keys,
         association_reader,
         timeout=10.0,
-        interval=1.0,
+        interval=DEFAULT_INTERVAL,
         backoff_base=1.0,
         backoff_cap=150.0,
         clock=time.time,

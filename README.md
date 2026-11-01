@@ -66,7 +66,7 @@ account checks run, and Ethereum publication remains the oracle's responsibility
 | Option                   | Default | Meaning                                               |
 | ------------------------ | ------- | ----------------------------------------------------- |
 | `--webhook-timeout`      | 10      | Overall request timeout, seconds.                     |
-| `--webhook-interval`     | 1       | Minimum seconds between request starts.               |
+| `--webhook-interval`     | 0.005   | Minimum seconds between request starts.               |
 | `--webhook-backoff-base` | 1       | First retry's lower bound; upper bound is twice this. |
 | `--webhook-backoff-cap`  | 150     | Maximum lower bound; upper bound is twice this.       |
 
@@ -91,7 +91,7 @@ merely to clear a warning. See the [operator guide](docs/operations.md#configura
 | Component | Modules and responsibility |
 | --- | --- |
 | `runtime` | `cli`, `config`, `serving`: arguments, validated configuration, KERIpy stores and HIO task/resource ownership. |
-| `receiving` | `directing`, `grants`: finite CESR HTTP intake, shared parser/escrows, IPEX replay and duplicate-safe work creation. |
+| `receiving` | `directing`, `grants`, `keying`: finite CESR HTTP intake, shared parser/escrows, indexed accepted key-state reads, IPEX replay and duplicate-safe work creation. |
 | `verification` | `coordinating`, `credentials`, `eoa`, `worker`, `rpc`: initial credential/wallet/account verification; `constants`, `schema_cache`, `errors` support that contract. |
 | `associations` | `accepting`, `revoking`, `statusing`: application acceptance, verified association revocation and public stored status. |
 | `delivery` | `authing`, `delivering`: HTTP signatures, webhook attempts, retry pacing and response policy. |

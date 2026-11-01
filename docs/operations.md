@@ -111,6 +111,25 @@ when the association had an original outbox obligation. Local-only acceptance
 becomes revoked locally without an event.
 Revoking an old association does not revoke its replacement.
 
+## Queue latency and key-state reads
+
+The root HIO scheduler offers workers a turn every five milliseconds. Each worker
+still advances one operation at a time through its dedicated durable phases; this
+cadence is not a request deadline or a promise of parallel verification. Synchronous
+validation, native KERI processing and durable LMDB commits can take longer than
+one turn. Large bursts accumulate queue wait even when HTTP intake returns quickly.
+
+Accepted KERI key state supplies the establishment event and witness set for
+accepted events in the current establishment epoch. Older anchors continue to use
+their historical authority, including after keys or witnesses rotate. The reader
+does not cache an association's acceptance or revocation verdict. Validation before
+and after RPC and the permanent nonce claim remain in place.
+
+Ordinary webhook requests default to a five-millisecond minimum start interval.
+Use `--webhook-interval` to pace a slower receiver. This interval is independent of
+failure backoff, `Retry-After`, and the three-attempt budget. No additional worker
+concurrency, batching, locks or weaker LMDB durability are introduced.
+
 ## Verification and intake failures
 
 The service progresses one item per worker through dedicated durable phases:
