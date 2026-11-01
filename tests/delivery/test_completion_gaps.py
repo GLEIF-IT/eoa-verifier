@@ -38,7 +38,16 @@ def test_real_sender_recovers_commit_ack_gaps(
             keys=ServiceKeys(receiver_hab),
         )
         app = falcon.App()
-        app.add_route("/hook", Receiver(auth, StatusEventService(store), target))
+        app.add_route(
+            "/hook",
+            Receiver(
+                auth,
+                StatusEventService(store),
+                target,
+                verifier_aid=sender_hab.pre,
+                producer_ready=lambda: sender_hab.pre in receiver.kevers,
+            ),
+        )
         server = http.ServerDoer(
             server=http.Server(host="127.0.0.1", port=port, app=app)
         )
@@ -108,7 +117,16 @@ def test_real_sender_recovers_commit_ack_gaps(
             store = StatusEventStore(receiver.db)
 
             app = falcon.App()
-            app.add_route("/hook", Receiver(auth, StatusEventService(store), target))
+            app.add_route(
+                "/hook",
+                Receiver(
+                    auth,
+                    StatusEventService(store),
+                    target,
+                    verifier_aid=sender_hab.pre,
+                    producer_ready=lambda: sender_hab.pre in receiver.kevers,
+                ),
+            )
             server = http.ServerDoer(
                 server=http.Server(host="127.0.0.1", port=port, app=app)
             )

@@ -10,7 +10,6 @@ from hio.help import decking
 from keri.app import (
     configing,
     habbing,
-    httping,
     keeping,
     notifying,
     oobiing,
@@ -48,6 +47,7 @@ from ..verification.verifying import VerificationService
 from ..verification.worker import EoaVerifierDoer
 from .bootstrap import bootstrap_service
 from .config import ServiceConfig
+from .oobing import OobiClienter
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +118,7 @@ class VerifierService(doing.DoDoer):
                 bufsize=8096,
             ),
         )
-        oobiery = oobiing.Oobiery(hby=hby, clienter=httping.Clienter())
+        oobiery = oobiing.Oobiery(hby=hby, clienter=OobiClienter())
         self.notifier, self.parser = notifier, parser
         self.grant_replay = GrantReplayService(
             GrantReader(baser),
