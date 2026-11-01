@@ -110,7 +110,7 @@ def start_run(
     local_only: bool = False,
     rpc_url: str | None = None,
     webhook_url: str | None = None,
-    peer_kel: Path | None = None,
+    webhook_oobi: str | None = None,
 ) -> None:
     """Start/reopen this run with immutable mode, peer and chain configuration.
 
@@ -125,6 +125,13 @@ def start_run(
         "externalWebhook": bool(webhook_url),
         "rpcUrl": rpc_url or configuration["rpcUrl"],
         "externalRpc": bool(rpc_url),
+        "webhookOobi": webhook_oobi
+        if webhook_url
+        else (
+            None
+            if local_only
+            else f"http://127.0.0.1:{configuration['receiverPort']}/oobi/{configuration['receiverAid']}"
+        ),
     }
     if webhook_url:
         requested.update(webhookUrl=webhook_url)
@@ -134,11 +141,6 @@ def start_run(
                 "Run configuration is immutable; use its original start options"
             )
     configuration.update(requested)
-    if (
-        peer_kel is not None
-        and peer_kel.resolve() != (root / "receiver.cesr").resolve()
-    ):
-        shutil.copyfile(peer_kel, root / "receiver.cesr")
     configuration["configured"] = True
     services.validate_local_rpc(configuration["rpcUrl"])
     save_json(root / "run.json", configuration)
@@ -165,12 +167,6 @@ def start_run(
             "verifier",
             lambda: services.request_json(configuration["verifierUrl"] + "/health"),
         )
-        if not local_only and (root / "receiver.cesr").is_file():
-            services.request_json(
-                configuration["verifierUrl"] + "/",
-                (root / "receiver.cesr").read_bytes(),
-                method="PUT",
-            )
         configuration["startedOnce"] = True
         save_json(root / "run.json", configuration)
     except BaseException:
@@ -189,8 +185,8 @@ def restart_verifier(root: Path, configuration: dict) -> None:
         webhook_url=configuration["webhookUrl"]
         if configuration["externalWebhook"]
         else None,
-        peer_kel=(root / "receiver.cesr")
-        if (root / "receiver.cesr").is_file()
+        webhook_oobi=configuration["webhookOobi"]
+        if configuration["externalWebhook"]
         else None,
     )
 

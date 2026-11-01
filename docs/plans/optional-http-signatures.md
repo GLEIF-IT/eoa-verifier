@@ -60,8 +60,8 @@ Resolve keyid only through locally accepted KERI key state. Never accept an
 unvalidated public key from a header or fetch an arbitrary header-provided URL.
 Oracle retains its producer allowlist. Verifier can verify a response from any
 locally resolved signer without requiring a per-destination AID setting. Operators
-choosing signed responses provision and update that signer's KEL through existing
-CESR intake. Plain targets require none of this. Retain the current single-key,
+choosing signed responses configure its OOBI; native KERIpy resolution obtains
+and validates key state, refreshed on restart after rotation. Plain targets require none of this. Retain the current single-key,
 threshold-one limitation; multi-key signing is outside this change.
 
 Remove `eoa-target`, `eoa-audience`, `eoa-action`, `eoa-request`, `eoa-status`,
@@ -108,9 +108,9 @@ delete an operator's existing stores or consumed association nonces.
    Prove a receiver with no KERI knowledge works, alongside signed-response cases.
 2. **Oracle:** adopt the same signature profile, retain explicit producer
    authorization and optional-response signing, remove transport nonce storage,
-   and update duplicate/restart expectations. Keep its signing identity and KEL
+   and update duplicate/restart expectations. Keep its signing identity and OOBI
    export because signed responses are now an explicit requirement. Provisioning
-   receiver KEL in tooling becomes optional, not a webhook startup prerequisite.
+   a response-signer OOBI in tooling becomes optional, not a webhook startup prerequisite.
 3. **Coordinated qualification/docs:** update protocol, operator guides, ADRs,
    earlier maintained plans, integration tooling and diagram sources/artifacts.
    Comply needs only any affected integration wording, not Solidity/ABI changes.

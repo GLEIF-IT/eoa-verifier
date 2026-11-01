@@ -5,27 +5,28 @@ for automated qualification or six for the manual environment; issuance retains
 the existing one-witness credential profile.
 """
 
-from pathlib import Path
 import json
+from pathlib import Path
 from urllib.request import urlopen
+
 from .artifacts import save_json
 from .processes import launch, wait_ready
 
 
 def make_identity(root: Path, name: str, *, transferable: bool = True):
-    """Create/reopen a fixture AID and export its public inception before closing."""
+    """Create/reopen a fixture AID and return its public identifier before closing."""
     from keri.app import habbing
 
     with habbing.openHby(name=name, headDirPath=str(root), temp=False) as hby:
         hab = hby.habByName(name) or hby.makeHab(name=name, transferable=transferable)
-        return hab.pre, bytes(hab.makeOwnEvent(sn=0))
+        return hab.pre
 
 
 def initialize(root: Path, config: dict) -> None:
     """Prepare independent witness, Verifier and receiver identities under root."""
-    from importlib.metadata import version
     import subprocess
     import sys
+    from importlib.metadata import version
 
     config["versions"] = {
         "python": sys.version.split()[0],
@@ -35,12 +36,10 @@ def initialize(root: Path, config: dict) -> None:
         ).strip(),
     }
     for index, w in enumerate(config["witnesses"]):
-        aid, _ = make_identity(root / f"witness-{index}", "witness", transferable=False)
+        aid = make_identity(root / f"witness-{index}", "witness", transferable=False)
         w.update(aid=aid, url=f"http://127.0.0.1:{w['port']}")
-    config["verifierAid"], kel = make_identity(root / "services", "verifier")
-    (root / "verifier.cesr").write_bytes(kel)
-    config["receiverAid"], kel = make_identity(root / "receiver", "receiver")
-    (root / "receiver.cesr").write_bytes(kel)
+    config["verifierAid"] = make_identity(root / "services", "verifier")
+    config["receiverAid"] = make_identity(root / "receiver", "receiver")
     save_json(root / "run.json", config)
 
 
@@ -76,6 +75,7 @@ def serve_infrastructure(root: Path, config: dict) -> None:
     """Serve native witness tasks and packaged schema bytes until shutdown."""
     from contextlib import ExitStack
     from importlib.resources import files
+
     import falcon
     from hio.base import doing
     from hio.core import http

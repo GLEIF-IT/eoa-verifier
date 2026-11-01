@@ -83,3 +83,8 @@ The test tree mirrors component ownership, not every implementation helper.
 Integration tooling keeps lifecycle sequencing in environment.py, concrete service
 commands and bounded HTTP exchanges in services.py, and wheel installation in
 builds.py. Their functional lifecycle tests remain in tests/integration.
+
+OOBI introduction tests exercise real HTTP and the pinned KERIpy resolver.
+Resolution requires accepted key state; Oracle also binds it to the authorized
+producer AID. Rotation is retrieved from the same OOBI on restart. Startup no
+longer imports public KEL files. Credential/TEL evidence transport is unchanged.

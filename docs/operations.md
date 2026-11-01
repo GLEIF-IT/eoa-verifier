@@ -67,14 +67,20 @@ startup settings; it does not grant trust to invalid credentials or messages.
 
 ## Optional signer key state and credential evidence
 
-A plain webhook target needs only its URL. If it signs responses, deliver its
-public KEL with CESR attachments through `PUT /` before delivery and after key
-rotation. Verifier accepts only KERIpy-validated key state, never a header-provided
-key or an arbitrary discovery URL. Unknown response signers leave delivery blocked
-for operator correction and retry. A receiver choosing request verification needs
-Verifier's accepted key state, available from `GET /oobi/<verifier-aid>/controller`.
-No receiver AID setting is required. Current signatures support a single
-transferable Ed25519 key at threshold one.
+A plain webhook target needs only its URL. For signed responses, configure
+`--webhook-oobi https://receiver.example/oobi/<receiver-aid>`. The native KERIpy
+resolver retrieves and validates key events. Startup refreshes the configured
+OOBI, including after rotation; no public KEL file is imported. Intake, OOBI
+serving, verification and acceptance remain available while outbound delivery
+waits for a resolved introduction with accepted key state. Waiting does not
+consume delivery attempts. Failed/unavailable introductions keep delivery waiting;
+inspect resolver logs, correct the URL/peer and restart. No header-driven discovery
+occurs. Restart does not automatically resume existing delivery dead letters.
+
+A receiver choosing request verification resolves Verifier's OOBI at
+`https://verifier.example/oobi/<verifier-aid>`. Oracle separately authorizes its
+configured `--verifier-aid`. No receiver AID setting is required in Verifier.
+Service signatures currently support one transferable Ed25519 key at threshold one.
 
 Present the untargeted association through IPEX Grant with its source credentials,
 KEL/TEL and witnessed issuance evidence. `POST /` accepts JSON body/CESR-attachment header
@@ -203,9 +209,9 @@ signed body digest, but the target may ignore signatures and return any ordinary
 means the target returned HTTP success.
 
 If a response supplies either signature header, Verifier requires a valid complete
-signature and matching digest. Provision that signer's KEL through the existing
-CESR intake before enabling signed responses, and supply validated rotations when
-keys change. Unknown keys fail verification; no arbitrary key discovery occurs.
+signature and matching digest. Configure `--webhook-oobi URL` for that signer. KERIpy resolves its
+KEL before delivery starts; restart with the same OOBI after rotation to refresh
+accepted key state. Unknown keys fail verification; no arbitrary key discovery occurs.
 Unsigned responses require no KERI setup. Use HTTPS for destination authentication
 and transport integrity; optional signatures do not provide downgrade resistance.
 See the [transport contract](../protocol/verifier-api-v1/README.md#transport-signature-profile) for exact coverage and limitations.
