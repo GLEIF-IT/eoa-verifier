@@ -34,15 +34,15 @@ class GrantNotificationDoer(doing.Doer):
         return False
 
 
-class NativeGrantAdapter:
-    """Read native notices and replay authenticated EXN embeds through KERIpy."""
+class IpexGrantAdapter:
+    """Read KERIpy notices and replay authenticated EXN embeds through KERIpy."""
 
     def __init__(self, hby, notifier, parser):
-        """Borrow native stores and parser without assuming their lifecycle."""
+        """Borrow KERIpy stores and parser without assuming their lifecycle."""
         self.hby, self.notifier, self.parser = hby, notifier, parser
 
     def next_notice(self):
-        """Detach the oldest native notice into an application Grant record."""
+        """Detach the oldest KERIpy notice into an application Grant record."""
         noter = self.notifier.noter
         with noter.env.begin(db=noter.notes.sdb) as txn, txn.cursor() as cursor:
             notice = (
@@ -51,7 +51,7 @@ class NativeGrantAdapter:
         return GrantReplayRecord(notice.rid, notice.attrs) if notice else None
 
     def remove_notice(self, notice_id):
-        """Acknowledge a native notice only after application work is durable."""
+        """Acknowledge a KERIpy notice only after application work is durable."""
         self.notifier.noter.rem(notice_id)
 
     def _replay_embed(self, ims):

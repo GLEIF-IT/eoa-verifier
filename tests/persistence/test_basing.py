@@ -29,7 +29,8 @@ def test_duplicates_completion_and_restart(tmp_path):
     try:
         verification = VerificationRecord("a", "first")
         assert ApplicationWriter(baser).enqueue_verification(verification)
-        verification = verification_service(baser).next_verification(now=0)
+        verificationService = verification_service(baser)
+        verification = verificationService.start_pending(verificationService.next_pending())
         verification_service(baser).defer_verification(
             verification, reason="missing source", next_attempt_at=5
         )
@@ -42,7 +43,8 @@ def test_duplicates_completion_and_restart(tmp_path):
             "verified",
             eoaResult={"wallet": "wallet", "accountObservation": {"chainId": 31337}},
         )
-        verification_service(baser).next_verification(now=0)
+        verificationService = verification_service(baser)
+        verificationService.start_pending(verificationService.next_pending())
         verification_service(baser).finish(result)
         verification_service(baser).finish(result)
         with pytest.raises(ValueError, match="conflicting"):
@@ -69,7 +71,8 @@ def test_completion_rollback_after_result_write():
     with dbing.openLMDB(cls=VerifierBaser) as baser:
         verification = VerificationRecord("a", "first")
         ApplicationWriter(baser).enqueue_verification(verification)
-        verification = verification_service(baser).next_verification(now=0)
+        verificationService = verification_service(baser)
+        verification = verificationService.start_pending(verificationService.next_pending())
         real_env = baser.env
 
         class FailingTransaction:
@@ -122,9 +125,7 @@ def test_acceptance_and_delivery_progress_survive_reopen(verified_store):
     assert ApplicationReader(baser).acceptance() is None
     assert baser.delivery_ready.get(keys=(associationStatus.eventId,)) is not None
     delivery_service(baser).record_attempt(associationStatus.eventId)
-    delivery_service(baser).complete(
-        associationStatus.eventId, outcome="retry", error="connection failed"
-    )
+    delivery_service(baser).defer(associationStatus.eventId, error="connection failed")
     delivery = baser.outbox.get(keys=(associationStatus.eventId,))
     # The durable bytes are the public status event, not the internal result row.
     assert json.loads(delivery.body) == {
@@ -145,7 +146,7 @@ def test_acceptance_and_delivery_progress_survive_reopen(verified_store):
     assert baser.destinations.get(keys=(delivery.destination,)) == schedule
 
     # The delivery component calls completion only after validating an ACK.
-    delivery_service(baser).complete(associationStatus.eventId, outcome="acknowledged")
+    delivery_service(baser).acknowledge(associationStatus.eventId)
     assert baser.outbox.get(keys=(associationStatus.eventId,)).acknowledged
     assert baser.destinations.get(keys=(delivery.destination,)).failures == 0
 
@@ -173,7 +174,8 @@ def test_rejected_result_cannot_create_acceptance_or_event(verified_store):
     ApplicationWriter(baser).enqueue_verification(
         VerificationRecord("rejected", "grant")
     )
-    verification_service(baser).next_verification(now=0)
+    verificationService = verification_service(baser)
+    verificationService.start_pending(verificationService.next_pending())
     verification_service(baser).finish(
         VerificationResult("rejected", "rejected", "wrong schema")
     )

@@ -5,40 +5,42 @@ Date: 2026-10-31
 
 ## Decision and rationale
 
-Nonce consumption belongs to the application accepting an association, not the
-issuer constructing it or Oracle receiving downstream status. Bind each exact
-issuer/nonce pair permanently to one accepted SAID. Keep initial verification
-separate from application rejection so a valid proof can still fail local reuse
-policy. [Verifier API v1](../protocol/verifier-api-v1/README.md) owns these visible
-semantics; [external-association-v1](../protocol/external-association-v1/README.md)
-owns nonce syntax and signed commitments.
+Nonce consumption belongs to the application accepting an association. It does
+not belong to the issuer ceremony or the downstream Oracle. Each exact nonce is
+permanently unique within the accepting verifier store, across all issuers.
+Another credential using it is rejected with `NONCE_REUSED`. Initial proof
+verification remains separate from application acceptance.
 
-`VerifierBaser.accept()` commits the claim, accepted status and optional outbox
-obligation in one native synchronous LMDB write transaction. Insert without
-overwrite and inspect existing data in the same transaction. Inconsistent or
-orphaned claims abort acceptance. Native LMDB supplies process coordination; no
-application locks, threads or additional environment are needed for nonce claims.
+The LMDB key is the nonce's exact ASCII bytes. The `AcceptedNonce` value records
+the accepted credential SAID. A key's presence means consumed regardless of its
+value. No issuer prefix, digest, owner lookup, history scan, paging or startup
+nonce audit is needed. The 1–128 character `[A-Za-z0-9_-]` contract fits directly
+inside LMDB's key limit without encoding tricks or normalization.
 
-The typed `AcceptedNonce` record stores issuer, exact nonce and accepted SAID.
-Komer's ordinary issuer.nonce key is unambiguous under the credential profile and
-at most 173 bytes, within the pinned environment's 511-byte key limit. Hashing
-or custom key encodings add no value. Standard name/base/head-dir selects the
-existing application store. Persistent closure retains all claims.
+`AcceptanceService` prepares status and event records. The writer performs one
+no-overwrite nonce insert, atomically with accepted status and any delivery
+obligation. A conflict aborts the acceptance transaction. The service saves a
+`NONCE_REUSED` rejection for a new credential; a same-credential race returns its
+already stored status. Duplicate delivery does not perform a second acceptance.
+No nonce value is decoded to decide reuse. An opaque or malformed value still
+denies acceptance. Revocation and supersession never release the key.
 
-KERIpy evidence and application state use separate transactions. A dedicated
-`accepting.` phase recovers completed verified results one at a time; invalid, pending or revoked
-evidence cannot burn a nonce. Target-free acceptance still claims the nonce,
-without an event. Later enabling delivery does not backfill those acceptances.
+The `accepting.` work queue recovers one verified result at a time. Invalid,
+pending or revoked evidence cannot burn a nonce. Target-free acceptance uses the
+same atomic claim without an event. LMDB provides durability and independent
+process coordination; there is no application mutex or extra nonce environment.
 
-## Store and operational limits
+## Breaking storage contract
 
-The `durable-phases-v1` scope requires complete claim history. Startup rejects
-pre-policy or inconsistent acceptance stores; it does not migrate, backfill or
-recreate missing claims. The history audit currently holds accepted SAIDs in
-memory. Uniqueness applies within one preserved verifier store, not globally
-across independent deployments. Do not erase history to evade reuse rejection.
+Use fresh application stores with policy `nonce-key-v1`. There are no old-format
+readers, migrations, backfills or compatibility APIs. Startup checks the fixed
+trust/network scope record, not the nonce or association datasets. Atomic writes
+prevent partial acceptance; the application does not reconstruct history or
+attempt to repair manual database edits. Preserve the store across restart.
+Uniqueness is local to that verifier store, not shared across independent deployments.
 
-See [operations](../docs/operations.md) for store layout and maintenance, and
-[testing](../docs/testing.md) for process-race, crash/rollback, exact-key and
-witnessed-intake coverage. Transport replay claims and Ethereum transaction
-nonces are separate concerns.
+[Verifier API v1](../protocol/verifier-api-v1/README.md) owns acceptance behavior;
+[external-association-v1](../protocol/external-association-v1/README.md) owns signed
+fields and syntax. Transport replay claims and Ethereum transaction nonces are
+separate concerns. See [testing](../docs/testing.md) for process-race, crash,
+rollback, exact-key and witnessed-intake coverage.

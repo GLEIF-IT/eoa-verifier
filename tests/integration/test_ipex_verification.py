@@ -3,7 +3,7 @@
 import shutil
 import subprocess
 import time
-from contextlib import ExitStack
+from contextlib import ExitStack, closing
 from importlib.resources import files
 from uuid import uuid4
 
@@ -342,18 +342,15 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             # already-existing result before the duplicate has been processed.
             yield from send(presentationCesr)
 
-            intake = next(
-                d for d in runtime.doers if isinstance(d, GrantNotificationDoer)
-            )
-            for _, exn in runtime.hby.db.exns.getItemIter():
-                if exn.ked.get("e", {}).get("acdc", {}).get("d") == creder.said:
-                    intake.service.native.notifier.add(
-                        {"r": "/exn/ipex/grant", "d": exn.said}
-                    )
-                    intake.service.process_one()
-                    break
-            else:
-                raise AssertionError("accepted Grant not found")
+            with closing(runtime.hby.db.exns.getItemIter()) as exnRecords:
+                for _, exn in exnRecords:
+                    if exn.ked.get("e", {}).get("acdc", {}).get("d") == creder.said:
+                        grantSaid = exn.said
+                        break
+                else:
+                    raise AssertionError("accepted Grant not found")
+            runtime.notifier.add({"r": "/exn/ipex/grant", "d": grantSaid})
+            runtime.grant_replay.process_one()
             assert runtime.baser.results.get(keys=(creder.said,)) == original
             assert (
                 runtime.baser.associations.get(keys=(creder.said,)) == associationStatus
@@ -487,7 +484,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             )
             assert (
                 runtime.baser.accepted_nonces.get(
-                    keys=(nonce_key(raced.issuer, raced.sad["u"]),)
+                    keys=(nonce_key(raced.sad["u"]),)
                 )
                 is None
             )
@@ -503,7 +500,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
                 assert reason in verification.reason, (label, verification)
                 assert (
                     runtime.baser.accepted_nonces.get(
-                        keys=(nonce_key(candidate.issuer, candidate.sad["u"]),)
+                        keys=(nonce_key(candidate.sad["u"]),)
                     )
                     is None
                 )

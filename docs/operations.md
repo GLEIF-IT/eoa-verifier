@@ -28,11 +28,12 @@ Foundry 1.5.1.
 Reuse name, base, alias, store root and passcode on restart. `--incept-file` supplies
 KERIpy options for a new identity only. The application store is bound to its
 GEDA root and chain ID before workers start, including operation without webhook delivery.
-Changing either requires separate stores. Existing stores with completed results
-but no recorded scope are refused; preserve them and use fresh stores rather than guessing their original policy. Pre-policy stores are also refused: acceptance now requires permanent issuer/nonce
-history under policy `durable-phases-v1`. Association nonces must contain
-1–128 ASCII characters from `[A-Za-z0-9_-]`; no normalization is applied. Use a deliberate fresh store set; there is
-no migration or backfill. Never reset accepted history to evade nonce rejection.
+Changing either requires separate stores. Use fresh application stores for the
+`nonce-key-v1` policy. Each nonce is a direct key, consumed permanently across all
+issuers in that store. Startup checks the fixed scope record without auditing
+nonce or association history. Nonces contain 1–128 ASCII characters from
+`[A-Za-z0-9_-]`; no normalization is applied. There are no old-format readers,
+migrations or backfills. Preserve the store across restart.
 Enabling webhook delivery with the same root/chain remains supported, but does not
 create deliveries for associations accepted without a configured target. Preserve the entire KERIpy/application
 store set together; do not copy live LMDB files or share writable stores between
@@ -65,7 +66,7 @@ liveness defect. Complete preceding messages can already have entered KERIpy sta
 request processing is not an atomic batch. Missing verification evidence still
 uses KERIpy escrows.
 Initial checks must finish before acceptance. Without webhook configuration, the
-service accepts locally and consumes the exact issuer/nonce, but creates no delivery
+service accepts locally and consumes the exact nonce, but creates no delivery
 obligation. Public `delivery` is null. Another SAID reusing an accepted pair becomes
 locally rejected with `NONCE_REUSED`, even after revocation or downstream supersession. Initial
 verification remains visible separately in the application store. See

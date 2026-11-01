@@ -144,7 +144,8 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
         ApplicationWriter(baser).enqueue_verification(
             VerificationRecord("association", "grant")
         )
-        verification_service(baser).next_verification(now=0)
+        verificationService = verification_service(baser)
+        verificationService.start_pending(verificationService.next_pending())
         verification_service(baser).finish(
             VerificationResult(
                 "association",
@@ -165,9 +166,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
         if reply.startswith("retirement"):
             # Initial delivery is already acknowledged; retirement needs its own
             # event ACK, even if the target signs another acceptance of event 1.
-            delivery_service(baser).complete(
-                associationStatus.eventId, outcome="acknowledged"
-            )
+            delivery_service(baser).acknowledge(associationStatus.eventId)
             associationStatus = retirement_service(baser).retire("association")
         sender = WebhookSender(
             reader=ApplicationReader(baser),
@@ -265,7 +264,8 @@ def test_malformed_chunk_response_preserves_pending_delivery(tmp_path):
         ApplicationWriter(baser).enqueue_verification(
             VerificationRecord("association", "grant")
         )
-        verification_service(baser).next_verification(now=0)
+        verificationService = verification_service(baser)
+        verificationService.start_pending(verificationService.next_pending())
         verification_service(baser).finish(
             VerificationResult(
                 "association",
@@ -319,7 +319,8 @@ def test_malformed_chunk_response_preserves_pending_delivery(tmp_path):
 def accept(baser, said):
     """Create a completed result and its event at one shared destination."""
     ApplicationWriter(baser).enqueue_verification(VerificationRecord(said, "grant"))
-    verification_service(baser).next_verification(now=0)
+    verificationService = verification_service(baser)
+    verificationService.start_pending(verificationService.next_pending())
     verification_service(baser).finish(
         VerificationResult(
             said, "verified", eoaResult={"wallet": "wallet", "accountObservation": {}}
@@ -519,8 +520,10 @@ def test_transient_attempt_budget_moves_to_dead_letter_without_history_scan(outb
         yield 0.0
         raise TimeoutError("unavailable")
 
+    deliveryService = delivery_service(outbox)
+    deliveryService.start_ready(deliveryService.next_ready())
     for attempt in range(3):
-        delivery = delivery_service(outbox).next_delivery()
+        delivery = deliveryService.next_active()
         assert delivery.eventId == associationStatus.eventId
         with patch.object(sender.service, "send", unavailable):
             list(sender.service.attempt(delivery))
@@ -529,23 +532,27 @@ def test_transient_attempt_budget_moves_to_dead_letter_without_history_scan(outb
     assert outbox.delivery_dead.get(keys=(associationStatus.eventId,)) is not None
     outbox.close()
     outbox.reopen()
-    assert delivery_service(outbox).next_delivery() is None
+    assert delivery_service(outbox).next_active() is None
+    assert delivery_service(outbox).next_ready() is None
     delivery_service(outbox).retry(associationStatus.eventId)
-    assert delivery_service(outbox).next_delivery().attempts == 0
+    assert delivery_service(outbox).next_ready().attempts == 0
 
 
 def test_delivery_phase_resumes_active_and_releases_completed(outbox):
     """A crash retains the active event; ACK atomically removes its scheduling reference."""
     associationStatus = accept(outbox, "phase")
-    delivery = delivery_service(outbox).next_delivery()
+    deliveryService = delivery_service(outbox)
+    delivery = deliveryService.next_ready()
+    deliveryService.start_ready(delivery)
     assert delivery.eventId == associationStatus.eventId
     assert outbox.delivery_ready.cntAll() == 0
     outbox.close()
     outbox.reopen()
-    assert delivery_service(outbox).next_delivery() == delivery
-    delivery_service(outbox).complete(delivery.eventId, outcome="acknowledged")
+    assert delivery_service(outbox).next_active() == delivery
+    delivery_service(outbox).acknowledge(delivery.eventId)
     assert outbox.delivery_active.cntAll() == 0
-    assert delivery_service(outbox).next_delivery() is None
+    assert delivery_service(outbox).next_active() is None
+    assert delivery_service(outbox).next_ready() is None
     assert outbox.outbox.get(keys=(delivery.eventId,)).acknowledged
 
 
@@ -557,7 +564,7 @@ def test_late_completion_keeps_another_active_reference(outbox):
     current = accept(outbox, "current")
     outbox.delivery_ready.rem(keys=(current.eventId,))
     outbox.delivery_active.pin(keys=("sender",), val=DeliveryReference(current.eventId))
-    delivery_service(outbox).complete(earlier.eventId, outcome="acknowledged")
+    delivery_service(outbox).acknowledge(earlier.eventId)
     assert outbox.delivery_active.get(keys=("sender",)).eventId == current.eventId
     assert outbox.associations.get(keys=("current",)) == current
     assert not outbox.outbox.get(keys=(current.eventId,)).acknowledged

@@ -2,7 +2,7 @@
 
 Run from the repository root with the installed verifier and pytest. Tests are an
 explicit tests package; pytest.ini selects importlib mode. No PYTHONPATH or
-sys.path edits are required. Production components and imports are unchanged. The verifier also owns the
+sys.path edits are required. The verifier also owns the
 external-association profile conformance suite and reference vectors.
 
 | Production subject | Test location / example |
@@ -14,10 +14,11 @@ external-association profile conformance suite and reference vectors.
 | receiving/directing.py and grants.py | tests/receiving/test_directing.py and test_grants.py |
 | verification/eoa.py | python -m pytest tests/verification/test_eoa.py |
 | EoaVerifierDoer / timeout | python -m pytest tests/verification/test_worker.py -k timeout |
-| verification/coordinating.py | tests/verification/test_coordinating.py |
-| StatusEnd | python -m pytest tests/associations/test_statusing.py |
-| VerifierBaser.accept | python -m pytest tests/persistence/test_basing.py -k acceptance |
-| Native nonce claims/durability | tests/persistence/test_accepted_nonces.py |
+| VerificationService / VerificationCoordinator | tests/verification/test_coordinating.py |
+| StatusQuery / StatusEnd | python -m pytest tests/associations/test_statusing.py |
+| AcceptanceService and atomic acceptance writes | python -m pytest tests/persistence/test_basing.py -k acceptance |
+| Detached readers | tests/persistence/test_reading.py |
+| LMDB nonce claims/durability | tests/persistence/test_accepted_nonces.py |
 | Delivery authentication and sender | tests/delivery/test_authing.py and test_delivering.py |
 | Acceptance/retirement workers with witnessed evidence | tests/integration/test_ipex_verification.py |
 | Atomic retirement plus public visibility | tests/integration/test_acceptance_status.py |

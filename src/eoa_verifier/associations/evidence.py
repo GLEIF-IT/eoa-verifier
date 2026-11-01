@@ -1,4 +1,4 @@
-"""Native association issuance facts and accepted TEL revocation identifiers."""
+"""KERIpy association issuance facts and accepted TEL revocation identifiers."""
 
 from keri import kering
 
@@ -7,14 +7,15 @@ class AssociationEvidence:
     """Borrow Regery; return copied issuance facts and explicit revocation IDs."""
 
     def __init__(self, rgy):
+        """Borrow the already-open KERIpy registry without owning its lifecycle."""
         self._rgy = rgy
 
     def next_revocation(self):
-        """Detach one credential/TEL-event SAID pair from the native queue."""
+        """Detach one credential/TEL-event SAID pair from the KERIpy queue."""
         return self._rgy.reger.next_revocation()
 
     def remove_revocation(self, cred_said):
-        """Acknowledge native revocation after idempotent application retirement."""
+        """Acknowledge KERIpy revocation after idempotent application retirement."""
         self._rgy.reger.revocations.rem(keys=(cred_said,))
 
     def issuance_facts(self, credSaid):

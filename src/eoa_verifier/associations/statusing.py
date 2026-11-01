@@ -9,6 +9,7 @@ class StatusQuery:
     """Build one stored association view without effects or work discovery."""
 
     def __init__(self, reader):
+        """Borrow detached point queries; this view owns no store or network tasks."""
         self.reader = reader
 
     def get(self, said):
@@ -16,7 +17,7 @@ class StatusQuery:
         associationStatus = self.reader.association(said)
         verificationResult = self.reader.verification_result(said)
         phase, verification = self.reader.verification_progress(said)
-        deadLetterResult = self.reader.acceptance(said, dead=True)
+        deadLetterResult = self.reader.dead_acceptance(said)
         if associationStatus is not None:
             statusBody = asdict(associationStatus)
             delivery = (
@@ -75,6 +76,7 @@ class StatusEnd:
     """Map the status query to GET /v1/associations/{said}/status."""
 
     def __init__(self, query):
+        """Borrow the application status projection."""
         self.query = query
 
     def on_get(self, req, rep, said):

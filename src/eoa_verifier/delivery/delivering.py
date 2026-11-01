@@ -20,6 +20,7 @@ class _TransientFailure(Exception):
     """An HTTP result that remains pending, optionally honoring Retry-After."""
 
     def __init__(self, message, *, retry_after=0.0):
+        """Retain a transient failure and the optional server-requested delay."""
         super().__init__(message)
         self.retry_after = retry_after
 
@@ -52,27 +53,28 @@ class DeliveryService:
             raise ValueError("max_attempts must be positive")
         self.max_attempts = max_attempts
 
-    def next_delivery(self):
-        """Resume active work before claiming the ready head; never scan outbox history."""
-        reference = self.reader.delivery_reference("active")
-        if reference is None:
-            reference = self.reader.delivery_reference("ready")
-            if reference is None:
-                return None
-            self.writer.activate_delivery(reference)
-        delivery = self.reader.delivery(reference.eventId)
-        if delivery is None:
-            raise ValueError("scheduled delivery event is absent")
-        return delivery
+    def next_active(self):
+        """Read the active delivery without consulting or claiming ready work."""
+        reference = self.reader.active_delivery_reference()
+        return self._delivery(reference.eventId) if reference is not None else None
+
+    def next_ready(self):
+        """Read the ready delivery head without changing its scheduling reference."""
+        reference = self.reader.ready_delivery_reference()
+        return self._delivery(reference.eventId) if reference is not None else None
+
+    def start_ready(self, delivery):
+        """Commit ready-to-active before attempting the selected delivery."""
+        self.writer.delivery_ready_to_active(DeliveryReference(delivery.eventId))
 
     def retry(self, event_id):
         """Reset a corrected dead letter without resetting destination cooldown."""
-        reference = self.reader.delivery_reference("dead", event_id)
+        reference = self.reader.dead_delivery_reference(event_id)
         if reference is None:
             raise ValueError("unknown dead-letter event")
         previous = self.reader.delivery(event_id)
         delivery = replace(previous, blocked=False, error="", attempts=0)
-        self.writer.retry_delivery(previous, delivery, reference)
+        self.writer.retry_dead_delivery(previous, delivery, reference)
 
     def record_attempt(self, event_id, *, next_attempt_at=None):
         """Prepare durable attempt accounting and request-start pacing before I/O."""
@@ -87,54 +89,70 @@ class DeliveryService:
             blocked=False,
             error="attempt started; authenticated ACK not recorded",
         )
-        schedule = None
+        schedule = self.reader.destination_schedule(delivery.destination)
         if next_attempt_at is not None:
-            schedule = self.reader.destination_schedule(delivery.destination)
             schedule = replace(
                 schedule, nextAttemptAt=max(schedule.nextAttemptAt, next_attempt_at)
             )
-        self.writer.save_delivery(previous, delivery, schedule)
+        self.writer.record_delivery_attempt(previous, delivery, schedule)
         return delivery
 
-    def complete(self, event_id, *, outcome, error="", schedule=None):
-        """Persist an explicit acknowledged, retry or dead-letter outcome."""
-        if outcome not in ("acknowledged", "retry", "dead-letter"):
-            raise ValueError("unknown delivery outcome")
-        previous = self.reader.delivery(event_id)
-        if previous is None:
-            raise ValueError("unknown delivery event")
+    def acknowledge(self, event_id):
+        """Prepare authenticated completion and reset destination failure backoff."""
+        previous = self._delivery(event_id)
         if previous.acknowledged:
             return
-        acknowledged, blocked = outcome == "acknowledged", outcome == "dead-letter"
-        delivery = replace(
-            previous, error=error, blocked=blocked, acknowledged=acknowledged
+        delivery = replace(previous, error="", blocked=False, acknowledged=True)
+        schedule = replace(
+            self.reader.destination_schedule(delivery.destination), failures=0
         )
-        if acknowledged:
-            schedule = replace(
-                self.reader.destination_schedule(delivery.destination), failures=0
-            )
-        self.writer.save_delivery(
-            previous,
-            delivery,
-            schedule,
-            completed=acknowledged or blocked,
-            dead=DeliveryReference(event_id) if blocked else None,
+        self.writer.acknowledge_delivery(
+            previous, delivery, schedule, DeliveryReference(event_id)
         )
+
+    def defer(self, event_id, *, error, schedule=None):
+        """Prepare retry progress while retaining the active delivery reference."""
+        previous = self._delivery(event_id)
+        if previous.acknowledged:
+            return
+        delivery = replace(previous, error=error, blocked=False, acknowledged=False)
+        schedule = schedule or self.reader.destination_schedule(delivery.destination)
+        self.writer.defer_delivery(previous, delivery, schedule)
+
+    def dead_letter(self, event_id, *, error, schedule=None):
+        """Prepare a stopped event and its dedicated dead-letter reference."""
+        previous = self._delivery(event_id)
+        if previous.acknowledged:
+            return
+        delivery = replace(previous, error=error, blocked=True, acknowledged=False)
+        schedule = schedule or self.reader.destination_schedule(delivery.destination)
+        self.writer.dead_letter_delivery(
+            previous, delivery, schedule, DeliveryReference(event_id)
+        )
+
+    def _delivery(self, event_id):
+        """Read an identified event or fail on missing durable state."""
+        delivery = self.reader.delivery(event_id)
+        if delivery is None:
+            raise ValueError("unknown delivery event")
+        return delivery
 
     def process_one(self):
         """Advance one ready/current event, yielding only through its HTTP effect."""
-        delivery = self.next_delivery()
+        delivery = self.next_active()
         if delivery is None:
-            return
+            delivery = self.next_ready()
+            if delivery is None:
+                return
+            self.start_ready(delivery)
         status = self.reader.association(delivery.associationSaid)
         if (
             status is None
             or status.status not in ("accepted", "revoked")
             or status.eventId != delivery.eventId
         ):
-            self.complete(
+            self.dead_letter(
                 delivery.eventId,
-                outcome="dead-letter",
                 error="event is no longer the current association status",
             )
             return
@@ -147,9 +165,8 @@ class DeliveryService:
     def attempt(self, delivery):
         """Persist pacing before HTTP; prepare the explicit result after it returns."""
         if delivery.attempts >= self.max_attempts:
-            self.complete(
+            self.dead_letter(
                 delivery.eventId,
-                outcome="dead-letter",
                 error="delivery attempt limit reached",
             )
             return
@@ -159,9 +176,8 @@ class DeliveryService:
         try:
             yield from self.send(delivery)
         except (AuthenticationError, ValueError, ssl.SSLCertVerificationError) as error:
-            self.complete(
+            self.dead_letter(
                 delivery.eventId,
-                outcome="dead-letter",
                 error=str(error) or type(error).__name__,
             )
         except (_TransientFailure, OSError) as error:
@@ -179,16 +195,13 @@ class DeliveryService:
                 schedule,
                 nextAttemptAt=max(schedule.nextAttemptAt, self.clock() + delay),
             )
-            self.complete(
-                delivery.eventId,
-                outcome="dead-letter"
-                if delivery.attempts >= self.max_attempts
-                else "retry",
-                error=str(error) or type(error).__name__,
-                schedule=schedule,
-            )
+            reason = str(error) or type(error).__name__
+            if delivery.attempts >= self.max_attempts:
+                self.dead_letter(delivery.eventId, error=reason, schedule=schedule)
+            else:
+                self.defer(delivery.eventId, error=reason, schedule=schedule)
         else:
-            self.complete(delivery.eventId, outcome="acknowledged")
+            self.acknowledge(delivery.eventId)
 
     def send(self, delivery):
         """Authenticate and validate the response produced by the signed HTTP adapter."""

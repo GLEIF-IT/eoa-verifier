@@ -1,4 +1,4 @@
-"""Credential-chain trust and profile rules over native evidence snapshots."""
+"""Credential-chain trust and profile rules over KERIpy evidence snapshots."""
 
 from keri.core import coring, serdering
 
@@ -16,7 +16,7 @@ def verify_association(
 ) -> serdering.SerderACDC:
     """Return a KERIpy-accepted association after local LE/QVI trust checks.
 
-    evidence supplies detached credentials and native validation results. said and
+    evidence supplies detached credentials and KERIpy validation results. said and
     schema_said identify the expected association; trusted_geda_aid anchors QVI
     issuance/delegation. Optional candidate bytes aid rejection while escrowed but
     cannot establish acceptance. Require untargeted I2I LE linkage, correct holders,

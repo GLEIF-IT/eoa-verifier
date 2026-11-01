@@ -21,63 +21,106 @@ class ApplicationWriter:
         """Borrow the application's already-open store."""
         self._db = baser
 
-    def move_grant(self, previous, source, record, target):
-        """Save a prepared Grant phase and remove its expected source and due index.
-
-        source is None for a native notice; other phases are active, waiting or
-        dead. Comparing the source bytes prevents a stale caller removing work.
-        """
+    def start_grant(self, record):
+        """Persist a KERIpy notice in grant_active before KERIpy acknowledgement."""
         db = self._db
-        tables = {
-            "active": db.grant_active,
-            "waiting": db.grant_waiting,
-            "dead": db.grant_dead,
-        }
-        table = tables[target]
-        key = b"receiver" if target == "active" else record.noticeId.encode()
-        raw = table.serializer(record)
-        source_table = tables[source] if source else None
-        source_key = (
-            (b"receiver" if source == "active" else previous.noticeId.encode())
-            if source
-            else None
-        )
-        expected = source_table.serializer(previous) if source else None
-        old_due = (
-            due_key(previous.nextAttemptAt, previous.noticeId)
-            if source == "waiting"
-            else None
-        )
-        new_due = (
-            due_key(record.nextAttemptAt, record.noticeId)
-            if target == "waiting"
-            else None
-        )
+        raw = db.grant_active.serializer(record)
         with db.env.begin(write=True) as txn:
-            if source_table is not None:
-                if txn.get(source_key, db=source_table.sdb) != expected:
-                    raise ValueError("Grant source changed")
-                txn.delete(source_key, db=source_table.sdb)
-            if old_due is not None:
-                txn.delete(old_due, db=db.grant_due.sdb)
-            txn.put(key, raw, db=table.sdb)
-            if new_due is not None:
-                txn.put(new_due, record.noticeId.encode(), db=db.grant_due.sdb)
+            if not txn.put(b"receiver", raw, db=db.grant_active.sdb, overwrite=False):
+                raise ValueError("receiver already has an active Grant")
 
-    def complete_grant(self, record, verification=None):
-        """Atomically settle the expected active Grant and enqueue optional work.
+    def resume_grant(self, previous, record):
+        """Replace the expected grant_active record with its prepared next attempt."""
+        db = self._db
+        expected = db.grant_active.serializer(previous)
+        raw = db.grant_active.serializer(record)
+        with db.env.begin(write=True) as txn:
+            if txn.get(b"receiver", db=db.grant_active.sdb) != expected:
+                raise ValueError("grant source is absent or changed")
+            txn.put(b"receiver", raw, db=db.grant_active.sdb)
+
+    def activate_waiting_grant(self, previous, record):
+        """Move grant_waiting to grant_active and remove its due index."""
+        db = self._db
+        key = record.noticeId.encode()
+        expected = db.grant_waiting.serializer(previous)
+        raw = db.grant_active.serializer(record)
+        old_due = due_key(previous.nextAttemptAt, previous.noticeId)
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.grant_waiting.sdb) != expected:
+                raise ValueError("grant source is absent or changed")
+            txn.delete(key, db=db.grant_waiting.sdb)
+            txn.delete(old_due, db=db.grant_due.sdb)
+            txn.put(b"receiver", raw, db=db.grant_active.sdb)
+
+    def defer_grant(self, previous, record):
+        """Move grant_active to grant_waiting and insert its prepared deadline."""
+        db = self._db
+        key = record.noticeId.encode()
+        expected = db.grant_active.serializer(previous)
+        raw = db.grant_waiting.serializer(record)
+        new_due = due_key(record.nextAttemptAt, record.noticeId)
+        with db.env.begin(write=True) as txn:
+            if txn.get(b"receiver", db=db.grant_active.sdb) != expected:
+                raise ValueError("grant source is absent or changed")
+            txn.delete(b"receiver", db=db.grant_active.sdb)
+            txn.put(key, raw, db=db.grant_waiting.sdb)
+            txn.put(new_due, key, db=db.grant_due.sdb)
+
+    def dead_letter_grant(self, previous, record):
+        """Move grant_active to grant_dead after replay failure or interruption."""
+        db = self._db
+        key = record.noticeId.encode()
+        expected = db.grant_active.serializer(previous)
+        raw = db.grant_dead.serializer(record)
+        with db.env.begin(write=True) as txn:
+            if txn.get(b"receiver", db=db.grant_active.sdb) != expected:
+                raise ValueError("grant source is absent or changed")
+            txn.delete(b"receiver", db=db.grant_active.sdb)
+            txn.put(key, raw, db=db.grant_dead.sdb)
+
+    def dead_letter_waiting_grant(self, previous, record):
+        """Move exhausted grant_waiting to grant_dead and remove its deadline."""
+        db = self._db
+        key = record.noticeId.encode()
+        expected = db.grant_waiting.serializer(previous)
+        raw = db.grant_dead.serializer(record)
+        old_due = due_key(previous.nextAttemptAt, previous.noticeId)
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.grant_waiting.sdb) != expected:
+                raise ValueError("grant source is absent or changed")
+            txn.delete(key, db=db.grant_waiting.sdb)
+            txn.delete(old_due, db=db.grant_due.sdb)
+            txn.put(key, raw, db=db.grant_dead.sdb)
+
+    def retry_dead_grant(self, previous, record):
+        """Move corrected grant_dead to grant_waiting with its reset deadline."""
+        db = self._db
+        key = record.noticeId.encode()
+        expected = db.grant_dead.serializer(previous)
+        raw = db.grant_waiting.serializer(record)
+        new_due = due_key(record.nextAttemptAt, record.noticeId)
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.grant_dead.sdb) != expected:
+                raise ValueError("grant source is absent or changed")
+            txn.delete(key, db=db.grant_dead.sdb)
+            txn.put(key, raw, db=db.grant_waiting.sdb)
+            txn.put(new_due, key, db=db.grant_due.sdb)
+
+    def complete_grant(self, record, verification):
+        """Atomically settle the expected active Grant and enqueue verification work.
 
         Existing verification work/results retain duplicate semantics. A failed
         insert or source removal aborts both changes, leaving replay recoverable.
         """
         db = self._db
         expected = db.grant_active.serializer(record)
-        key = verification.associationSaid.encode() if verification else None
-        raw = db.pending.serializer(verification) if verification else None
+        key = verification.associationSaid.encode()
+        raw = db.pending.serializer(verification)
         with db.env.begin(write=True) as txn:
             if txn.get(b"receiver", db=db.grant_active.sdb) != expected:
                 raise ValueError("Grant source changed")
-            if verification is not None and not any(
+            if not any(
                 txn.get(key, db=table.sdb) is not None
                 for table in (
                     db.results,
@@ -87,6 +130,15 @@ class ApplicationWriter:
                 )
             ):
                 txn.put(key, raw, db=db.pending.sdb, overwrite=False)
+            txn.delete(b"receiver", db=db.grant_active.sdb)
+
+    def discard_unrelated_notice(self, record):
+        """Remove an active KERIpy notice whose route is outside IPEX Grant handling."""
+        db = self._db
+        expected = db.grant_active.serializer(record)
+        with db.env.begin(write=True) as txn:
+            if txn.get(b"receiver", db=db.grant_active.sdb) != expected:
+                raise ValueError("Grant source changed")
             txn.delete(b"receiver", db=db.grant_active.sdb)
 
     def enqueue_verification(self, verification):
@@ -109,43 +161,112 @@ class ApplicationWriter:
                 return False
             return txn.put(key, raw, db=db.pending.sdb, overwrite=False)
 
-    def move_verification(self, previous, source, record, target):
-        """Move the expected record and its due index as one prepared write set."""
+    def pending_to_verifying(self, previous, record):
+        """Move pending to verifying with a prepared charged attempt."""
         db = self._db
-        tables = {
-            "pending": db.pending,
-            "verifying": db.verifying,
-            "waiting": db.waiting,
-            "dead-letter": db.verification_dead,
-        }
-        origin, destination = tables[source], tables[target]
         key = record.associationSaid.encode()
-        expected, raw = origin.serializer(previous), destination.serializer(record)
-        old_due = (
-            due_key(previous.nextAttemptAt, previous.associationSaid)
-            if source == "waiting"
-            else None
-        )
-        new_due = (
-            due_key(record.nextAttemptAt, record.associationSaid)
-            if target == "waiting"
-            else None
-        )
+        expected = db.pending.serializer(previous)
+        raw = db.verifying.serializer(record)
         with db.env.begin(write=True) as txn:
-            if txn.get(key, db=origin.sdb) != expected:
-                raise ValueError("active verification source is absent or changed")
-            txn.delete(key, db=origin.sdb)
-            if old_due is not None:
-                txn.delete(old_due, db=db.verification_due.sdb)
-            txn.put(key, raw, db=destination.sdb)
-            if new_due is not None:
-                txn.put(new_due, key, db=db.verification_due.sdb)
+            if txn.get(key, db=db.pending.sdb) != expected:
+                raise ValueError("verification source is absent or changed")
+            txn.delete(key, db=db.pending.sdb)
+            txn.put(key, raw, db=db.verifying.sdb)
 
-    def complete_verification(self, result, acceptance):
-        """Save an immutable result, optional acceptance obligation and remove active work."""
+    def resume_verifying(self, previous, record):
+        """Replace interrupted verifying work with its prepared next attempt."""
+        db = self._db
+        key = record.associationSaid.encode()
+        expected = db.verifying.serializer(previous)
+        raw = db.verifying.serializer(record)
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.verifying.sdb) != expected:
+                raise ValueError("verification source is absent or changed")
+            txn.put(key, raw, db=db.verifying.sdb)
+
+    def waiting_to_verifying(self, previous, record):
+        """Move waiting to verifying and remove its due index."""
+        db = self._db
+        key = record.associationSaid.encode()
+        expected = db.waiting.serializer(previous)
+        raw = db.verifying.serializer(record)
+        old_due = due_key(previous.nextAttemptAt, previous.associationSaid)
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.waiting.sdb) != expected:
+                raise ValueError("verification source is absent or changed")
+            txn.delete(key, db=db.waiting.sdb)
+            txn.delete(old_due, db=db.verification_due.sdb)
+            txn.put(key, raw, db=db.verifying.sdb)
+
+    def verifying_to_waiting(self, previous, record):
+        """Move verifying to waiting with a prepared retry deadline."""
+        db = self._db
+        key = record.associationSaid.encode()
+        expected = db.verifying.serializer(previous)
+        raw = db.waiting.serializer(record)
+        new_due = due_key(record.nextAttemptAt, record.associationSaid)
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.verifying.sdb) != expected:
+                raise ValueError("verification source is absent or changed")
+            txn.delete(key, db=db.verifying.sdb)
+            txn.put(key, raw, db=db.waiting.sdb)
+            txn.put(new_due, key, db=db.verification_due.sdb)
+
+    def verifying_to_dead_letter(self, previous, record):
+        """Move failed or interrupted verifying work to verification_dead."""
+        db = self._db
+        key = record.associationSaid.encode()
+        expected = db.verifying.serializer(previous)
+        raw = db.verification_dead.serializer(record)
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.verifying.sdb) != expected:
+                raise ValueError("verification source is absent or changed")
+            txn.delete(key, db=db.verifying.sdb)
+            txn.put(key, raw, db=db.verification_dead.sdb)
+
+    def waiting_to_dead_letter(self, previous, record):
+        """Move exhausted waiting work to verification_dead and remove its deadline."""
+        db = self._db
+        key = record.associationSaid.encode()
+        expected = db.waiting.serializer(previous)
+        raw = db.verification_dead.serializer(record)
+        old_due = due_key(previous.nextAttemptAt, previous.associationSaid)
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.waiting.sdb) != expected:
+                raise ValueError("verification source is absent or changed")
+            txn.delete(key, db=db.waiting.sdb)
+            txn.delete(old_due, db=db.verification_due.sdb)
+            txn.put(key, raw, db=db.verification_dead.sdb)
+
+    def pending_to_dead_letter(self, previous, record):
+        """Move exhausted pending work to verification_dead."""
+        db = self._db
+        key = record.associationSaid.encode()
+        expected = db.pending.serializer(previous)
+        raw = db.verification_dead.serializer(record)
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.pending.sdb) != expected:
+                raise ValueError("verification source is absent or changed")
+            txn.delete(key, db=db.pending.sdb)
+            txn.put(key, raw, db=db.verification_dead.sdb)
+
+    def dead_letter_to_pending(self, previous, record):
+        """Move corrected verification_dead work to pending with a reset budget."""
+        db = self._db
+        key = record.associationSaid.encode()
+        expected = db.verification_dead.serializer(previous)
+        raw = db.pending.serializer(record)
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.verification_dead.sdb) != expected:
+                raise ValueError("verification source is absent or changed")
+            txn.delete(key, db=db.verification_dead.sdb)
+            txn.put(key, raw, db=db.pending.sdb)
+
+    def complete_verified_candidate(self, result):
+        """Commit result and acceptance obligation and remove verifying work atomically."""
         db = self._db
         key, raw = result.associationSaid.encode(), db.results.serializer(result)
-        acceptance_raw = db.accepting.serializer(acceptance) if acceptance else None
+        acceptance_raw = db.accepting.serializer(result)
         with db.env.begin(write=True) as txn:
             existing = txn.get(key, db=db.results.sdb)
             if existing is not None:
@@ -155,84 +276,143 @@ class ApplicationWriter:
             if txn.get(key, db=db.verifying.sdb) is None:
                 raise ValueError("active verification is absent")
             txn.put(key, raw, db=db.results.sdb)
-            if acceptance_raw is not None:
-                txn.put(key, acceptance_raw, db=db.accepting.sdb)
+            txn.put(key, acceptance_raw, db=db.accepting.sdb)
             txn.delete(key, db=db.verifying.sdb)
 
-    def move_acceptance(self, previous, record, *, to_dead):
-        """Persist a prepared acceptance/dead-letter move against its expected source."""
+    def complete_rejected_candidate(self, result):
+        """Commit rejected result and remove verifying work atomically."""
         db = self._db
-        source, target = (
-            (db.accepting, db.acceptance_dead)
-            if to_dead
-            else (db.acceptance_dead, db.accepting)
-        )
-        key, expected, raw = (
-            record.associationSaid.encode(),
-            source.serializer(previous),
-            target.serializer(record),
-        )
+        key, raw = result.associationSaid.encode(), db.results.serializer(result)
         with db.env.begin(write=True) as txn:
-            if txn.get(key, db=source.sdb) != expected:
-                raise ValueError("acceptance work is absent or changed")
-            txn.put(key, raw, db=target.sdb)
-            txn.delete(key, db=source.sdb)
+            existing = txn.get(key, db=db.results.sdb)
+            if existing is not None:
+                if existing != raw:
+                    raise ValueError("conflicting verification result")
+                return
+            if txn.get(key, db=db.verifying.sdb) is None:
+                raise ValueError("active verification is absent")
+            txn.put(key, raw, db=db.results.sdb)
+            txn.delete(key, db=db.verifying.sdb)
 
-    def save_acceptance(
-        self, status, claim, delivery=None, reference=None, schedule=None
-    ):
-        """Insert one prepared outcome with its optional nonce/event obligation atomically.
+    def dead_letter_acceptance(self, previous, record):
+        """Move accepting to acceptance_dead with a prepared diagnostic."""
+        db = self._db
+        key = record.associationSaid.encode()
+        expected = db.accepting.serializer(previous)
+        raw = db.acceptance_dead.serializer(record)
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.accepting.sdb) != expected:
+                raise ValueError("acceptance source is absent or changed")
+            txn.delete(key, db=db.accepting.sdb)
+            txn.put(key, raw, db=db.acceptance_dead.sdb)
 
-        False reports an existing immutable association. NonceConflict aborts the
-        entire write set so the service can inspect the owner and prepare rejection.
+    def retry_dead_acceptance(self, previous, record):
+        """Move corrected acceptance_dead back to accepting."""
+        db = self._db
+        key = record.associationSaid.encode()
+        expected = db.acceptance_dead.serializer(previous)
+        raw = db.accepting.serializer(record)
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.acceptance_dead.sdb) != expected:
+                raise ValueError("acceptance source is absent or changed")
+            txn.delete(key, db=db.acceptance_dead.sdb)
+            txn.put(key, raw, db=db.accepting.sdb)
+
+    def accept_association(self, status, nonce):
+        """Commit nonce ownership and accepted status without delivery.
+
+        False means this SAID already has status. NonceConflict aborts all writes.
         """
         from .keys import nonce_key
+        from .records import AcceptedNonce
 
         db = self._db
         key, raw = status.associationSaid.encode(), db.associations.serializer(status)
-        claim_key = nonce_key(claim.issuerAid, claim.nonce) if claim else None
-        claim_raw = db.accepted_nonces.serializer(claim) if claim else None
-        event_key = delivery.eventId.encode() if delivery else None
-        event_raw = db.outbox.serializer(delivery) if delivery else None
-        ref_raw = db.delivery_ready.serializer(reference) if reference else None
-        schedule_key = delivery.destination.encode() if schedule else None
-        schedule_raw = db.destinations.serializer(schedule) if schedule else None
+        claim_key = nonce_key(nonce)
+        claim_raw = db.accepted_nonces.serializer(AcceptedNonce(status.associationSaid))
         with db.env.begin(write=True) as txn:
             if txn.get(key, db=db.associations.sdb) is not None:
                 return False
-            if claim is not None and not txn.put(
+            if not txn.put(
                 claim_key, claim_raw, db=db.accepted_nonces.sdb, overwrite=False
             ):
                 raise NonceConflict()
             txn.put(key, raw, db=db.associations.sdb)
-            if event_raw is not None:
-                txn.put(event_key, event_raw, db=db.outbox.sdb)
-                txn.put(event_key, ref_raw, db=db.delivery_ready.sdb)
-            if schedule_raw is not None:
-                txn.put(
-                    schedule_key, schedule_raw, db=db.destinations.sdb, overwrite=False
-                )
             txn.delete(key, db=db.accepting.sdb)
         return True
 
-    def save_retirement(self, previous, status, delivery=None, reference=None):
-        """Replace the expected association and insert its prepared revocation event."""
+    def accept_and_queue_delivery(self, status, nonce, delivery, reference, schedule):
+        """Commit nonce ownership and accepted status with its ready event.
+
+        False means this SAID already has status. NonceConflict aborts all writes.
+        """
+        from .keys import nonce_key
+        from .records import AcceptedNonce
+
+        db = self._db
+        key, raw = status.associationSaid.encode(), db.associations.serializer(status)
+        claim_key = nonce_key(nonce)
+        claim_raw = db.accepted_nonces.serializer(AcceptedNonce(status.associationSaid))
+        event_key, event_raw = delivery.eventId.encode(), db.outbox.serializer(delivery)
+        ref_raw = db.delivery_ready.serializer(reference)
+        schedule_key, schedule_raw = (
+            delivery.destination.encode(),
+            db.destinations.serializer(schedule),
+        )
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.associations.sdb) is not None:
+                return False
+            if not txn.put(
+                claim_key, claim_raw, db=db.accepted_nonces.sdb, overwrite=False
+            ):
+                raise NonceConflict()
+            txn.put(key, raw, db=db.associations.sdb)
+            txn.put(event_key, event_raw, db=db.outbox.sdb)
+            txn.put(event_key, ref_raw, db=db.delivery_ready.sdb)
+            txn.put(schedule_key, schedule_raw, db=db.destinations.sdb, overwrite=False)
+            txn.delete(key, db=db.accepting.sdb)
+        return True
+
+    def reject_reused_nonce(self, status):
+        """Save nonce-reuse rejection and remove accepting; never write a nonce or event."""
+        db = self._db
+        key, raw = status.associationSaid.encode(), db.associations.serializer(status)
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.associations.sdb) is not None:
+                return False
+            txn.put(key, raw, db=db.associations.sdb)
+            txn.delete(key, db=db.accepting.sdb)
+        return True
+
+    def retire_association(self, previous, status):
+        """Replace accepted status with revoked status without delivery."""
         db = self._db
         key = status.associationSaid.encode()
         expected, raw = (
             db.associations.serializer(previous),
             db.associations.serializer(status),
         )
-        event_key = delivery.eventId.encode() if delivery else None
-        event_raw = db.outbox.serializer(delivery) if delivery else None
-        ref_raw = db.delivery_ready.serializer(reference) if reference else None
         with db.env.begin(write=True) as txn:
             if txn.get(key, db=db.associations.sdb) != expected:
                 raise ValueError("association changed before retirement")
             txn.put(key, raw, db=db.associations.sdb)
-            if event_raw is not None:
-                txn.put(event_key, event_raw, db=db.outbox.sdb)
-                txn.put(event_key, ref_raw, db=db.delivery_ready.sdb)
+
+    def retire_and_queue_delivery(self, previous, status, delivery, reference):
+        """Replace accepted status with revoked status and its ready revocation event."""
+        db = self._db
+        key = status.associationSaid.encode()
+        expected, raw = (
+            db.associations.serializer(previous),
+            db.associations.serializer(status),
+        )
+        event_key, event_raw = delivery.eventId.encode(), db.outbox.serializer(delivery)
+        ref_raw = db.delivery_ready.serializer(reference)
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.associations.sdb) != expected:
+                raise ValueError("association changed before retirement")
+            txn.put(key, raw, db=db.associations.sdb)
+            txn.put(event_key, event_raw, db=db.outbox.sdb)
+            txn.put(event_key, ref_raw, db=db.delivery_ready.sdb)
 
     def bind_scope(self, scope):
         """Insert a prepared scope once, rejecting a conflicting storage binding."""
@@ -252,7 +432,7 @@ class ApplicationWriter:
             keys=(peer, nonce), val=ReplayClaim(expires_at)
         )
 
-    def activate_delivery(self, reference):
+    def delivery_ready_to_active(self, reference):
         """Move the expected ready reference to the single active sender slot."""
         db = self._db
         key, raw = reference.eventId.encode(), db.delivery_ready.serializer(reference)
@@ -265,37 +445,77 @@ class ApplicationWriter:
             txn.put(b"sender", active_raw, db=db.delivery_active.sdb)
             txn.delete(key, db=db.delivery_ready.sdb)
 
-    def save_delivery(
-        self, previous, delivery, schedule=None, *, completed=False, dead=None
-    ):
-        """Persist prepared progress/schedule and optional phase cleanup in one transaction.
-
-        An exact reference comparison keeps a late completion from clearing another
-        active item. No ACK, error or retry policy runs in this save operation.
-        """
-        from .records import DeliveryReference
-
+    def record_delivery_attempt(self, previous, delivery, schedule):
+        """Persist charged outbox progress and request-start pacing before HTTP."""
         db = self._db
         key = delivery.eventId.encode()
         expected, raw = db.outbox.serializer(previous), db.outbox.serializer(delivery)
-        schedule_key = delivery.destination.encode() if schedule else None
-        schedule_raw = db.destinations.serializer(schedule) if schedule else None
-        active_raw = db.delivery_active.serializer(DeliveryReference(delivery.eventId))
-        dead_raw = db.delivery_dead.serializer(dead) if dead else None
+        schedule_key, schedule_raw = (
+            delivery.destination.encode(),
+            db.destinations.serializer(schedule),
+        )
         with db.env.begin(write=True) as txn:
             if txn.get(key, db=db.outbox.sdb) != expected:
                 raise ValueError("delivery changed before completion")
             txn.put(key, raw, db=db.outbox.sdb)
-            if completed:
-                txn.delete(key, db=db.delivery_ready.sdb)
-                if txn.get(b"sender", db=db.delivery_active.sdb) == active_raw:
-                    txn.delete(b"sender", db=db.delivery_active.sdb)
-            if dead_raw is not None:
-                txn.put(key, dead_raw, db=db.delivery_dead.sdb)
-            if schedule_raw is not None:
-                txn.put(schedule_key, schedule_raw, db=db.destinations.sdb)
+            txn.put(schedule_key, schedule_raw, db=db.destinations.sdb)
 
-    def retry_delivery(self, previous, delivery, reference):
+    def defer_delivery(self, previous, delivery, schedule):
+        """Persist retry progress and cooldown, retaining the active reference."""
+        db = self._db
+        key = delivery.eventId.encode()
+        expected, raw = db.outbox.serializer(previous), db.outbox.serializer(delivery)
+        schedule_key, schedule_raw = (
+            delivery.destination.encode(),
+            db.destinations.serializer(schedule),
+        )
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.outbox.sdb) != expected:
+                raise ValueError("delivery changed before completion")
+            txn.put(key, raw, db=db.outbox.sdb)
+            txn.put(schedule_key, schedule_raw, db=db.destinations.sdb)
+
+    def acknowledge_delivery(self, previous, delivery, schedule, reference):
+        """Persist authenticated ACK progress and remove the matching ready/active references."""
+        db = self._db
+        key = delivery.eventId.encode()
+        expected, raw = db.outbox.serializer(previous), db.outbox.serializer(delivery)
+        schedule_key, schedule_raw = (
+            delivery.destination.encode(),
+            db.destinations.serializer(schedule),
+        )
+        active_raw = db.delivery_active.serializer(reference)
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.outbox.sdb) != expected:
+                raise ValueError("delivery changed before completion")
+            txn.put(key, raw, db=db.outbox.sdb)
+            txn.put(schedule_key, schedule_raw, db=db.destinations.sdb)
+            txn.delete(key, db=db.delivery_ready.sdb)
+            if txn.get(b"sender", db=db.delivery_active.sdb) == active_raw:
+                txn.delete(b"sender", db=db.delivery_active.sdb)
+
+    def dead_letter_delivery(self, previous, delivery, schedule, reference):
+        """Persist failed progress and move matching ready/active references to delivery_dead."""
+        db = self._db
+        key = delivery.eventId.encode()
+        expected, raw = db.outbox.serializer(previous), db.outbox.serializer(delivery)
+        schedule_key, schedule_raw = (
+            delivery.destination.encode(),
+            db.destinations.serializer(schedule),
+        )
+        active_raw = db.delivery_active.serializer(reference)
+        dead_raw = db.delivery_dead.serializer(reference)
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.outbox.sdb) != expected:
+                raise ValueError("delivery changed before completion")
+            txn.put(key, raw, db=db.outbox.sdb)
+            txn.put(schedule_key, schedule_raw, db=db.destinations.sdb)
+            txn.delete(key, db=db.delivery_ready.sdb)
+            if txn.get(b"sender", db=db.delivery_active.sdb) == active_raw:
+                txn.delete(b"sender", db=db.delivery_active.sdb)
+            txn.put(key, dead_raw, db=db.delivery_dead.sdb)
+
+    def retry_dead_delivery(self, previous, delivery, reference):
         """Save a prepared reset and move its expected dead reference back to ready."""
         db = self._db
         key, raw = delivery.eventId.encode(), db.outbox.serializer(delivery)

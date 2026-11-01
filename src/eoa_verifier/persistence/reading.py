@@ -37,20 +37,33 @@ class ApplicationReader:
         """Return one identified Grant dead letter."""
         return self._db.grant_dead.get(keys=(notice_id,))
 
-    def verification(self, phase, cred_said=None):
-        """Return a point record or phase head; waiting heads follow the due index."""
-        tables = {
-            "pending": self._db.pending,
-            "verifying": self._db.verifying,
-            "waiting": self._db.waiting,
-            "dead-letter": self._db.verification_dead,
-        }
-        table = tables[phase]
-        if cred_said is not None:
-            return table.get(keys=(cred_said,))
-        if phase == "waiting":
-            return due_record(self._db.verification_due, table)
-        return first_record(table)
+    def active_verification(self, cred_said=None):
+        """Return one identified verifying record or the interrupted phase head."""
+        return (
+            self._db.verifying.get(keys=(cred_said,))
+            if cred_said is not None
+            else first_record(self._db.verifying)
+        )
+
+    def waiting_verification(self, cred_said=None):
+        """Return one waiting record or the earliest indexed retry, even if future."""
+        return (
+            self._db.waiting.get(keys=(cred_said,))
+            if cred_said is not None
+            else due_record(self._db.verification_due, self._db.waiting)
+        )
+
+    def pending_verification(self, cred_said=None):
+        """Return one pending record or the queue head."""
+        return (
+            self._db.pending.get(keys=(cred_said,))
+            if cred_said is not None
+            else first_record(self._db.pending)
+        )
+
+    def dead_verification(self, cred_said):
+        """Return an identified verification dead letter."""
+        return self._db.verification_dead.get(keys=(cred_said,))
 
     def verification_result(self, cred_said):
         """Return the immutable result for one candidate."""
@@ -58,16 +71,27 @@ class ApplicationReader:
 
     def verification_progress(self, cred_said):
         """Read the stored phase of one candidate without scheduling work."""
-        for phase in ("pending", "verifying", "waiting", "dead-letter"):
-            record = self.verification(phase, cred_said)
+        for phase, record in (
+            ("pending", self.pending_verification(cred_said)),
+            ("verifying", self.active_verification(cred_said)),
+            ("waiting", self.waiting_verification(cred_said)),
+            ("dead-letter", self.dead_verification(cred_said)),
+        ):
             if record is not None:
                 return phase, record
         return None, None
 
-    def acceptance(self, cred_said=None, *, dead=False):
-        """Return one identified acceptance or its active phase head."""
-        table = self._db.acceptance_dead if dead else self._db.accepting
-        return table.get(keys=(cred_said,)) if cred_said else first_record(table)
+    def acceptance(self, cred_said=None):
+        """Return an identified accepting record or the phase head."""
+        return (
+            self._db.accepting.get(keys=(cred_said,))
+            if cred_said is not None
+            else first_record(self._db.accepting)
+        )
+
+    def dead_acceptance(self, cred_said):
+        """Return one acceptance dead letter."""
+        return self._db.acceptance_dead.get(keys=(cred_said,))
 
     def association(self, cred_said):
         """Return detached accepted/rejected/revoked application status."""
@@ -76,24 +100,6 @@ class ApplicationReader:
     def delivery(self, event_id):
         """Return an immutable event and its current delivery progress."""
         return self._db.outbox.get(keys=(event_id,))
-
-    def nonce_claim(self, issuer, nonce):
-        """Read a claim by canonical key; consistency with its owner is service policy."""
-        from .keys import nonce_key
-
-        key = nonce_key(issuer, nonce)
-        with self._db.env.begin() as txn:
-            return self._db.accepted_nonces.deserializer(
-                txn.get(key, db=self._db.accepted_nonces.sdb)
-            )
-
-    def nonce_page(self, after=None, limit=128):
-        """Detach at most limit historical claims; never yield with a reader open."""
-        return record_page(self._db.accepted_nonces, after, limit)
-
-    def association_page(self, after=None, limit=128):
-        """Detach a bounded historical status page for the stopped-service audit."""
-        return record_page(self._db.associations, after, limit)
 
     def scope(self):
         """Read the persisted trust/network policy binding."""
@@ -106,32 +112,18 @@ class ApplicationReader:
             for table in (self._db.results, self._db.associations, self._db.outbox)
         )
 
-    def delivery_reference(self, phase, event_id=None):
-        """Read one scheduling reference, never discover work from outbox history."""
-        table = {
-            "active": self._db.delivery_active,
-            "ready": self._db.delivery_ready,
-            "dead": self._db.delivery_dead,
-        }[phase]
-        if phase == "active":
-            return table.get(keys=("sender",))
-        return table.get(keys=(event_id,)) if event_id else first_record(table)
+    def active_delivery_reference(self):
+        """Read the sender's interrupted delivery reference."""
+        return self._db.delivery_active.get(keys=("sender",))
+
+    def ready_delivery_reference(self):
+        """Read the ready delivery head without consuming it."""
+        return first_record(self._db.delivery_ready)
+
+    def dead_delivery_reference(self, event_id):
+        """Read one identified delivery dead letter."""
+        return self._db.delivery_dead.get(keys=(event_id,))
 
     def destination_schedule(self, destination):
         """Return a detached destination pacing/backoff record."""
         return self._db.destinations.get(keys=(destination,))
-
-
-def record_page(table, after, limit):
-    """Copy bounded key/record pairs and release the cursor before returning."""
-    records = []
-    with table.db.env.begin(db=table.sdb) as txn, txn.cursor() as cursor:
-        found = cursor.first() if after is None else cursor.set_range(after)
-        if found and after is not None and bytes(cursor.key()) == after:
-            found = cursor.next()
-        while found and len(records) < limit:
-            records.append(
-                (bytes(cursor.key()), table.deserializer(bytes(cursor.value())))
-            )
-            found = cursor.next()
-    return records

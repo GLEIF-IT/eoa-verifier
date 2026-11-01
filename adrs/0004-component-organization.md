@@ -33,12 +33,13 @@ layer or additional concurrency runtime is introduced.
 Runtime may import all components. Receiving, verification, associations and
 delivery may import persistence, but do not import runtime or one another.
 Persistence does not import other application components. These are application
-import rules, not a claim of runtime isolation: injected stores, decks and native
+import rules, not a claim of runtime isolation: injected stores, decks and KERIpy
 KERIpy evidence remain explicit shared contracts. Review component edges, leaf
 responsibilities and dependency cycles when changing imports.
 
 ServiceConfig lives in runtime/config.py; service composition and store lifetime
-remain together in runtime/serving.py. Persistent dataclasses live in
+remain in runtime/serving.py; runtime/bootstrap.py prepares scope, schemas and
+identity before task assembly. Persistent dataclasses live in
 persistence/records.py. VerifierBaser binds tables and owns their lifecycle;
 persistence/reading.py returns detached snapshots and persistence/writing.py
 commits prepared records. Feature services choose transitions and construct events.
@@ -48,13 +49,13 @@ Retain one VerifierBaser and one application LMDB transaction boundary. Completi
 writes results/removes pending work atomically. Acceptance and retirement each
 commit association status and its immutable outbox event together. Event creation
 belongs to association services; delivery sends stored bytes. KERIpy evidence
-stores remain separate. Durable phase queues bridge commit gaps; the native
+stores remain separate. Durable phase queues bridge commit gaps; the KERIpy
 accepted-TEL index and its revocation record commit atomically in VerifierReger.
 No completed-result or association-history scans schedule work.
 
 Keep authentication separate from ACK policy, verification separate from
 acceptance, and oracle ownership/chain publication outside this application.
-Preserve the coordinator's native-state recheck after RPC waits and the existing
+Preserve the coordinator's KERIpy-state recheck after RPC waits and the existing
 HIO task/store lifetime. The subsequent durable-phase refactor changes storage
 without compatibility readers; the authenticated event format remains unchanged.
 
@@ -62,12 +63,25 @@ without compatibility readers; the authenticated event format remains unchanged.
 
 Each feature service reads detached records, decides the next phase, prepares its
 records, and calls a concrete atomic save. Clock, retry, trust and outcome policy
-run outside write transactions. No transaction spans native parsing or RPC.
+run outside write transactions. No transaction spans KERIpy parsing or RPC. Each persistence method names one
+legal transition and fixes its source/destination tables. For example,
+`defer_grant` moves active to waiting, `retry_dead_grant` moves dead to waiting,
+and `acknowledge_delivery` removes only the matching scheduling references.
+Do not pass source/target phase strings or outcome flags to a catch-all save.
+Keep the short transaction bodies explicit even when some code repeats.
+
+Queue reads are phase-specific and do not consume work. Verification exposes
+`next_verifying`, `next_waiting` and `next_pending`; its coordinator explicitly
+chooses interrupted work, then a due retry, then new work. Grant replay and
+delivery use the same separation of phase reads from named transitions. A dead
+letter still consumes the turn: never interpret an exhausted item as permission
+to start a second item. Status queries may read several named phases for one
+identifier because they neither select nor advance work.
 The Grant replay service commits verification enqueue and active-Grant removal
-together after native replay; a rollback preserves the active Grant.
+together after KERIpy replay; a rollback preserves the active Grant.
 
 See the [five-slice implementation plan](../docs/plans/application-persistence-separation.md)
-for the remaining extraction boundaries and qualification requirements.
+for the extraction boundaries, review links and qualification evidence.
 
 ## Import migration
 

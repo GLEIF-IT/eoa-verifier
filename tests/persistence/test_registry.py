@@ -1,4 +1,4 @@
-"""Atomic native TEL revocation records and idempotent application retirement."""
+"""Atomic KERIpy TEL revocation records and idempotent application retirement."""
 
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -14,7 +14,7 @@ from tests.support.acceptance import accept_verified_result, retirement_service
 
 
 def revocation_serder(*, backers=False):
-    """Make a syntactic TEL event; integration tests separately establish native validation."""
+    """Make a syntactic TEL event; integration tests separately establish KERIpy validation."""
     credSaid = core.Diger(ser=b"credential").qb64
     registryId = core.Diger(ser=b"registry").qb64
     issuanceTelSaid = core.Diger(ser=b"issuance").qb64
@@ -27,7 +27,7 @@ def revocation_serder(*, backers=False):
 
 @pytest.mark.parametrize("backers", [False, True])
 def test_accepted_tel_and_revocation_record_survive_reopen(tmp_path, backers):
-    """Both native revocation variants commit one revocation record; native replay cannot recreate it."""
+    """Both KERIpy revocation variants commit one revocation record; KERIpy replay cannot recreate it."""
     with dbing.openLMDB(
         cls=VerifierReger,
         name="revocation_record",
@@ -47,7 +47,7 @@ def test_accepted_tel_and_revocation_record_survive_reopen(tmp_path, backers):
         assert reger.next_revocation() is None
 
 
-def test_failed_revocation_record_write_rolls_back_native_acceptance():
+def test_failed_revocation_record_write_rolls_back_keripy_acceptance():
     """A fault after the TEL index write commits neither index nor revocation record."""
     with dbing.openLMDB(cls=VerifierReger) as reger:
         telSerder = revocation_serder()

@@ -1,5 +1,5 @@
 {
-  "$id": "EOgZ5tOZ0f7U-4H004zKoz75Pi8XwUM2FjKoMYrkBnmu",
+  "$id": "ECg_trM84AAnW4ZILy8XhIrXCVSQYqpQ-hktJdk_x0g8",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "vLEI External Association v1",
   "description": "An untargeted credential issued by a Legal Entity to associate its AID with an external identifier.",
@@ -16,7 +16,7 @@
       "pattern": "^E[A-Za-z0-9_-]{43}$"
     },
     "u": {
-      "description": "Issuer-scoped nonce of 1–128 ASCII letters, digits, underscores or hyphens, signed unchanged and consumed by the verifier at association acceptance.",
+      "description": "Nonce of 1–128 ASCII letters, digits, underscores or hyphens, signed unchanged and permanently consumed across issuers within the accepting verifier store.",
       "type": "string",
       "minLength": 1,
       "maxLength": 128,

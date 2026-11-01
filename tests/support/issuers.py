@@ -6,7 +6,6 @@ from keri import core
 from keri.core import coring
 
 from eoa_verifier.verification.eoa import build_challenge
-
 from scripts.integration.issuers import association_from_challenge
 
 KEY = "0x" + "0" * 63 + "1"
@@ -25,7 +24,7 @@ def candidate():
     return association_from_challenge(challenge, "0x" + sig.hex(), said).sad
 
 
-def signed_notice(runtime, grants, sender, embedded, attachments=b""):
+def signed_notice(runtime, sender, embedded, attachments=b""):
     """Deliver an actual signed opening Grant through KERIpy EXN authentication."""
     from keri.core import coring, parsing, serdering
     from keri.peer import exchanging
@@ -54,13 +53,8 @@ def signed_notice(runtime, grants, sender, embedded, attachments=b""):
             + pathed
         )
     exc = exchanging.Exchanger(hby=runtime.hby, handlers=[])
-    protocoling.loadHandlers(
-        hby=runtime.hby, exc=exc, notifier=grants.service.native.notifier
-    )
+    protocoling.loadHandlers(hby=runtime.hby, exc=exc, notifier=runtime.notifier)
     runtime.hby.psr.parse(ims=bytearray(sender.makeOwnEvent(sn=0)))
     parsing.Parser(kvy=runtime.hby.kvy, exc=exc).parse(ims=bytearray(stream))
-    assert any(
-        n.attrs["d"] == exn.said
-        for n, _ in grants.service.native.notifier.noter.getNotes()
-    )
+    assert any(n.attrs["d"] == exn.said for n, _ in runtime.notifier.noter.getNotes())
     return exn.said

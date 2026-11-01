@@ -32,7 +32,8 @@ def verified_store(tmp_path):
         ApplicationWriter(baser).enqueue_verification(
             VerificationRecord("association", "grant")
         )
-        verification_service(baser).next_verification(now=0)
+        verificationService = verification_service(baser)
+        verificationService.start_pending(verificationService.next_pending())
         verification_service(baser).finish(
             VerificationResult(
                 "association",

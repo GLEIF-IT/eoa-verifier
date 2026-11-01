@@ -1,4 +1,4 @@
-"""Idempotent application retirement after accepted native TEL revocation."""
+"""Idempotent application retirement after accepted KERIpy TEL revocation."""
 
 from dataclasses import replace
 
@@ -10,9 +10,10 @@ from .events import status_delivery
 
 
 class RetirementService:
-    """Commit application retirement before acknowledging its separate native record."""
+    """Commit application retirement before acknowledging its separate KERIpy record."""
 
     def __init__(self, reader, writer, evidence=None):
+        """Borrow detached application adapters and optional KERIpy revocation access."""
         self.reader, self.writer, self.evidence = reader, writer, evidence
 
     def process_one(self):
@@ -52,22 +53,24 @@ class RetirementService:
             if original
             else None
         )
-        self.writer.save_retirement(
-            previous,
-            status,
-            delivery,
-            DeliveryReference(delivery.eventId) if delivery else None,
-        )
+        if delivery is None:
+            self.writer.retire_association(previous, status)
+        else:
+            self.writer.retire_and_queue_delivery(
+                previous, status, delivery, DeliveryReference(delivery.eventId)
+            )
         return status
 
 
 class RetirementDoer(doing.Doer):
-    """Schedule one native-to-application retirement operation per turn."""
+    """Schedule one KERIpy-to-application retirement operation per turn."""
 
     def __init__(self, service, tock=0.25, **kwa):
+        """Borrow the retirement operation and configure its scheduler interval."""
         self.service = service
         super().__init__(tock=tock, **kwa)
 
     def recur(self, tyme):
+        """Advance one revocation record and remain scheduled."""
         self.service.process_one()
         return False

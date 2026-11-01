@@ -135,19 +135,12 @@ def main(argv=None):
                 headDirPath=args["head_dir"],
                 temp=False,
             ) as baser:
+                reader, writer = ApplicationReader(baser), ApplicationWriter(baser)
                 actions = {
-                    "retry-delivery": DeliveryService(
-                        ApplicationReader(baser), ApplicationWriter(baser)
-                    ).retry,
-                    "retry-verification": VerificationService(
-                        ApplicationReader(baser), ApplicationWriter(baser)
-                    ).retry,
-                    "retry-grant": GrantReplayService(
-                        ApplicationReader(baser), ApplicationWriter(baser)
-                    ).retry,
-                    "retry-acceptance": AcceptanceService(
-                        ApplicationReader(baser), ApplicationWriter(baser)
-                    ).retry,
+                    "retry-delivery": DeliveryService(reader, writer).retry,
+                    "retry-verification": VerificationService(reader, writer).retry,
+                    "retry-grant": GrantReplayService(reader, writer).retry,
+                    "retry-acceptance": AcceptanceService(reader, writer).retry,
                 }
                 actions[args["command"]](args["identifier"])
         except (ValueError, OSError) as exc:

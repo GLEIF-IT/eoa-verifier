@@ -1,4 +1,4 @@
-"""Read detached credential evidence and validate native KERI mechanisms."""
+"""Read detached credential evidence and validate KERIpy mechanisms."""
 
 from keri import core, kering
 from keri.core import coring, eventing, serdering
@@ -12,10 +12,10 @@ from eoa_verifier.verification.errors import (
 
 
 class CredentialEvidence:
-    """Borrow native stores; expose reconstructed credentials and copied facts."""
+    """Borrow KERIpy stores; expose reconstructed credentials and copied facts."""
 
     def __init__(self, rgy):
-        """Retain Regery access inside the native adapter, never in policy code."""
+        """Retain Regery access inside the KERIpy adapter, never in policy code."""
         self._rgy = rgy
 
     def delegator(self, aid):

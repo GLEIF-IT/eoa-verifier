@@ -28,7 +28,7 @@ sequenceDiagram
         V->>V: Store initial rejection
     else Initially verified
         V->>V: Store verification result
-        alt Issuer/nonce owned by another accepted SAID
+        alt Nonce owned by another accepted SAID
             V->>V: Store local NONCE_REUSED rejection, no webhook
         else Fresh pair or same accepted SAID
             V->>V: Atomically commit nonce claim, acceptance and optional outbox
