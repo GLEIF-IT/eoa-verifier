@@ -8,8 +8,8 @@ Oracle step.
 ## Agree on the integration
 
 The deployment operator supplies the Verifier URL and configures your HTTPS webhook
-URL. The vLEI issuer team prepares and presents credentials. Your application asks
-the wallet to sign the supplied EIP-712 typed data and handles status events.
+URL. The Legal Entity's KERI integration team prepares and presents the association
+credential. Your application requests the wallet signature and handles status events.
 
 An **AID** identifies an entity/service; a **SAID** identifies a credential/event.
 Look up status using the **association credential SAID** supplied by the issuer.
@@ -18,7 +18,7 @@ Look up status using the **association credential SAID** supplied by the issuer.
 
 ```text
 ISSUE
-Ethereum wallet -- EIP-712 signature --> Legal Entity's vLEI issuer
+Ethereum wallet -- EIP-712 signature --> Legal Entity (issuer)
                                             |
                           Issue association credential containing proof
                           Send IPEX Grant + supporting KERI evidence
