@@ -60,6 +60,8 @@ def prepare_run(
     Partial failures retain artifacts/logs but stop any owned infrastructure.
     Existing directories are never overwritten or treated as completed runs.
     """
+    if root.resolve().is_relative_to(source.resolve()):
+        raise ValueError("Run directory must be outside its source checkout")
     anvil = shutil.which("anvil")
     if not anvil:
         raise ValueError("Anvil is required; install Foundry 1.5.1")

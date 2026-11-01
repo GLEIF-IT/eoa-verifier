@@ -23,7 +23,7 @@ loses one post-commit ACK, reopens persistent stores and verifies exact revocati
 Stop retains all state and logs. Start reuses identities, chain and acceptance;
 it does not repeat issuance. Clean refuses live owned processes and removes only
 the explicit stopped run. Never use an operator's KERI directory as a run root.
-One controller operates a run at a time; there is no concurrent controller API.
+Keep run roots outside source checkouts. One controller operates a run at a time; there is no concurrent controller API.
 
 Prepare defaults to six real native witness identities/listeners in one HIO
 process. Issuance uses the first witness, matching the maintained credential

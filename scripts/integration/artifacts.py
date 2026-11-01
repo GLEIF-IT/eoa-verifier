@@ -54,6 +54,8 @@ def snapshot_source(source: Path, destination: Path) -> dict:
     into an operator directory. Return base revision and a content digest.
     """
     source = source.resolve()
+    if destination.resolve().is_relative_to(source):
+        raise ValueError("Snapshot destination must be outside its source")
     destination.mkdir(parents=True)
     inputs = (
         subprocess.check_output(
@@ -101,6 +103,8 @@ def copy_tool_inputs(source: Path, destination: Path) -> dict:
     tests and protocol fixtures copied by the caller. Application code is supplied
     by the wheel, never imported from this directory.
     """
+    if destination.resolve().is_relative_to(source.resolve()):
+        raise ValueError("Snapshot destination must be outside its source")
     destination.mkdir(parents=True)
     for name in ("scripts", "tests", "protocol"):
         if (source / name).is_dir():
