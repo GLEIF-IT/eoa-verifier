@@ -464,7 +464,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
                 d for d in runtime.doers if isinstance(d, VerificationCoordinator)
             )
             verifier_loop = next(
-                d for d in coordinator.doers if d is not coordinator.eoa_verifier
+                d for d in coordinator.doers if d is not coordinator.wallet_doer
             )
             coordinator.remove([verifier_loop])
             raced, stream = yield from issue_association()
@@ -474,9 +474,9 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             while coordinator.activeCredSaid != raced.said:
                 coordinator.process_ready()
                 yield 0.01
-            while not coordinator.eoa_verifier.cues:
+            while not coordinator.wallet_doer.cues:
                 yield 0.01
-            assert coordinator.eoa_verifier.cues[0]["kin"] == "verified"
+            assert coordinator.wallet_doer.cues[0]["kin"] == "verified"
             yield from revoke_credential(issuers["le"], registries["le"], raced)
             yield from send(replay(le, le_rgy, registries["le"], raced))
             while runtime.rgy.reger.tevers[raced.regi].vcState(raced.said).et != "rev":

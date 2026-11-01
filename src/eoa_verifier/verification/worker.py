@@ -3,11 +3,11 @@
 from hio.base import doing
 from hio.help import decking
 
-from .checking import EoaVerificationService
-from .observing import AccountObserver
+from .checking import WalletVerifier
+from .accounts import EthAccountReader
 
 
-class EoaVerifierDoer(doing.DoDoer):
+class WalletCheckDoer(doing.DoDoer):
     """Own initial wallet verification and one sequential account observation at a time.
 
     msgs contains schema-validated association ACDC dictionaries, including d, i,
@@ -29,8 +29,8 @@ class EoaVerifierDoer(doing.DoDoer):
         msgs and cues are transient HIO decks; the coordinator persists work status
         instead of these queues. kwa supplies HIO DoDoer options such as scheduling tock.
         """
-        self.service = EoaVerificationService(
-            AccountObserver(self, rpc_url=rpc_url, chain_id=chain_id, timeout=timeout),
+        self.verifier = WalletVerifier(
+            EthAccountReader(self, rpc_url=rpc_url, chain_id=chain_id, timeout=timeout),
             chain_id,
         )
         self.msgs = decking.Deck()
@@ -48,5 +48,5 @@ class EoaVerifierDoer(doing.DoDoer):
             if not self.msgs:
                 yield self.tock
                 continue
-            cue = yield from self.service.verify(self.msgs.popleft())
+            cue = yield from self.verifier.verify(self.msgs.popleft())
             self.cues.append(cue)

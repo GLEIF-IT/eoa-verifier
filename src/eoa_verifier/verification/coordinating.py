@@ -4,13 +4,13 @@ from hio.base import doing
 
 
 class VerificationCoordinator(doing.DoDoer):
-    """Schedule one asynchronous EOA check; the service owns durable progression."""
+    """Schedule one wallet proof/account check for a prepared association credential."""
 
-    def __init__(self, *, service, eoa_verifier, **kwa):
-        """Borrow the application service and own the EOA worker's scheduler lifetime."""
-        self.service, self.eoa_verifier = service, eoa_verifier
+    def __init__(self, *, service, wallet_doer, **kwa):
+        """Borrow VerificationService and own the WalletCheckDoer scheduler lifetime."""
+        self.service, self.wallet_doer = service, wallet_doer
         self.activeCredSaid = None
-        super().__init__(doers=[eoa_verifier, doing.doify(self.verify_do)], **kwa)
+        super().__init__(doers=[wallet_doer, doing.doify(self.verify_do)], **kwa)
 
     def verify_do(self, tymth, tock=0.0, **opts):
         """Apply one response or begin one attempt per scheduler turn."""
@@ -22,9 +22,9 @@ class VerificationCoordinator(doing.DoDoer):
 
     def process_results(self):
         """Discard unrelated cues; pass the one dispatched result to its service."""
-        if not self.eoa_verifier.cues:
+        if not self.wallet_doer.cues:
             return
-        cue = self.eoa_verifier.cues.popleft()
+        cue = self.wallet_doer.cues.popleft()
         if cue["said"] != self.activeCredSaid:
             return
         self.service.apply_cue(cue)
@@ -49,4 +49,4 @@ class VerificationCoordinator(doing.DoDoer):
         association = self.service.prepare(verification)
         if association is not None:
             self.activeCredSaid = association.said
-            self.eoa_verifier.msgs.append(association.sad)
+            self.wallet_doer.msgs.append(association.sad)

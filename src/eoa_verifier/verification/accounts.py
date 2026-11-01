@@ -1,4 +1,4 @@
-"""Sequential identified-block account observations with owned RPC client lifetimes."""
+"""Read initial Ethereum account snapshots with owned RPC client lifetimes."""
 
 import re
 
@@ -8,15 +8,15 @@ from keri.help import helping
 from .rpc import RpcClientDoer, request_rpc
 
 
-class AccountObserver:
-    """Translate Ethereum RPC responses into detached account observations."""
+class EthAccountReader:
+    """Read a detached Ethereum account snapshot at one identified block; do not monitor it."""
 
     def __init__(self, scheduler, *, rpc_url, chain_id, timeout):
         """Borrow the HIO parent that schedules and closes each temporary client."""
         self.scheduler = scheduler
         self.rpc_url, self.chain_id, self.timeout = rpc_url, chain_id, timeout
 
-    def observe(self, wallet):
+    def read(self, wallet):
         """Yield through chain ID, latest block, then code at that block; return observation.
 
         A new worker-owned client prevents late responses from a timed-out observation

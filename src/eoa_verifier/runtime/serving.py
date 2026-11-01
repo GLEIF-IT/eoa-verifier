@@ -44,7 +44,7 @@ from ..verification.constants import ASSOCIATION_SCHEMA
 from ..verification.coordinating import VerificationCoordinator
 from ..verification.evidence import CredentialEvidence
 from ..verification.verifying import VerificationService
-from ..verification.worker import EoaVerifierDoer
+from ..verification.worker import WalletCheckDoer
 from .bootstrap import bootstrap_service
 from .config import ServiceConfig
 from .oobing import OobiClienter
@@ -138,7 +138,7 @@ class VerifierService(doing.DoDoer):
                     trusted_geda_aid=config.trusted_geda_aid,
                     association_schema=ASSOCIATION_SCHEMA,
                 ),
-                eoa_verifier=EoaVerifierDoer(
+                wallet_doer=WalletCheckDoer(
                     rpc_url=config.rpc_url, chain_id=config.chain_id
                 ),
             ),

@@ -44,7 +44,7 @@ tested integrity boundary, not a reason to wrap every business read in a writer.
 | `receiving/grants.py:GrantNotificationDoer` | KERIpy notice access, EXN decoding, parser replay, retry policy and application writes inside a scheduler adapter | KERIpy Grant adapter handles KERI mechanisms; replay service orchestrates; doer schedules one item |
 | `verification/coordinating.py:VerificationCoordinator` | HIO request/cue plumbing, evidence decisions and direct application-table access | Verification service owns attempts/results/rechecks; coordinator handles scheduling and correlation |
 | `verification/credentials.py` | KERIpy KERI retrieval/read-through caches, schema/anchor mechanisms and application LE/QVI/issuer policy | Evidence adapter exposes detached facts and KERIpy validation results; credential rules evaluate trust/profile requirements |
-| `verification/worker.py:EoaVerifierDoer` | Wallet proof policy, RPC client lifetime/result decoding, retry classification and cue construction | Account-observation adapter owns RPC mechanics; verification service owns proof/account policy and outcome classification; doer drives the exchange |
+| `verification/worker.py:WalletCheckDoer` | Wallet proof policy, RPC client lifetime/result decoding, retry classification and cue construction | Account-observation adapter owns RPC mechanics; verification service owns proof/account policy and outcome classification; doer drives the exchange |
 | `associations/accepting.py`, `revoking.py` | Scheduling, direct KERIpy/application reads, eligibility decisions and multi-store sequencing | Acceptance/revocation services own the operations; doers delegate; KERIpy evidence adapter exposes facts and revocation identifiers |
 | `associations/statusing.py:StatusEnd` | Falcon handling, multi-table reads, phase precedence and response construction | Status query service builds the detached view; endpoint maps it to HTTP |
 | `delivery/delivering.py:WebhookSender` | Queue access, attempt budgets/backoff, HTTP lifecycle, response policy and persistence | Delivery service owns progression; HTTP adapter owns I/O; explicit HTTP completion rules and optional signature verification produce outcomes |
@@ -83,7 +83,7 @@ slice; these are responsibility placements, not a one-class-per-file mandate.
   KERIpy Grant bridge and thin scheduled entry point.
 - `verification/coordinating.py`: verification service and thin coordinator;
   `verification/evidence.py` isolates KERIpy evidence access;
-  `verification/observing.py` isolates account RPC observation. Keep credential
+  `verification/accounts.py` isolates initial Ethereum account reads. Keep credential
   rules and EOA rules with their existing feature modules.
 - `associations/accepting.py`, `revoking.py`, `statusing.py`: concrete services and
   small scheduling/HTTP adapters. `associations/events.py` owns the shared pure

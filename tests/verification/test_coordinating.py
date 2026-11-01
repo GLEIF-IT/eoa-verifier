@@ -13,7 +13,7 @@ from eoa_verifier.persistence.verification import VerificationReader, Verificati
 from eoa_verifier.verification.constants import ASSOCIATION_SCHEMA
 from eoa_verifier.verification.coordinating import VerificationCoordinator
 from eoa_verifier.verification.errors import MissingCredentialArtifactsError
-from eoa_verifier.verification.worker import EoaVerifierDoer
+from eoa_verifier.verification.worker import WalletCheckDoer
 from tests.support.issuers import candidate, signed_notice
 from tests.support.persistence import enqueue_verification
 from tests.support.services import entered_service, verification_service
@@ -25,12 +25,12 @@ def test_busy_worker_and_waiting_do_not_schedule_other_active_work():
         for said in ("a", "b"):
             enqueue_verification(baser, VerificationRecord(said, ""))
         clock = tyming.Tymist()
-        worker = EoaVerifierDoer(rpc_url="http://unused", chain_id=31337)
+        worker = WalletCheckDoer(rpc_url="http://unused", chain_id=31337)
         coordinator = VerificationCoordinator(
             service=verification_service(
                 baser, association_schema=ASSOCIATION_SCHEMA, clock=lambda: clock.tyme
             ),
-            eoa_verifier=worker,
+            wallet_doer=worker,
         )
         coordinator.activeCredSaid = "busy"
         with patch.object(
@@ -66,12 +66,12 @@ def test_rpc_retry_and_success_move_only_on_completion():
         enqueue_verification(baser, VerificationRecord("a", "first"))
         verificationService = verification_service(baser)
         verificationService.start_pending(verificationService.next_pending())
-        worker = EoaVerifierDoer(rpc_url="http://unused", chain_id=31337)
+        worker = WalletCheckDoer(rpc_url="http://unused", chain_id=31337)
         coordinator = VerificationCoordinator(
             service=verification_service(
                 baser, association_schema=ASSOCIATION_SCHEMA, clock=lambda: 0
             ),
-            eoa_verifier=worker,
+            wallet_doer=worker,
         )
         coordinator.activeCredSaid = "a"
         worker.cues.append({"kin": "retry", "said": "a", "error": "RPC unavailable"})
@@ -156,8 +156,8 @@ def test_exhausted_phase_consumes_only_one_scheduler_turn(phase, budget):
         assert service.next_waiting() == (exhausted if phase == "waiting" else None)
         assert service.next_pending() == other
         assert getattr(baser, phase).get(keys=("a",)) == exhausted
-        worker = EoaVerifierDoer(rpc_url="http://unused", chain_id=31337)
-        coordinator = VerificationCoordinator(service=service, eoa_verifier=worker)
+        worker = WalletCheckDoer(rpc_url="http://unused", chain_id=31337)
+        coordinator = VerificationCoordinator(service=service, wallet_doer=worker)
         coordinator.process_ready()
         assert baser.verification_dead.get(keys=("a",)).attempts == 3
         assert baser.pending.get(keys=("b",)) == other

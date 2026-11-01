@@ -1,4 +1,16 @@
-"""Verification phase policy over detached evidence and prepared atomic saves."""
+"""Verify received external-association ACDCs against local vLEI trust evidence before acceptance.
+
+VerificationService checks the association's schema, LE/QVI source relationships,
+GEDA issuance/delegation root, nested SAIDs, accepted TEL status and witnessed
+issuance using evidence already validated by KERIpy. The coordinator then obtains
+a wallet proof/account result from WalletCheckDoer and returns it to this service;
+success rechecks local credential evidence before saving an initial verified result.
+
+This module owns bounded durable attempts and initial-check outcomes. Association
+acceptance, permanent nonce consumption, revocation application and webhook delivery
+are separate operations. It neither publishes endorsements nor continually checks
+Ethereum or fetches missing KERI evidence itself.
+"""
 
 import time
 from dataclasses import replace
@@ -12,7 +24,29 @@ from .errors import MissingCredentialArtifactsError, VerificationError
 
 
 class VerificationService:
-    """Own one candidate's local checks, finite retries and result completion."""
+    """Check an external-association credential's local trust chain and complete its initial result.
+
+    prepare() requires the configured association schema, an untargeted I2I edge to
+    an accepted LE credential, an accepted QVI source, issuer/holder continuity, QVI
+    issuance and delegation rooted at the configured GEDA, valid nested block SAIDs,
+    and locally accepted, witnessed association issuance. CredentialEvidence reads
+    KERIpy-validated credentials, TEL status and KEL/witness evidence; this service
+    does not replace KERIpy signature or event validation. Missing local evidence is
+    retryable; known invalid relationships or revocation reject the candidate.
+
+    The coordinator sends the prepared ACDC to WalletCheckDoer. Its WalletVerifier
+    checks the EIP-712 wallet proof, configured Ethereum chain and initial account
+    code policy via EthAccountReader. apply_cue() correlates the result with active
+    work and repeats local credential checks before committing a successful result,
+    so revocation learned locally while RPC was pending causes rejection instead.
+
+    Attempts and retry deadlines are durable and bounded, including interrupted
+    attempts. Services decide outcomes using detached reads; writers commit explicit
+    phase/result changes. A verified result queues separate application acceptance:
+    it neither consumes the association nonce nor proves acceptance, webhook delivery
+    or on-chain endorsement. No ongoing account monitoring or remote evidence
+    freshness guarantee is provided.
+    """
 
     def __init__(
         self,
@@ -26,7 +60,14 @@ class VerificationService:
         max_attempts=3,
         clock=time.time,
     ):
-        """Borrow adapters; KERIpy evidence is unnecessary for offline phase operations."""
+        """Borrow credential-evidence and application persistence adapters; own no store or worker.
+
+        reader/writer are verification feature adapters. Scheduled checks also require
+        CredentialEvidence, the trusted GEDA AID and the association schema SAID. Offline
+        retry/phase operations need only persistence. retry_delay is seconds; clock
+        returns UTC Unix seconds for persisted deadlines. max_attempts includes attempts
+        interrupted by restart. The coordinator separately owns wallet-check scheduling.
+        """
         self.reader, self.writer, self.evidence = reader, writer, evidence
         self.trusted_geda_aid, self.association_schema = (
             trusted_geda_aid,
@@ -124,14 +165,25 @@ class VerificationService:
         self.writer.dead_to_pending(record, updated)
 
     def finish(self, result):
-        """Prepare an acceptance obligation only for a verified result."""
+        """Persist a prepared initial VerificationResult and settle its verifying phase.
+
+        The caller supplies the completed check outcome; this storage-facing operation
+        does not repeat cryptographic checks. Only status verified queues the separate
+        application-acceptance phase. Rejected results create no acceptance obligation.
+        """
         if result.status == "verified":
             self.writer.complete_verified(result)
         else:
             self.writer.complete_rejected(result)
 
     def prepare(self, record):
-        """Validate a charged attempt; return its detached ACDC for RPC dispatch."""
+        """Check the association ACDC and accepted LE/QVI source chain before wallet/RPC dispatch.
+
+        record identifies a charged verifying attempt. Return its detached accepted ACDC
+        when credential trust, nested SAIDs and witnessed issuance pass. Missing evidence
+        persists a bounded retry; invalid/revoked evidence persists a rejected result.
+        Those handled failures return None, so no wallet request is dispatched.
+        """
         try:
             return self._verify(record)
         except MissingCredentialArtifactsError as exc:
@@ -141,7 +193,13 @@ class VerificationService:
         return None
 
     def apply_cue(self, cue):
-        """Recheck local evidence after RPC and commit one correlated outcome."""
+        """Apply one correlated wallet-check cue to its active association-credential attempt.
+
+        A retry cue records bounded deferral; a failed proof/account cue records rejection.
+        For a verified cue, recheck locally accepted credential/source evidence before
+        saving wallet/account facts and queuing acceptance. Missing active work or an
+        unknown cue kind raises ValueError. This does not consume nonces or send HTTP.
+        """
         verification = self.reader.verifying(cue["said"])
         if verification is None:
             raise ValueError("dispatched verification has no active work")
@@ -162,7 +220,12 @@ class VerificationService:
             raise ValueError("unknown EOA result")
 
     def _verify(self, verification):
-        """Require KERIpy acceptance; Grant bytes can justify rejection, never acceptance."""
+        """Require accepted association/LE/QVI evidence, GEDA trust and witnessed issuance.
+
+        Grant candidate bytes can expose a definite rejection while KERIpy escrows are
+        incomplete, but cannot establish acceptance. Delegate concrete credential/edge/
+        nested-SAID checks to verify_association and return its accepted ACDC.
+        """
         return verify_association(
             evidence=self.evidence,
             said=verification.associationSaid,
