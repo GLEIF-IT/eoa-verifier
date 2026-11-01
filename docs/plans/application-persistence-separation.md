@@ -267,6 +267,11 @@ Oracle/Comply architecture changes are outside this plan. Advance Oracle's exact
 producer pin only as needed for final qualification. Preserve maintained paired
 qualification and the qualified contract revision.
 
+## Implementation evidence
+
+- Slice 1: [PR #28](https://github.com/GLEIF-IT/eoa-verifier/pull/28), Grant service/native adapter and atomic replay completion. Focused checks: 25 passed.
+- Slice 2: verification service, native credential evidence and account observation adapters. Focused checks: 119 passed; installed-wheel CI gates merge.
+
 ## Validation and completion criteria
 
 Use focused existing tests first. Add tests at changed boundaries, not tests that

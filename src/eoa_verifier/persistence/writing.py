@@ -84,3 +84,73 @@ class ApplicationWriter:
             ):
                 txn.put(key, raw, db=db.pending.sdb, overwrite=False)
             txn.delete(b"receiver", db=db.grant_active.sdb)
+
+    def enqueue_verification(self, verification):
+        """Insert unfinished work once, preserving existing work and immutable results."""
+        db = self._db
+        key, raw = (
+            verification.associationSaid.encode(),
+            db.pending.serializer(verification),
+        )
+        with db.env.begin(write=True) as txn:
+            if any(
+                txn.get(key, db=table.sdb) is not None
+                for table in (
+                    db.results,
+                    db.verifying,
+                    db.waiting,
+                    db.verification_dead,
+                )
+            ):
+                return False
+            return txn.put(key, raw, db=db.pending.sdb, overwrite=False)
+
+    def move_verification(self, previous, source, record, target):
+        """Move the expected record and its due index as one prepared write set."""
+        db = self._db
+        tables = {
+            "pending": db.pending,
+            "verifying": db.verifying,
+            "waiting": db.waiting,
+            "dead-letter": db.verification_dead,
+        }
+        origin, destination = tables[source], tables[target]
+        key = record.associationSaid.encode()
+        expected, raw = origin.serializer(previous), destination.serializer(record)
+        old_due = (
+            due_key(previous.nextAttemptAt, previous.associationSaid)
+            if source == "waiting"
+            else None
+        )
+        new_due = (
+            due_key(record.nextAttemptAt, record.associationSaid)
+            if target == "waiting"
+            else None
+        )
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=origin.sdb) != expected:
+                raise ValueError("active verification source is absent or changed")
+            txn.delete(key, db=origin.sdb)
+            if old_due is not None:
+                txn.delete(old_due, db=db.verification_due.sdb)
+            txn.put(key, raw, db=destination.sdb)
+            if new_due is not None:
+                txn.put(new_due, key, db=db.verification_due.sdb)
+
+    def complete_verification(self, result, acceptance):
+        """Save an immutable result, optional acceptance obligation and remove active work."""
+        db = self._db
+        key, raw = result.associationSaid.encode(), db.results.serializer(result)
+        acceptance_raw = db.accepting.serializer(acceptance) if acceptance else None
+        with db.env.begin(write=True) as txn:
+            existing = txn.get(key, db=db.results.sdb)
+            if existing is not None:
+                if existing != raw:
+                    raise ValueError("conflicting verification result")
+                return
+            if txn.get(key, db=db.verifying.sdb) is None:
+                raise ValueError("active verification is absent")
+            txn.put(key, raw, db=db.results.sdb)
+            if acceptance_raw is not None:
+                txn.put(key, acceptance_raw, db=db.accepting.sdb)
+            txn.delete(key, db=db.verifying.sdb)

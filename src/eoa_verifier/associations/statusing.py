@@ -4,6 +4,8 @@ from dataclasses import asdict
 
 import falcon
 
+from eoa_verifier.persistence.reading import ApplicationReader
+
 
 class StatusEnd:
     """Borrow the application store; GET is an informational view, not a signed event."""
@@ -20,7 +22,7 @@ class StatusEnd:
         """
         associationStatus = self.baser.associations.get(keys=(said,))
         verificationResult = self.baser.results.get(keys=(said,))
-        phase, verification = self.baser.verification_progress(said)
+        phase, verification = ApplicationReader(self.baser).verification_progress(said)
         deadLetterResult = self.baser.acceptance_dead.get(keys=(said,))
         if associationStatus is not None:
             statusBody = asdict(associationStatus)

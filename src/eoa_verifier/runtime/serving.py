@@ -29,15 +29,17 @@ from ..associations.retiring import RetirementDoer
 from ..associations.statusing import StatusEnd
 from ..delivery.delivering import WebhookSender
 from ..persistence.basing import VerifierBaser
+from ..persistence.reading import ApplicationReader
 from ..persistence.registry import VerifierReger
+from ..persistence.writing import ApplicationWriter
 from ..receiving.directing import CesrEnd, Receiver
 from ..receiving.grants import GrantNotificationDoer, NativeGrantAdapter
 from ..receiving.replaying import GrantReplayService
-from ..persistence.reading import ApplicationReader
-from ..persistence.writing import ApplicationWriter
 from ..verification.constants import ASSOCIATION_SCHEMA
 from ..verification.coordinating import VerificationCoordinator
+from ..verification.evidence import CredentialEvidence
 from ..verification.schema_cache import pin_accepted_schemas
+from ..verification.verifying import VerificationService
 from ..verification.worker import EoaVerifierDoer
 from .config import ServiceConfig
 
@@ -130,10 +132,13 @@ class VerifierService(doing.DoDoer):
                 ),
             ),
             VerificationCoordinator(
-                baser=baser,
-                rgy=rgy,
-                trusted_geda_aid=config.trusted_geda_aid,
-                association_schema=ASSOCIATION_SCHEMA,
+                service=VerificationService(
+                    ApplicationReader(baser),
+                    ApplicationWriter(baser),
+                    CredentialEvidence(rgy),
+                    trusted_geda_aid=config.trusted_geda_aid,
+                    association_schema=ASSOCIATION_SCHEMA,
+                ),
                 eoa_verifier=EoaVerifierDoer(
                     rpc_url=config.rpc_url, chain_id=config.chain_id
                 ),

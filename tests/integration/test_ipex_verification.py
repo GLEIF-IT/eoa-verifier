@@ -18,6 +18,7 @@ from keri.db import basing, dbing
 from keri.help import helping
 
 from eoa_verifier.associations.retiring import RetirementDoer
+from eoa_verifier.persistence.reading import ApplicationReader
 from eoa_verifier.receiving.grants import GrantNotificationDoer
 from eoa_verifier.runtime.config import ServiceConfig
 from eoa_verifier.verification.constants import LE_SCHEMA, QVI_SCHEMA
@@ -171,7 +172,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             deadline = workflow.tyme + 10
             while True:
                 verification = (
-                    runtime.baser.verification_progress(said)[1]
+                    ApplicationReader(runtime.baser).verification_progress(said)[1]
                     if expected == "pending"
                     else runtime.baser.results.get(keys=(said,))
                 )
@@ -182,7 +183,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
                 assert workflow.tyme < deadline, (
                     expected,
                     verification,
-                    runtime.baser.verification_progress(said),
+                    ApplicationReader(runtime.baser).verification_progress(said),
                 )
                 yield 0.01
 
@@ -309,7 +310,10 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             client_doer = http.ClientDoer(client=client)
             workflow.extend([runtime, client_doer])
             assert runtime.hab.pre == aid
-            assert runtime.baser.verification_progress(creder.said)[1] is not None
+            assert (
+                ApplicationReader(runtime.baser).verification_progress(creder.said)[1]
+                is not None
+            )
             # Supporting evidence alone resumes persisted work; no new Grant required.
             yield from deliver(
                 streams["geda"] + streams["qvi"], creder.said, "verified"

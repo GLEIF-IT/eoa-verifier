@@ -18,8 +18,8 @@ def verifier_service(config):
     from keri.db import basing, dbing
     from keri.vdr import credentialing
 
-    from eoa_verifier.persistence.registry import VerifierReger
     from eoa_verifier.persistence.basing import VerifierBaser
+    from eoa_verifier.persistence.registry import VerifierReger
     from eoa_verifier.runtime.serving import VerifierService
 
     options = dict(name=config.name, base=config.base, headDirPath=config.head_dir)
@@ -62,3 +62,18 @@ def entered_service(config):
             yield runtime
         finally:
             scheduler.exit()
+
+
+def verification_service(baser, rgy=None, **options):
+    """Compose the production phase service over a test-owned application store."""
+    from eoa_verifier.persistence.reading import ApplicationReader
+    from eoa_verifier.persistence.writing import ApplicationWriter
+    from eoa_verifier.verification.evidence import CredentialEvidence
+    from eoa_verifier.verification.verifying import VerificationService
+
+    return VerificationService(
+        ApplicationReader(baser),
+        ApplicationWriter(baser),
+        CredentialEvidence(rgy),
+        **options,
+    )

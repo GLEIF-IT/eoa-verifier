@@ -168,7 +168,9 @@ def test_programming_error_surfaces_and_closes_client(monkeypatch):
         clients.append(client)
         raise AttributeError("programming defect")
 
-    monkeypatch.setattr("eoa_verifier.verification.worker.request_rpc", broken_request)
+    monkeypatch.setattr(
+        "eoa_verifier.verification.observing.request_rpc", broken_request
+    )
     worker = EoaVerifierDoer(rpc_url="http://127.0.0.1:1", chain_id=31337)
     worker.msgs.append(candidate())
     with pytest.raises(AttributeError, match="programming defect"):
