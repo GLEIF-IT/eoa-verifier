@@ -38,7 +38,7 @@ KERIpy evidence remain explicit shared contracts. Review component edges, leaf
 responsibilities and dependency cycles when changing imports.
 
 ServiceConfig lives in runtime/config.py; service composition and store lifetime
-remain in runtime/serving.py; runtime/bootstrap.py prepares scope, schemas and
+remain in runtime/serving.py; runtime/bootstrap.py records advisory startup settings, prepares schemas and
 identity before task assembly. Persistent dataclasses live in
 persistence/records.py. VerifierBaser binds tables and owns their lifecycle;
 persistence/reading.py returns detached snapshots and persistence/writing.py

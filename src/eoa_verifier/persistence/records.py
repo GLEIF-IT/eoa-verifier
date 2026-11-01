@@ -39,11 +39,10 @@ class VerificationResult:
 
 @dataclass
 class VerificationScope:
-    """Initial-verification policy shared by every result in one persistent store."""
+    """Last observed trust/network settings, used only for startup warnings."""
 
     trustedGedaAid: str
     chainId: int
-    acceptancePolicy: str
 
 
 @dataclass
