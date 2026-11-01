@@ -13,14 +13,12 @@ from eoa_verifier.persistence.basing import VerifierBaser
 from eoa_verifier.persistence.keys import nonce_key
 from eoa_verifier.persistence.reading import ApplicationReader
 from eoa_verifier.persistence.records import (
-    AcceptedNonce,
     VerificationRecord,
     VerificationResult,
 )
 from eoa_verifier.persistence.writing import ApplicationWriter
 from tests.support.acceptance import (
     acceptance_service,
-    association_integrity,
     retirement_service,
 )
 from tests.support.issuers import candidate
@@ -87,7 +85,7 @@ def accept(baser, said, *, issuer="issuer", nonce="nonce", delivery=True):
 
 
 @pytest.mark.parametrize("delivery", [False, True])
-def test_exact_pair_scope_terminal_rejection_and_revocation(tmp_path, delivery):
+def test_global_nonce_rejection_survives_revocation_and_reopen(tmp_path, delivery):
     with dbing.openLMDB(
         cls=VerifierBaser, name="nonces", headDirPath=str(tmp_path), temp=False
     ) as baser:
@@ -133,8 +131,8 @@ def test_exact_pair_scope_terminal_rejection_and_revocation(tmp_path, delivery):
         assert first.status_code == 200 and first.json["status"] == "accepted"
         assert (first.json["delivery"] is not None) == delivery
         assert (
-            accept(baser, "issuer2", issuer="other", delivery=delivery).status
-            == "accepted"
+            accept(baser, "issuer2", issuer="other", delivery=delivery).reason
+            == "NONCE_REUSED"
         )
         for said, nonce in (
             ("uppercase", "Nonce"),
@@ -144,17 +142,13 @@ def test_exact_pair_scope_terminal_rejection_and_revocation(tmp_path, delivery):
             assert (
                 accept(baser, said, nonce=nonce, delivery=delivery).status == "accepted"
             )
-        assert baser.accepted_nonces.cntAll() == 5
-        assert (
-            baser.accepted_nonces.get(keys=("issuer", "nonce")).associationSaid
-            == "first"
-        )
+        assert baser.accepted_nonces.cntAll() == 4
+        assert baser.accepted_nonces.get(keys=("nonce",)).associationSaid == "first"
         with baser.env.begin() as txn:
-            assert txn.get(b"issuer.nonce", db=baser.accepted_nonces.sdb) is not None
+            assert txn.get(b"nonce", db=baser.accepted_nonces.sdb) is not None
         retirement_service(baser).retire("first")
         baser.close()
         baser.reopen()
-        association_integrity(baser).validate_nonce_history()
         assert accept(baser, "first", delivery=delivery).status == "revoked"
         assert (
             accept(baser, "after-revocation", delivery=delivery).reason
@@ -164,67 +158,36 @@ def test_exact_pair_scope_terminal_rejection_and_revocation(tmp_path, delivery):
             accept(baser, "second", nonce="different", delivery=delivery)
             == rejectedStatus
         )
-        assert baser.outbox.cntAll() == (6 if delivery else 0)
+        assert baser.outbox.cntAll() == (5 if delivery else 0)
 
 
-@pytest.mark.parametrize(
-    "corruption", ["json", "wrong-pair", "missing-owner", "wrong-owner"]
-)
-def test_inconsistent_claims_abort_acceptance(corruption):
+@pytest.mark.parametrize("raw", [b"{bad", b"{}", b'{"associationSaid":"absent"}'])
+def test_existing_nonce_key_rejects_without_decoding_its_value(raw):
+    """Any stored value means consumed, even if its diagnostic owner is unreadable."""
     with dbing.openLMDB(cls=VerifierBaser) as baser:
-        verify(baser, "first")
         verify(baser, "candidate")
-        accept(baser, "first")
-        key = nonce_key("issuer", "nonce")
-        raw = {
-            "json": b"{bad",
-            "wrong-pair": baser.accepted_nonces.serializer(
-                AcceptedNonce("issuer", "different", "first")
-            ),
-            "missing-owner": baser.accepted_nonces.serializer(
-                AcceptedNonce("issuer", "nonce", "absent")
-            ),
-            "wrong-owner": baser.accepted_nonces.serializer(
-                AcceptedNonce("other", "nonce", "first")
-            ),
-        }[corruption]
         with baser.env.begin(write=True) as txn:
-            txn.put(key, raw, db=baser.accepted_nonces.sdb)
-        with pytest.raises(ValueError, match="inconsistent"):
-            accept(baser, "candidate")
-        assert baser.associations.get(keys=("candidate",)) is None
+            txn.put(b"nonce", raw, db=baser.accepted_nonces.sdb)
+        rejected = accept(baser, "candidate", issuer="another-issuer")
+        assert rejected.status == "rejected" and rejected.reason == "NONCE_REUSED"
         assert baser.outbox.get(keys=("candidate:1",)) is None
-        with pytest.raises(ValueError, match="inconsistent"):
-            association_integrity(baser).validate_nonce_history()
+        with baser.env.begin() as txn:
+            assert txn.get(b"nonce", db=baser.accepted_nonces.sdb) == raw
 
 
-def test_populated_store_without_nonce_history_is_rejected():
+def test_scope_reopen_does_not_audit_nonce_or_association_values():
+    """Startup checks its policy record, not the growing accepted-history dataset."""
+    from eoa_verifier.runtime.bootstrap import bind_verification_scope
+
     with dbing.openLMDB(cls=VerifierBaser) as baser:
-        association_integrity(baser).bind_verification_scope(
-            trusted_geda_aid="geda", chain_id=1
-        )
-        verify(baser, "first")
-        accept(baser, "first")
-        baser.accepted_nonces.trim()
-        with pytest.raises(ValueError, match="lack nonce history"):
-            association_integrity(baser).bind_verification_scope(
-                trusted_geda_aid="geda", chain_id=1
-            )
-        assert baser.associations.get(keys=("first",)).status == "accepted"
-
-
-def test_old_scope_is_rejected_without_reading_or_migrating_acceptance():
-    with dbing.openLMDB(cls=VerifierBaser) as baser:
+        reader, writer = ApplicationReader(baser), ApplicationWriter(baser)
+        bind_verification_scope(reader, writer, trusted_geda_aid="geda", chain_id=1)
         with baser.env.begin(write=True) as txn:
+            txn.put(b"nonce", b"opaque consumed value", db=baser.accepted_nonces.sdb)
             txn.put(
-                b"verification",
-                b'{"trustedGedaAid":"geda","chainId":1}',
-                db=baser.scope.sdb,
+                b"credential", b"opaque historical value", db=baser.associations.sdb
             )
-        with pytest.raises(ValueError, match="fresh store"):
-            association_integrity(baser).bind_verification_scope(
-                trusted_geda_aid="geda", chain_id=1
-            )
+        bind_verification_scope(reader, writer, trusted_geda_aid="geda", chain_id=1)
 
 
 @pytest.mark.parametrize("same_said", [False, True])
@@ -275,7 +238,6 @@ def test_independent_process_race_has_one_owner(tmp_path, same_said):
                 p.kill()
             p.wait(timeout=5)
     with dbing.openLMDB(**options) as baser:
-        association_integrity(baser).validate_nonce_history()
         assert baser.accepted_nonces.cntAll() == baser.outbox.cntAll() == 1
         assert (
             sum(row.status == "accepted" for _, row in baser.associations.getItemIter())
@@ -298,7 +260,6 @@ def test_process_death_before_and_after_commit(tmp_path):
         )
         assert result.returncode == exitcode, result.stderr
         with dbing.openLMDB(**options) as baser:
-            association_integrity(baser).validate_nonce_history()
             expected = int(mode == "commit")
             assert (
                 baser.accepted_nonces.cntAll()
@@ -318,12 +279,10 @@ def test_process_death_before_and_after_commit(tmp_path):
     "nonce", ["x", "N" * 128, "aZ09_-", "25C89E61-21F8-4CCF-948D-46D1FBB7BAE8"]
 )
 def test_ascii_boundaries_are_preserved_in_lmdb(nonce):
-    credential = candidate()
     with dbing.openLMDB(cls=VerifierBaser) as baser:
-        issuer = credential["i"]
-        key = nonce_key(issuer, nonce)
-        assert key == f"{issuer}.{nonce}".encode("ascii")
-        assert len(key) <= 173 < baser.env.max_key_size()
+        key = nonce_key(nonce)
+        assert key == nonce.encode("ascii")
+        assert len(key) <= 128 < baser.env.max_key_size()
 
 
 @pytest.mark.parametrize(

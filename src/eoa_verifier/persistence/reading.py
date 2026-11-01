@@ -101,24 +101,6 @@ class ApplicationReader:
         """Return an immutable event and its current delivery progress."""
         return self._db.outbox.get(keys=(event_id,))
 
-    def nonce_claim(self, issuer, nonce):
-        """Read a claim by canonical key; consistency with its owner is service policy."""
-        from .keys import nonce_key
-
-        key = nonce_key(issuer, nonce)
-        with self._db.env.begin() as txn:
-            return self._db.accepted_nonces.deserializer(
-                txn.get(key, db=self._db.accepted_nonces.sdb)
-            )
-
-    def nonce_page(self, after=None, limit=128):
-        """Detach at most limit historical claims; never yield with a reader open."""
-        return record_page(self._db.accepted_nonces, after, limit)
-
-    def association_page(self, after=None, limit=128):
-        """Detach a bounded historical status page for the stopped-service audit."""
-        return record_page(self._db.associations, after, limit)
-
     def scope(self):
         """Read the persisted trust/network policy binding."""
         return self._db.scope.get(keys=("verification",))
@@ -145,18 +127,3 @@ class ApplicationReader:
     def destination_schedule(self, destination):
         """Return a detached destination pacing/backoff record."""
         return self._db.destinations.get(keys=(destination,))
-
-
-def record_page(table, after, limit):
-    """Copy bounded key/record pairs and release the cursor before returning."""
-    records = []
-    with table.db.env.begin(db=table.sdb) as txn, txn.cursor() as cursor:
-        found = cursor.first() if after is None else cursor.set_range(after)
-        if found and after is not None and bytes(cursor.key()) == after:
-            found = cursor.next()
-        while found and len(records) < limit:
-            records.append(
-                (bytes(cursor.key()), table.deserializer(bytes(cursor.value())))
-            )
-            found = cursor.next()
-    return records

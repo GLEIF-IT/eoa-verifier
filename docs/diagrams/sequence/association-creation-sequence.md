@@ -29,4 +29,4 @@ sequenceDiagram
 
 </details>
 
-The [EOA profile](../../../protocol/external-association-v1/eoa-v1/README.md) owns the signed fields. No issuer nonce ledger is part of this service model. Verifier consumes the exact issuer/nonce on application acceptance. Continue with [verification](association-verification-sequence.md).
+The [EOA profile](../../../protocol/external-association-v1/eoa-v1/README.md) owns the signed fields. No issuer nonce ledger is part of this service model. Verifier consumes the exact nonce on application acceptance. Continue with [verification](association-verification-sequence.md).

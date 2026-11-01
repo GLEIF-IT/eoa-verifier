@@ -27,7 +27,7 @@ is embedded in the association ACDC so a relying party can verify that agreement
 | `issuerAid` | Associate the account with **this entity's AID**. | Rebuilt from `i`; checked against the LE credential's holder. Its hash supplies the endorsement's `identityRef`. |
 | `leVleiSaid` | Refer to **this particular LE credential**. | Rebuilt from `e.le.n`; followed to establish the LEI, trust chain, and credential status. Signing it prevents substituting another credential while retaining the wallet signature. |
 | `extId` | Associate **this account on this chain**. | Rebuilt from `a.extId`; the address must match the recovered signer and supplies the endorsement's `wallet`. The chain scopes signing and registry posting. |
-| `nonce` | Authorize **this individual ceremony**. | Rebuilt from `u`; a new nonce requires a new signature. EOA Verifier consumes the exact issuer/nonce on application acceptance; another SAID cannot reuse it. |
+| `nonce` | Authorize **this individual ceremony**. | Rebuilt from `u`; a new nonce requires a new signature. EOA Verifier consumes the exact nonce on application acceptance; another SAID cannot reuse it. |
 
 These fields are the association protocol's signed commitments; EIP-712 supplies
 the typed-data format and signing rules. Binding the exact LE credential means

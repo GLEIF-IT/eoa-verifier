@@ -102,13 +102,13 @@ re-enqueue completed or dead-letter candidates. Restart resumes durable phases.
 A verification result is not acceptance, webhook delivery or an Ethereum endorsement.
 
 `AcceptanceDoer` takes one unfinished `accepting.` record and locally accepted issuance evidence
-without repeating initial checks. Acceptance permanently binds the exact issuer/nonce
+without repeating initial checks. Acceptance permanently binds the exact nonce
 to one SAID, atomically with immutable facts and any configured outbox obligation.
-Another SAID using that pair becomes locally `rejected` with `NONCE_REUSED`; its
+Another SAID using that nonce becomes locally `rejected` with `NONCE_REUSED`; its
 initial verification remains `verified`. Same-SAID replay is idempotent, and
 revocation/supersession never releases the nonce.
 Nonces contain 1–128 ASCII characters from `[A-Za-z0-9_-]`; storage uses ordinary
-`issuer.nonce` Komer keys. See [ADR 0005](adrs/0005-accepted-association-nonces.md).
+the exact nonce bytes as Komer keys. See [ADR 0005](adrs/0005-accepted-association-nonces.md).
 
 Acceptance runs with or without webhooks. With no target, public `delivery` is null;
 enabling delivery later does not backfill events for locally accepted records.

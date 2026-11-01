@@ -484,7 +484,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             )
             assert (
                 runtime.baser.accepted_nonces.get(
-                    keys=(nonce_key(raced.issuer, raced.sad["u"]),)
+                    keys=(nonce_key(raced.sad["u"]),)
                 )
                 is None
             )
@@ -500,7 +500,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
                 assert reason in verification.reason, (label, verification)
                 assert (
                     runtime.baser.accepted_nonces.get(
-                        keys=(nonce_key(candidate.issuer, candidate.sad["u"]),)
+                        keys=(nonce_key(candidate.sad["u"]),)
                     )
                     is None
                 )

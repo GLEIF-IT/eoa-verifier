@@ -3,19 +3,22 @@
 import json
 from pathlib import Path
 
-from ..associations.integrity import AssociationIntegrity
+from ..persistence.records import VerificationScope
 from ..verification.schema_cache import pin_accepted_schemas
 
 
 def bootstrap_service(config, hby, reader, writer):
-    """Validate persisted scope/history, install schemas and return the service habitat.
+    """Validate persisted scope, install schemas and return the service habitat.
 
     The caller owns all stores and has not started workers. Inception options
     affect only a newly created identity; KERIpy startup failures propagate to
     the outer resource contexts, which close previously acquired stores.
     """
-    AssociationIntegrity(reader, writer).bind_verification_scope(
-        trusted_geda_aid=config.trusted_geda_aid, chain_id=config.chain_id
+    bind_verification_scope(
+        reader,
+        writer,
+        trusted_geda_aid=config.trusted_geda_aid,
+        chain_id=config.chain_id,
     )
     inits = {
         "transferable": True,
@@ -35,3 +38,22 @@ def bootstrap_service(config, hby, reader, writer):
     pin_accepted_schemas(hby)
     hab = hby.habByName(config.alias) or hby.makeHab(name=config.alias, **inits)
     return hab
+
+
+def bind_verification_scope(reader, writer, *, trusted_geda_aid, chain_id):
+    """Bind one store to its trust/network policy using a single scope record.
+
+    Existing stores require an exact scope match. A new scope is initialized only
+    in an empty store; startup never audits nonce or association history.
+    """
+    scope = VerificationScope(trusted_geda_aid, chain_id, "nonce-key-v1")
+    existing = reader.scope()
+    if existing is not None:
+        if existing != scope:
+            raise ValueError(
+                "verifier store belongs to another GEDA root, chain or acceptance policy"
+            )
+        return
+    if reader.has_history():
+        raise ValueError("verifier store has unscoped results; use separate stores")
+    writer.bind_scope(scope)

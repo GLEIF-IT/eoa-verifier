@@ -5,7 +5,6 @@ from dataclasses import replace
 from hio.base import doing
 
 from eoa_verifier.persistence.records import (
-    AcceptedNonce,
     AssociationStatus,
     DeliveryReference,
     DestinationSchedule,
@@ -13,7 +12,6 @@ from eoa_verifier.persistence.records import (
 from eoa_verifier.persistence.writing import NonceConflict
 
 from .events import status_delivery
-from .integrity import AssociationIntegrity
 
 
 class AcceptanceService:
@@ -59,7 +57,6 @@ class AcceptanceService:
             raise ValueError("acceptance requires a completed verified result")
         if bool(destination) != bool(peer_aid):
             raise ValueError("delivery requires both destination and peer AID")
-        claim = AcceptedNonce(associationFacts["issuerAid"], nonce, credSaid)
         observation = dict(
             result.eoaResult["accountObservation"], wallet=result.eoaResult["wallet"]
         )
@@ -81,20 +78,17 @@ class AcceptanceService:
         schedule = DestinationSchedule() if delivery else None
         try:
             if delivery is None:
-                saved = self.writer.accept_association(status, claim)
+                saved = self.writer.accept_association(status, nonce)
             else:
                 saved = self.writer.accept_and_queue_delivery(
-                    status, claim, delivery, reference, schedule
+                    status, nonce, delivery, reference, schedule
                 )
         except NonceConflict:
-            # The entire attempted acceptance aborted. Inspect committed ownership
-            # without a writer, then prepare a separate terminal rejection.
+            # The failed no-overwrite insert aborted the entire acceptance. A
+            # same-credential race returns its stored result; every new use rejects.
             previous = self.reader.association(credSaid)
             if previous is not None:
                 return previous
-            AssociationIntegrity(self.reader, self.writer).claimed_nonce(
-                claim.issuerAid, nonce
-            )
             status = replace(
                 status, status="rejected", eventId="", reason="NONCE_REUSED"
             )

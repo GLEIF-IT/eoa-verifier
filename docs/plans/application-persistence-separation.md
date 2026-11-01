@@ -1,6 +1,6 @@
 # Separate application work from persistence and transport
 
-Status: Implemented in five slices; installed-wheel CI and paired qualification passed.
+Status: Implemented in five slices. Final qualification evidence is recorded in the linked PRs.
 Scope: eoa-verifier application code, its tests and affected integration tooling.
 Source reviewed: `3a36fe33642de0ae8c2bdc1f940417eb13301f54` (runtime tree from the merged naming refactor).
 Dependency reference: installed GLEIF KERI 1.2.19 and HIO 0.6.22, as pinned in pyproject.toml.
@@ -36,7 +36,7 @@ tested integrity boundary, not a reason to wrap every business read in a writer.
 | `next_verification`, `defer_verification`, `finish`, `retry_verification`, `stop_acceptance`, `retry_acceptance` | Retry and completion policy plus atomic queue/result updates | Verification and acceptance services decide; persistence applies each prepared transition |
 | `accept`, `retire`, `_status_delivery`, `nonce_key` | Acceptance prerequisites, protocol validation, nonce-conflict policy, status/event construction, serialization and writes | Association services and event builder prepare outcomes; writer enforces uniqueness and commits status/claim/outbox together; key encoding remains persistence-owned |
 | `next_delivery`, `record_attempt`, `delivery_result`, `retry_delivery` | Work selection, attempt/error state, success inference from empty error, schedule reset and table updates | Delivery service chooses explicit outcomes and schedule values; writer persists prepared delivery/phase/schedule records |
-| `bind_verification_scope`, `validate_nonce_history`, `_read_claim` | Startup trust policy, cross-record integrity decisions and full-history reading | Startup/integrity service checks detached records; persistence owns bounded retrieval and conditional scope insertion |
+| `bind_verification_scope`, `validate_nonce_history`, `_read_claim` | Startup trust policy, cross-record integrity decisions and full-history reading | Delete the history audit and paging; bootstrap checks one scope record; the nonce key alone enforces consumption |
 | `first_record`, `due_record`, `verification_progress` | Mostly storage queries; `due_record` also consumes an index and decides eligibility | Detached read functions; querying never consumes work or chooses retry policy |
 | `receiving/grants.py:GrantNotificationDoer` | KERIpy notice access, EXN decoding, parser replay, retry policy and application writes inside a scheduler adapter | KERIpy Grant adapter handles KERI mechanisms; replay service orchestrates; doer schedules one item |
 | `verification/coordinating.py:VerificationCoordinator` | HIO request/cue plumbing, evidence decisions and direct application-table access | Verification service owns attempts/results/rechecks; coordinator handles scheduling and correlation |
@@ -130,11 +130,9 @@ behavior, including fresh notices progressing when another Grant is waiting.
 
 The pinned Komer point get closes its underlying read transaction, whereas
 getItemIter delegates to a generator whose LMDB reader remains open across yields.
-Keep that distinction visible in adapter contracts. Bounded startup audit pages
-are detached before validation; they are not batches of application operations.
-The startup audit may still traverse all historical records and retain its existing
-cross-record bookkeeping. This plan bounds reader lifetime, not total audit cost.
-Run it before workers start, with no other service mutating that store.
+Keep that distinction visible in adapter contracts. Nonce consumption uses the
+exact nonce key with no-overwrite insertion. Delete full-history audits and their
+paging helpers; startup does not traverse accepted nonces or associations.
 Scope checks that only need to know whether history exists read a head record;
 they do not count every row.
 
@@ -200,13 +198,13 @@ execution in a persistence callback or add a generic multi-item batch API.
 | Manual retry | Prepared reset record, phase movement and due index where applicable |
 | Transport authentication | Atomic no-overwrite replay claim after signature/context validation |
 
-For acceptance, the service reads existing status/claims and prepares the outcome.
+For acceptance, the service reads existing status and prepares the outcome.
 The successful acceptance writer still uses no-overwrite nonce insertion. If a
 competing process wins, abort the whole attempted acceptance and return a nonce
-conflict; do not manufacture NONCE_REUSED inside persistence. The service reads and
-validates the existing claim/owner, then prepares the rejection unit. A crash between
+conflict; do not manufacture NONCE_REUSED inside persistence. The service prepares
+rejection based solely on the key conflict, without decoding or following its value. A crash between
 these operations leaves acceptance work recoverable. Same-SAID races return the
-already committed status; corrupt/orphaned claims fail closed. Preserve the current
+already committed status; every existing nonce key denies a new credential. Preserve the current
 independent-process and process-death tests. Do not add an acceptance/reservation
 state where a consumed nonce exists without its accepted association.
 
@@ -255,8 +253,8 @@ replay between those commits remains idempotent. No cross-environment transactio
    verification service; separate KERIpy evidence access and account observation
    from policy and HIO scheduling. Wire retry-verification and delete old methods.
 3. **Association lifecycle and status.** Move acceptance/rejection, retirement and
-   event construction above storage; extract the status query and startup nonce
-   integrity rules. Wire retry-acceptance. Preserve nonce contention and both
+   event construction above storage; extract the status query and fixed-key startup scope
+   checks. Wire retry-acceptance. Preserve nonce contention and both
    KERIpy/application and status/outbox commit gaps explicitly.
 4. **Delivery and authentication.** Separate retry/ACK/application progression from
    HTTP effects and signature mechanics. Wire retry-delivery, retain mandatory
@@ -281,18 +279,43 @@ qualification and the qualified contract revision.
 - Slice 1: [PR #28](https://github.com/GLEIF-IT/eoa-verifier/pull/28), Grant service/KERIpy adapter and atomic replay completion. Focused checks: 25 passed.
 - Slice 2: [PR #29](https://github.com/GLEIF-IT/eoa-verifier/pull/29), verification service, KERIpy credential evidence and account observation adapters. Focused checks: 119 passed; installed-wheel CI gates merge.
 
-- Slice 3: [PR #30](https://github.com/GLEIF-IT/eoa-verifier/pull/30), acceptance/retirement services, status query, detached nonce integrity audit and atomic conflict handling. Focused checks: 65 passed; 33 nonce/rollback checks passed; bounded-page reader check passed.
+- Slice 3: [PR #30](https://github.com/GLEIF-IT/eoa-verifier/pull/30), acceptance/retirement services, status query, atomic conflict handling. The temporary nonce audit/page design from this slice is deleted by slice 5: direct nonce keys replace it.
 
 - Slice 4: [PR #31](https://github.com/GLEIF-IT/eoa-verifier/pull/31), delivery service with explicit outcomes, owned HTTP adapter, pure signature codec and KERIpy key adapter. Focused checks: 106 passed; late-completion and public retirement checks passed.
 
 - Slice 5: [PR #32](https://github.com/GLEIF-IT/eoa-verifier/pull/32), bootstrap and fixture receipt separation, final documentation, and explicit named persistence transitions throughout. Removed the intermediate `move_grant`, `move_verification`, directional acceptance and flag-driven delivery saves. Focused transition/lifecycle checks: 89 passed. Final adapter/runtime/receipt checks: 26 passed. Installed-wheel CI: 249 passed. Tests use explicit runtime notifier/parser/replay-service handles; the duplicate-Grant lookup closes its reader before replay.
 
-Final coordinated qualification: [Oracle PR #59](https://github.com/GLEIF-IT/vlei-oracle/pull/59)
-pins verifier `a778f865d6c1df17fb1e8bc7d5c03ff946732435` and retains contract
-`d6083e34fbe57641cdc0e7253db18f14ce1e4a35`. Oracle's full installed-wheel suite,
-including the maintained paired scenario, passed all 73 tests both locally and in
-CI. The verifier follow-up after that producer commit changes only test reader
-lifetime and this evidence record; package and integration tooling are unchanged.
+Coordinated qualification: [Oracle PR #59](https://github.com/GLEIF-IT/vlei-oracle/pull/59)
+advances the exact verifier pin while retaining contract
+`d6083e34fbe57641cdc0e7253db18f14ce1e4a35`. The initial application-separation
+candidate passed 249 installed-wheel Verifier tests and 73 Oracle tests including
+paired qualification. The phase-specific follow-up below is requalified before
+merging; current revisions and final results are recorded in those PRs.
+
+### Phase-selection and nonce-key follow-up
+
+- Nonces: use the exact nonce as the key across all issuers. Delete history audits,
+  paging and claim-owner traversal. The value records only the accepted SAID;
+  every existing key denies a new credential. Use fresh stores without migrations.
+- Verification: replace the combined selector with detached `next_verifying`,
+  `next_waiting` and `next_pending` reads. The coordinator explicitly schedules
+  one phase; writer names identify the fixed table transition.
+- Grant replay: separate active, due waiting and KERIpy notice reads from resume,
+  retry and first-attempt operations. Preserve acknowledgement after persistence.
+- Delivery: separate active and ready reads; claiming ready-to-active is explicit.
+- Oracle posting: remove `begin_operation`, string-directed `move_operation` and
+  phase-directed failure handling. Use separate queued/preparing/pending reads,
+  fixed phase transitions and distinct preparation/pending failure operations.
+  Offline retry policy prepares records above storage, preserving signed bytes
+  and the unresolved-transaction fence. This extends the coordinated Oracle PR
+  beyond its original pin-only scope.
+- Acceptance and retirement already read one dedicated queue. Cross-phase status
+  lookups remain bounded, read-only queries for one identifier. Comply has no
+  corresponding queue-selection or generic phase-transition API.
+
+No compatibility selector remains. Qualification covers exhausted-item turns,
+restart/cooldown behavior, atomic journal rollback, signed dead-letter fencing,
+and the maintained paired scenario.
 
 ## Validation and completion criteria
 
@@ -306,7 +329,8 @@ mirror the implementation or scripted architecture/doc checks.
 - Reader-lifetime tests exercise the adapter boundary and I/O suspension. Verify a
   returned value remains usable after the reader closes and that no cursor/reader
   survives while effects run. Do not add production transaction instrumentation.
-- Preserve nonce corruption, independent-process contention and pre/post-commit
+- Require existing nonce keys to deny reuse without decoding their values. Preserve
+  independent-process contention and pre/post-commit
   process-death tests; move business outcome assertions to service tests where needed.
 - Preserve Grant acknowledgement/reopen gaps, RPC interruption, evidence arriving
   during a wait, revocation before acceptance, immutable delivery retry, lost ACK,

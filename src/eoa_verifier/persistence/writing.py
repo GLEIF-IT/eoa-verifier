@@ -318,17 +318,18 @@ class ApplicationWriter:
             txn.delete(key, db=db.acceptance_dead.sdb)
             txn.put(key, raw, db=db.accepting.sdb)
 
-    def accept_association(self, status, claim):
+    def accept_association(self, status, nonce):
         """Commit nonce ownership and accepted status without delivery.
 
         False means this SAID already has status. NonceConflict aborts all writes.
         """
         from .keys import nonce_key
+        from .records import AcceptedNonce
 
         db = self._db
         key, raw = status.associationSaid.encode(), db.associations.serializer(status)
-        claim_key = nonce_key(claim.issuerAid, claim.nonce)
-        claim_raw = db.accepted_nonces.serializer(claim)
+        claim_key = nonce_key(nonce)
+        claim_raw = db.accepted_nonces.serializer(AcceptedNonce(status.associationSaid))
         with db.env.begin(write=True) as txn:
             if txn.get(key, db=db.associations.sdb) is not None:
                 return False
@@ -340,17 +341,18 @@ class ApplicationWriter:
             txn.delete(key, db=db.accepting.sdb)
         return True
 
-    def accept_and_queue_delivery(self, status, claim, delivery, reference, schedule):
+    def accept_and_queue_delivery(self, status, nonce, delivery, reference, schedule):
         """Commit nonce ownership and accepted status with its ready event.
 
         False means this SAID already has status. NonceConflict aborts all writes.
         """
         from .keys import nonce_key
+        from .records import AcceptedNonce
 
         db = self._db
         key, raw = status.associationSaid.encode(), db.associations.serializer(status)
-        claim_key = nonce_key(claim.issuerAid, claim.nonce)
-        claim_raw = db.accepted_nonces.serializer(claim)
+        claim_key = nonce_key(nonce)
+        claim_raw = db.accepted_nonces.serializer(AcceptedNonce(status.associationSaid))
         event_key, event_raw = delivery.eventId.encode(), db.outbox.serializer(delivery)
         ref_raw = db.delivery_ready.serializer(reference)
         schedule_key, schedule_raw = (

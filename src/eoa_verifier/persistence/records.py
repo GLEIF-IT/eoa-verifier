@@ -48,10 +48,8 @@ class VerificationScope:
 
 @dataclass
 class AcceptedNonce:
-    """Permanent exact issuer/nonce ownership by one application-accepted SAID."""
+    """Accepted credential recorded under its permanently consumed nonce key."""
 
-    issuerAid: str
-    nonce: str
     associationSaid: str
 
 

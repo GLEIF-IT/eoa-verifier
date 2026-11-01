@@ -5,7 +5,7 @@ Date: 2026-10-22; ownership clarified 2026-10-31
 
 Initial KERI/ACDC, LE/QVI relationship, witnessed issuance, wallet-proof and
 configured-chain account checks establish verification. Application acceptance
-is a separate local decision and consumes the issuer/nonce pair. Accepted
+is a separate local decision and consumes the nonce. Accepted
 associations do not expire with age or outages. Verified revocation of that
 association retires it; there is no continuous account/source-chain reassessment.
 
