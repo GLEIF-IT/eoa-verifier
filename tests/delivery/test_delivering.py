@@ -57,6 +57,7 @@ def test_retry_backoff_caps_and_paces_successes(outbox):
         writer=DeliveryWriter(outbox),
         keys=ServiceKeys(None),
         clock=clock,
+        interval=1.0,
         uniform=lower_bound,
         max_attempts=12,
         association_reader=AssociationReader(outbox),
@@ -94,6 +95,7 @@ def test_cooldown_survives_restart_and_gates_new_events(outbox):
         writer=DeliveryWriter(outbox),
         keys=ServiceKeys(None),
         clock=clock,
+        interval=1.0,
         uniform=lambda low, high: high,
         association_reader=AssociationReader(outbox),
     )
@@ -118,6 +120,7 @@ def test_cooldown_survives_restart_and_gates_new_events(outbox):
         writer=DeliveryWriter(outbox),
         keys=ServiceKeys(None),
         clock=clock,
+        interval=1.0,
         association_reader=AssociationReader(outbox),
     )
     starts = []

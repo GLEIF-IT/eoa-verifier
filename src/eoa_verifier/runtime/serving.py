@@ -14,7 +14,7 @@ from keri.app import (
     notifying,
     oobiing,
 )
-from keri.core import eventing, parsing, routing
+from keri.core import parsing, routing
 from keri.db import basing, dbing
 from keri.end import ending
 from keri.help import helping
@@ -39,6 +39,7 @@ from ..persistence.basing import VerifierBaser
 from ..persistence.registry import VerifierReger
 from ..receiving.directing import CesrEnd, Receiver
 from ..receiving.grants import GrantNotificationDoer, IpexGrantAdapter
+from ..receiving.keying import Kevery
 from ..receiving.replaying import GrantReplayService
 from ..verification.constants import ASSOCIATION_SCHEMA
 from ..verification.coordinating import VerificationCoordinator
@@ -50,6 +51,9 @@ from .config import ServiceConfig
 from .oobing import OobiClienter
 
 logger = logging.getLogger(__name__)
+
+# Seconds per root scheduler turn; each worker still advances only one operation.
+SERVICE_TOCK = 0.005
 
 
 class VerifierService(doing.DoDoer):
@@ -75,7 +79,7 @@ class VerifierService(doing.DoDoer):
         cues = decking.Deck()
         router = routing.Router()
         rvy = routing.Revery(db=hby.db, rtr=router, lax=True, local=False)
-        kvy = eventing.Kevery(
+        kvy = Kevery(
             db=hby.db, cues=cues, rvy=rvy, lax=True, local=False, direct=False
         )
         kvy.registerReplyRoutes(router)
@@ -283,4 +287,4 @@ def run_service(config: ServiceConfig, *, expire: float = 0.0):
             f"eoa-verifier serving {service.hab.pre} on {config.host}:{config.http_port}",
             flush=True,
         )
-        doing.Doist(limit=expire, tock=0.03125, real=True).do(doers=[service])
+        doing.Doist(limit=expire, tock=SERVICE_TOCK, real=True).do(doers=[service])
