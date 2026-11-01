@@ -1,8 +1,8 @@
 """Standalone witnessed Verifier acceptance/delivery scenario, with no Oracle."""
 
 import json
-from pathlib import Path
 from importlib.resources import files
+from pathlib import Path
 from urllib.request import urlopen
 from uuid import uuid4
 
@@ -20,7 +20,7 @@ TEST_KEYS = {1: "0x" + "0" * 63 + "1", 2: "0x" + "0" * 63 + "2"}
 
 
 def run_flow(root: Path, configuration: dict) -> None:
-    """Qualify acceptance, nonce rejection, receipt durability and exact revocation.
+    """Qualify acceptance, nonce rejection, status-event durability and exact revocation.
 
     Require a fresh scenario but preserve its stores/evidence after completion.
     Each ceremony closes issuer stores before service restart or public reads.
@@ -43,20 +43,20 @@ def run_flow(root: Path, configuration: dict) -> None:
     associationStatus = wait_for_status(configuration, first["said"], "accepted")
     _assert_delivery_mode(configuration, associationStatus)
     duplicate = _reject_reused_nonce(root, configuration, first["nonce"])
-    receipts = (
+    storedEvents = (
         request_json(configuration["webhookUrl"])
         if not configuration["localOnly"]
         else None
     )
-    if receipts is not None:
+    if storedEvents is not None:
         stop(root, "receiver")
     restart_verifier(root, configuration)
     reopenedStatus = wait_for_status(configuration, first["said"], "accepted")
     assert (
         reopenedStatus["accountObservation"] == associationStatus["accountObservation"]
     )
-    if receipts is not None:
-        assert request_json(configuration["webhookUrl"]) == receipts
+    if storedEvents is not None:
+        assert request_json(configuration["webhookUrl"]) == storedEvents
 
     second = _issue(root, TEST_KEYS[1], str(uuid4()))
     present_credential(root, configuration, second["said"])
@@ -71,8 +71,8 @@ def run_flow(root: Path, configuration: dict) -> None:
             complete_ceremony(ceremony, ceremony.revoke_association(descriptor["said"]))
         present_credential(root, configuration, descriptor["said"])
         wait_for_status(configuration, descriptor["said"], "revoked")
-    if receipts is not None:
-        _assert_receipts(configuration, first, second, duplicate)
+    if storedEvents is not None:
+        _assert_stored_events(configuration, first, second, duplicate)
     save_json(
         root / "flow.json",
         {
@@ -115,16 +115,16 @@ def _assert_delivery_mode(configuration: dict, associationStatus: dict) -> None:
         )  # Receiver deliberately drops its first ACK.
 
 
-def _assert_receipts(
+def _assert_stored_events(
     configuration: dict, first: dict, second: dict, duplicate: dict
 ) -> None:
-    """Require separate accepted/revoked receipts and no event for nonce rejection."""
-    events = request_json(configuration["webhookUrl"])
+    """Require separate accepted/revoked status events and no event for nonce rejection."""
+    storedEvents = request_json(configuration["webhookUrl"])
     assert not any(
-        json.loads(event["body"])["associationSaid"] == duplicate["said"]
-        for event in events
+        json.loads(storedEvent["body"])["associationSaid"] == duplicate["said"]
+        for storedEvent in storedEvents
     )
-    assert {event["eventId"] for event in events} == {
+    assert {storedEvent["eventId"] for storedEvent in storedEvents} == {
         f"{descriptor['said']}:{revision}"
         for descriptor in (first, second)
         for revision in (1, 2)

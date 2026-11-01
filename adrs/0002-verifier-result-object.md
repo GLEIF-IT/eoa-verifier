@@ -13,5 +13,5 @@ authenticated durable-storage ACK. Public GET is a separate stored-state view.
 
 [verifier-api-v1](../protocol/verifier-api-v1/README.md) is the single normative
 owner of event fields, accepted/revoked vocabulary, signatures and ACKs. The
-producer owns serialization; consumers own their receipt/effect policies. JSON
+producer owns serialization; consumers own their status-event storage and effect policies. JSON
 alone never proves credential validity, selection or an on-chain endorsement.

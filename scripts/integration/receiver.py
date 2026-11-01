@@ -16,11 +16,11 @@ from eoa_verifier.delivery.authing import AuthenticationError, ServiceAuthentica
 from eoa_verifier.delivery.keys import ServiceKeys
 
 
-class ReceiptStore:
-    """Borrow a KERIpy database for durable fixture receipts and replay claims."""
+class StatusEventStore:
+    """Borrow a KERIpy database for durable fixture status events and replay claims."""
 
     def __init__(self, db):
-        """Bind disjoint non-duplicate receipt, attempt and control subdatabases."""
+        """Bind disjoint non-duplicate event, attempt and control subdatabases."""
         self.events = subing.Suber(db=db, subkey="fixture.events.")
         self.replays = subing.Suber(db=db, subkey="fixture.replays.")
         self.attempts = subing.Suber(db=db, subkey="fixture.attempts.")
@@ -30,33 +30,37 @@ class ReceiptStore:
         """Use LMDB no-overwrite insertion for one authentication replay claim."""
         return self.replays.put(keys=(peer, nonce), val=str(expires_at))
 
-    def receipt(self, event_id):
-        """Return exact retained bytes as text for one event ID."""
+    def event_json(self, event_id):
+        """Return the retained status-event JSON string for one event ID."""
         return self.events.get(keys=(event_id,))
 
     def attempt_count(self, event_id):
-        """Read the number of authenticated receipt attempts already committed."""
+        """Read the number of authenticated delivery attempts already committed."""
         return int(self.attempts.get(keys=(event_id,)) or "0")
 
-    def save_receipt(self, event_id, text, count, previous):
+    def record_event(self, event_id, statusEventJson, count, previousJson):
         """Commit prepared immutable event bytes and the attempt count together."""
-        key, raw, count_raw = event_id.encode(), text.encode(), str(count).encode()
-        expected = previous.encode() if previous is not None else None
+        key, raw, count_raw = (
+            event_id.encode(),
+            statusEventJson.encode(),
+            str(count).encode(),
+        )
+        expected = previousJson.encode() if previousJson is not None else None
         with self.events.db.env.begin(write=True) as txn:
             if txn.get(key, db=self.events.sdb) != expected:
-                raise ReceiptConflict("receipt changed before save")
+                raise StatusEventConflict("status event changed before save")
             txn.put(key, raw, db=self.events.sdb, overwrite=False)
             txn.put(key, count_raw, db=self.attempts.sdb)
 
-    def receipts(self):
+    def stored_events(self):
         """Detach fixture diagnostics before HTTP response construction."""
-        rows = []
+        storedEvents = []
         with (
             self.events.db.env.begin() as txn,
             txn.cursor(db=self.events.sdb) as cursor,
         ):
             for key, raw in cursor:
-                rows.append(
+                storedEvents.append(
                     {
                         "eventId": bytes(key).decode(),
                         "body": bytes(raw).decode(),
@@ -65,54 +69,54 @@ class ReceiptStore:
                         ),
                     }
                 )
-        return rows
+        return storedEvents
 
     def drop_ack_once(self):
-        """Persist the fixture's deliberate first-ACK loss, separately from receipt commit."""
+        """Persist the fixture's deliberate first-ACK loss, separately from status-event commit."""
         return self.control.put(keys=("dropped",), val="true")
 
 
-class ReceiptConflict(ValueError):
-    """An event ID was reused with different bytes or changed during receipt."""
+class StatusEventConflict(ValueError):
+    """An event ID was reused with different bytes or changed during storage."""
 
 
-class ReceiptService:
-    """Apply the fixture's narrow immutable-event receipt operation."""
+class StatusEventService:
+    """Apply the fixture's narrow immutable status-event storage operation."""
 
     def __init__(self, store):
-        """Borrow receipt storage; authentication and ACK fault injection stay outside."""
+        """Borrow status-event storage; authentication and ACK fault injection stay outside."""
         self.store = store
 
-    def receive(self, body):
+    def receive(self, statusEventBytes):
         """Validate one event ID, persist identical bytes/count, and return its ID."""
         try:
-            payload = json.loads(body)
-            event_id = payload["eventId"]
+            statusEvent = json.loads(statusEventBytes)
+            event_id = statusEvent["eventId"]
             if not isinstance(event_id, str) or not event_id:
                 raise ValueError("missing event ID")
-            text = body.decode()
+            statusEventJson = statusEventBytes.decode()
         except (ValueError, KeyError, TypeError) as exc:
             raise ValueError("invalid fixture event") from exc
-        previous = self.store.receipt(event_id)
-        if previous is not None and previous != text:
-            raise ReceiptConflict("conflicting event bytes")
+        previousJson = self.store.event_json(event_id)
+        if previousJson is not None and previousJson != statusEventJson:
+            raise StatusEventConflict("conflicting event bytes")
         count = self.store.attempt_count(event_id) + 1
-        self.store.save_receipt(event_id, text, count, previous)
+        self.store.record_event(event_id, statusEventJson, count, previousJson)
         return event_id
 
-    def receipts(self):
-        """Return detached diagnostics without changing receipt state."""
-        return self.store.receipts()
+    def stored_events(self):
+        """Return detached diagnostics without changing stored events."""
+        return self.store.stored_events()
 
 
 class Receiver:
-    """Authenticate exact producer bytes and acknowledge only a durable receipt."""
+    """Authenticate exact producer bytes and acknowledge only durable status-event storage."""
 
-    def __init__(self, auth, receipts, target, *, drop_ack=None):
-        """Borrow authentication/receipt operations and an optional post-commit fault."""
-        self.auth, self.receipts, self.target, self.drop_ack = (
+    def __init__(self, auth, status_event_service, target, *, drop_ack=None):
+        """Borrow authentication/status-event operations and an optional post-commit fault."""
+        self.auth, self.status_event_service, self.target, self.drop_ack = (
             auth,
-            receipts,
+            status_event_service,
             target,
             drop_ack,
         )
@@ -123,20 +127,20 @@ class Receiver:
         relative = parsed.path + ("?" + parsed.query if parsed.query else "")
         if req.relative_uri != relative:
             raise falcon.HTTPBadRequest(description="unexpected signed target")
-        body = req.bounded_stream.read()
+        statusEventBytes = req.bounded_stream.read()
         try:
             requestAuth = self.auth.verify(
                 method="POST",
                 target=self.target,
                 action="status",
-                body=body,
+                body=statusEventBytes,
                 headers=req.headers,
             )
         except AuthenticationError as exc:
             raise falcon.HTTPUnauthorized(description=str(exc)) from exc
         try:
-            key = self.receipts.receive(body)
-        except ReceiptConflict as exc:
+            event_id = self.status_event_service.receive(statusEventBytes)
+        except StatusEventConflict as exc:
             raise falcon.HTTPConflict(description=str(exc)) from exc
         except ValueError as exc:
             raise falcon.HTTPBadRequest(description=str(exc)) from exc
@@ -144,21 +148,21 @@ class Receiver:
             raise falcon.HTTPServiceUnavailable(
                 description="fixture dropped post-commit ACK"
             )
-        ack = json.dumps({"eventId": key, "stored": True}).encode()
+        ackBytes = json.dumps({"eventId": event_id, "stored": True}).encode()
         headers, _ = self.auth.sign(
             method="POST",
             target=self.target,
             action="ack",
-            body=ack,
+            body=ackBytes,
             request=requestAuth.reference,
             status=200,
         )
-        rep.data = ack
+        rep.data = ackBytes
         rep.set_headers(headers)
 
     def on_get(self, req, rep):
-        """Expose retained receipt bytes and attempt counts for qualification."""
-        rep.media = self.receipts.receipts()
+        """Expose retained status-event JSON strings and attempt counts for qualification."""
+        rep.media = self.status_event_service.stored_events()
 
 
 def main():
@@ -173,7 +177,7 @@ def main():
     ) as hby:
         hab = hby.habByName("receiver")
         hby.psr.parse(ims=bytearray((root / "verifier.cesr").read_bytes()))
-        store = ReceiptStore(hby.db)
+        store = StatusEventStore(hby.db)
         auth = ServiceAuthenticator(
             keys=ServiceKeys(hab),
             claim_nonce=store.claim_nonce,
@@ -184,7 +188,7 @@ def main():
             "/hook",
             Receiver(
                 auth,
-                ReceiptService(store),
+                StatusEventService(store),
                 config["webhookUrl"],
                 drop_ack=store.drop_ack_once if config["dropAck"] else None,
             ),

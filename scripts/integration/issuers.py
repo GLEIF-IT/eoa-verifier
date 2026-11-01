@@ -209,7 +209,7 @@ def open_issuers(stack, schemas, *, base, temp, witness, head_dir=None):
 
 
 def collect_receipts(issuer, hab, sn):
-    """Queue hab/sn on the issuer’s KERIpy receipt worker; yield until its completion cue, then return None."""
+    """Queue hab/sn on the issuer’s KERIpy witness receipt worker; yield until its completion cue, then return None."""
     receiptor = issuer.registrar.receiptor
     receiptor.msgs.append({"pre": hab.pre, "sn": sn})
     while not any(cue["pre"] == hab.pre and cue["sn"] == sn for cue in receiptor.cues):
@@ -235,7 +235,7 @@ def approve_qvi(actors, issuers):
         hby.db.setAes(dbing.dgKey(qvi.pre, inception.said), couple)
     yield from collect_receipts(issuers["geda"], geda, geda.kever.sn)
     receive(qvi_hby, qvi_rgy, b"".join(geda.db.clonePreIter(pre=geda.pre)))
-    # The receipt worker sends cloneDelegation context before the delegated event.
+    # The witness receipt worker sends cloneDelegation context before the delegated event.
     yield from collect_receipts(issuers["qvi"], qvi, 0)
     geda_hby.psr.parse(ims=bytearray(b"".join(qvi.db.clonePreIter(pre=qvi.pre))))
     geda_hby.kvy.processEscrowDelegables()

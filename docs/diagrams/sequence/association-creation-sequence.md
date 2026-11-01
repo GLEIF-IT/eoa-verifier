@@ -23,7 +23,7 @@ sequenceDiagram
     W-->>I: EOA signature (no transaction / gas)
     I->>I: Embed proof and LE edge, compute nested and credential SAIDs
     I->>I: Issue untargeted association, anchor TEL issuance in KEL
-    I->>E: Publish KEL/TEL and obtain witness receipts
+    I->>E: Publish KEL/TEL and obtain KERI witness receipts
     Note over I,E: Issued evidence is ready for independent verification
 ```
 

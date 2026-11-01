@@ -95,7 +95,7 @@ the per-store scope of this policy.
 Accepted status remains valid indefinitely. The issuer issues the credential's
 TEL revocation. To apply it to local association status, deliver that TEL event
 and its anchored/witnessed issuer KEL evidence through the
-same CESR HTTP transport. Grant receipt or ACDC bytes alone are not revocation proof.
+same CESR HTTP transport. Receiving a Grant or ACDC bytes alone are not revocation proof.
 KERIpy must validate the evidence before the verifier records revoked status.
 The verifier does not issue the TEL revocation. Revoked status persists across
 restart and creates its own immutable event requiring its own authenticated ACK
