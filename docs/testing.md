@@ -14,12 +14,15 @@ external-association profile conformance suite and reference vectors.
 | receiving/directing.py and grants.py | tests/receiving/test_directing.py and test_grants.py |
 | verification/eoa.py | python -m pytest tests/verification/test_eoa.py |
 | EoaVerifierDoer / timeout | python -m pytest tests/verification/test_worker.py -k timeout |
-| VerificationService / VerificationCoordinator | tests/verification/test_coordinating.py |
+| VerificationService policy/results | tests/verification/test_verifying.py |
+| VerificationCoordinator scheduling/cues | tests/verification/test_coordinating.py |
 | StatusQuery / StatusEnd | python -m pytest tests/associations/test_statusing.py |
-| AcceptanceService and atomic acceptance writes | python -m pytest tests/persistence/test_basing.py -k acceptance |
-| Detached readers | tests/integration/test_ipex_verification.py and tests/delivery/test_delivering.py |
+| Acceptance/revocation policy | tests/associations/test_accepting.py and test_revoking.py |
+| Atomic verification and association writes | tests/persistence/test_verification.py and test_associations.py |
+| Detached readers | tests/integration/test_ipex_verification.py and tests/delivery/test_http_delivery.py |
 | LMDB nonce claims/durability | tests/persistence/test_accepted_nonces.py |
-| Delivery authentication and sender | tests/delivery/test_authing.py and test_delivering.py |
+| Signature profile and real HTTP delivery | tests/delivery/test_authing.py and test_http_delivery.py |
+| Delivery phases, pacing and retries | tests/delivery/test_delivering.py |
 | Acceptance/revocation workers with witnessed evidence | tests/integration/test_ipex_verification.py |
 | Atomic revocation plus public visibility | tests/integration/test_acceptance_status.py |
 
@@ -68,3 +71,15 @@ Feature persistence lives in grants.py, verification.py, associations.py and
 delivery.py. ScopeStore reads/saves advisory startup settings only. HTTP signature
 verification is stateless; there is no transport replay store. Test-only verification setup
 lives in tests/support/persistence.py; production enqueue is GrantWriter.complete.
+
+## Test ownership
+
+Classify a test by the responsibility its assertions protect. Service policy belongs
+with the feature; LMDB atomicity and rollback belong with persistence. Real HTTP
+within a component may stay in that component. Cross-component witnessed scenarios
+remain in integration, and the installed-service workflow remains in qualification.
+The test tree mirrors component ownership, not every implementation helper.
+
+Integration tooling keeps lifecycle sequencing in environment.py, concrete service
+commands and bounded HTTP exchanges in services.py, and wheel installation in
+builds.py. Their functional lifecycle tests remain in tests/integration.

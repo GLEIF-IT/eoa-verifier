@@ -41,8 +41,9 @@ ServiceConfig lives in runtime/config.py; service composition and store lifetime
 remain in runtime/serving.py; runtime/bootstrap.py records advisory startup settings, prepares schemas and
 identity before task assembly. Persistent dataclasses live in
 persistence/records.py. VerifierBaser binds tables and owns their lifecycle;
-persistence/reading.py returns detached snapshots and persistence/writing.py
-commits prepared records. Feature services choose transitions and construct events.
+the feature persistence modules (grants.py, verification.py, associations.py and
+delivery.py) provide detached reads and atomic saves of prepared records. Feature
+services choose transitions and construct events.
 They are stored schemas, not a general collection of application models.
 
 Retain one VerifierBaser and one application LMDB transaction boundary. Completion
@@ -66,7 +67,7 @@ records, and calls a concrete atomic save. Clock, retry, trust and outcome polic
 run outside write transactions. No transaction spans KERIpy parsing or RPC. Each persistence method names one
 legal transition and fixes its source/destination tables. For example,
 `active_to_waiting` moves active to waiting, `dead_to_waiting` moves dead to waiting,
-and `ack` removes only the matching scheduling references.
+and `complete` removes only the matching delivery scheduling references.
 Do not pass source/target phase strings or outcome flags to a catch-all save.
 Keep the short transaction bodies explicit even when some code repeats.
 
