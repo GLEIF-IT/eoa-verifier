@@ -7,10 +7,9 @@ from keri.core import coring
 
 from eoa_verifier.verification.eoa import build_challenge
 
-KEY = "0x" + "0" * 63 + "1"
-
-
 from scripts.integration.issuers import association_from_challenge
+
+KEY = "0x" + "0" * 63 + "1"
 
 
 def candidate():

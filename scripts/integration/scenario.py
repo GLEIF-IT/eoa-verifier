@@ -25,10 +25,11 @@ def run_flow(root: Path, configuration: dict) -> None:
     Require a fresh scenario but preserve its stores/evidence after completion.
     Each ceremony closes issuer stores before service restart or public reads.
     """
-    if (root / "flow.json").exists():
+    if (root / "flow-started").exists():
         raise ValueError(
             "Full flow requires a fresh run; use status for this completed scenario"
         )
+    (root / "flow-started").write_text("Full flow requires fresh scenario state.\n")
     # Exercise the same exact installed resources served to manual clients.
     for schema in files("eoa_verifier.verification").joinpath("schema_data").iterdir():
         raw = schema.read_bytes()

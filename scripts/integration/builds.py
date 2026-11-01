@@ -28,7 +28,11 @@ def prepare_installation(
     else:
         if not tool_revision:
             raise ValueError("--verifier-wheel requires --tool-revision")
-        provenance = copy_tool_inputs(source, snapshot)
+        provenance = (
+            snapshot_source(source, snapshot)
+            if (source / ".git").exists()
+            else copy_tool_inputs(source, snapshot)
+        )
         provenance["revision"] = tool_revision
     subprocess.run(
         [sys.executable, "-m", "venv", "--symlinks", str(root / "venv")], check=True

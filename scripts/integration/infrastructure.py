@@ -23,6 +23,17 @@ def make_identity(root: Path, name: str, *, transferable: bool = True):
 
 def initialize(root: Path, config: dict) -> None:
     """Prepare independent witness, Verifier and receiver identities under root."""
+    from importlib.metadata import version
+    import subprocess
+    import sys
+
+    config["versions"] = {
+        "python": sys.version.split()[0],
+        **{name: version(name) for name in ("eoa-verifier", "gleif_keri", "gleif_hio")},
+        "anvil": subprocess.check_output(
+            [config["anvil"], "--version"], text=True, timeout=5
+        ).strip(),
+    }
     for index, w in enumerate(config["witnesses"]):
         aid, _ = make_identity(root / f"witness-{index}", "witness", transferable=False)
         w.update(aid=aid, url=f"http://127.0.0.1:{w['port']}")

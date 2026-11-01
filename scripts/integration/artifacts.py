@@ -72,20 +72,26 @@ def snapshot_source(source: Path, destination: Path) -> dict:
         .split("\0")
     )
     digest = hashlib.sha256()
+    submodules = {}
     for relative in sorted(set(filter(None, inputs))):
         original, copied = source / relative, destination / relative
         if original.is_symlink():
             raise ValueError(f"Symlink source input is not supported: {original}")
         if original.is_dir():
             provenance = snapshot_source(original, copied)
-            digest.update(relative.encode())
-            digest.update(provenance["sha256"].encode())
+            submodules[relative] = provenance
+            digest.update(b"directory\0" + relative.encode() + b"\0")
+            digest.update(bytes.fromhex(provenance["sha256"]))
         elif original.is_file():
             copied.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(original, copied)
-            digest.update(relative.encode())
-            digest.update(original.read_bytes())
-    return {"revision": source_revision(source), "sha256": digest.hexdigest()}
+            digest.update(b"file\0" + relative.encode() + b"\0")
+            digest.update(hashlib.sha256(original.read_bytes()).digest())
+    return {
+        "revision": source_revision(source),
+        "sha256": digest.hexdigest(),
+        "submodules": submodules,
+    }
 
 
 def copy_tool_inputs(source: Path, destination: Path) -> dict:
@@ -109,6 +115,6 @@ def copy_tool_inputs(source: Path, destination: Path) -> dict:
     digest = hashlib.sha256()
     for path in sorted(destination.rglob("*")):
         if path.is_file():
-            digest.update(str(path.relative_to(destination)).encode())
-            digest.update(path.read_bytes())
+            digest.update(str(path.relative_to(destination)).encode() + b"\0")
+            digest.update(hashlib.sha256(path.read_bytes()).digest())
     return {"sha256": digest.hexdigest()}

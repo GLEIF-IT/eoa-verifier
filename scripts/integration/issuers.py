@@ -1,4 +1,8 @@
-"""support/issuers.py."""
+"""Native witnessed issuer primitives shared by fixture commands and own tests.
+
+Callers own contexts, scheduling and transport. These helpers construct real
+KERI/ACDC evidence and never write Verifier application acceptance records.
+"""
 
 from hio.base import doing
 from keri.app import habbing, signing
