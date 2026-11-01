@@ -368,3 +368,11 @@ This follow-up changes Python API names and terminology only. Preserve wire
 values, LMDB keys/layout, event IDs, atomic writes, phase operations and direct
 nonce consumption. No aliases or fallback imports remain. Coordinated PRs record
 focused, installed-wheel and paired qualification evidence and exact pins.
+
+Review and qualification: [Verifier #33](https://github.com/GLEIF-IT/eoa-verifier/pull/33),
+[Oracle #60](https://github.com/GLEIF-IT/vlei-oracle/pull/60), and
+[Comply #19](https://github.com/GLEIF-IT/vlei-comply/pull/19). Focused checks passed:
+40 verifier revocation/delivery/IPEX cases, 4 registry recovery cases after the
+final variable rename, 23 Oracle selection/receipt/posting cases, and 20 Comply
+wallet-association cases. Those PRs record final installed-wheel and paired test
+results against the exact coordinated pins before merge.
