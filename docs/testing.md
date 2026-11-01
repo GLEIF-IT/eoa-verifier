@@ -109,3 +109,14 @@ including separately parsing any embedded executable Python. Preserve signatures
 assertions, parameter matrices, fixture topology and packaged schema/vector bytes.
 Build/install the wheel and collect tests outside the checkout; existing CI remains
 the functional gate. No dedicated documentation-check script or new CI gate is needed.
+
+## CLI boundary
+
+The runtime CLI declares arguments separately from execution. Each command binds
+to an explicit handler, which builds validated configuration or invokes one
+offline recovery service. Shared defaults come from the configuration dataclass;
+command routing fields are never forwarded into it. Store selectors are declared
+once for startup and recovery. Test the public command-to-runtime boundary and
+actual persistent recovery in tests/runtime/test_cli.py, without launching network
+resources in parser/configuration tests. Keep domain decisions in feature services
+and resource ownership in the runtime or the command's standard KERIpy context.

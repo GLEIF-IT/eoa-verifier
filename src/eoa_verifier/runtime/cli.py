@@ -10,8 +10,10 @@ import argparse
 import sys
 
 from keri import kering
+from keri.db import dbing
 
 from eoa_verifier.persistence.associations import AssociationReader, AssociationWriter
+from eoa_verifier.persistence.basing import VerifierBaser
 from eoa_verifier.persistence.delivery import DeliveryReader, DeliveryWriter
 from eoa_verifier.persistence.grants import GrantReader, GrantWriter
 from eoa_verifier.persistence.verification import VerificationReader, VerificationWriter
@@ -21,155 +23,221 @@ from .serving import run_service
 
 
 def main(argv=None):
-    """Parse argv (or process arguments when None) and run the standalone service.
+    """Parse operator input, run one command, and return its process exit status.
 
-    Return 0 on normal shutdown. Report ValueError, OSError and KERIpy KeriError
-    to stderr and return 1; other exceptions propagate. argparse exits directly
-    for help or invalid/missing arguments. This entry point owns no posting keys.
+    argv=None reads process arguments. argparse exits for help/invalid syntax.
+    Expected configuration, storage and KERI errors print to stderr and return 1;
+    programming errors propagate. Handlers own resources and return normally on success.
     """
+    args = make_parser().parse_args(argv)
+    try:
+        args.handler(args)
+    except (ValueError, OSError, kering.KeriError) as exc:
+        print(f"eoa-verifier: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def make_parser():
+    """Declare supported commands and bind each to its concrete handler; open no resources."""
     parser = argparse.ArgumentParser(prog="eoa-verifier")
     commands = parser.add_subparsers(dest="command", required=True)
-    server = commands.add_parser("server")
-    actions = server.add_subparsers(dest="action", required=True)
-    start = actions.add_parser("start")
-    start.add_argument(
+    server_parser = commands.add_parser("server")
+    actions = server_parser.add_subparsers(dest="action", required=True)
+    start_parser = actions.add_parser("start")
+    _start_args(start_parser)
+    start_parser.set_defaults(handler=start_service)
+    for phase, handler, identifier in (
+        ("delivery", retry_delivery, "Delivery event ID"),
+        ("verification", retry_verification, "Association credential SAID"),
+        ("grant", retry_grant, "IPEX Grant notice ID"),
+        ("acceptance", retry_acceptance, "Association credential SAID"),
+    ):
+        retry_parser = commands.add_parser(
+            f"retry-{phase}",
+            help=f"Resume a corrected {phase} dead letter with service stopped",
+        )
+        retry_parser.add_argument("identifier", help=identifier)
+        _store_args(retry_parser)
+        retry_parser.set_defaults(handler=handler)
+    return parser
+
+
+def _store_args(parser):
+    """Declare the application-store selector shared by startup and offline recovery."""
+    parser.add_argument(
+        "--name",
+        default=ServiceConfig.name,
+        help="KERIpy store name to create or reopen (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--base",
+        default=ServiceConfig.base,
+        help="KERIpy store namespace (default: empty)",
+    )
+    parser.add_argument(
+        "--head-dir",
+        help="KERIpy storage root override (default: KERIpy store defaults/fallbacks)",
+    )
+
+
+def _start_args(parser):
+    """Declare service identity, verification network and optional webhook settings."""
+    parser.add_argument(
         "--trusted-geda-aid",
         required=True,
         help="Required canonical GEDA AID trusted for QVI issuance and delegation",
     )
-    start.add_argument(
+    parser.add_argument(
         "--rpc-url",
         required=True,
         help="Required trusted Ethereum RPC URL for initial account observations",
     )
-    start.add_argument(
+    parser.add_argument(
         "--chain-id",
         type=int,
         required=True,
         help="Required positive Ethereum chain ID; must match the association and RPC",
     )
-    start.add_argument(
-        "--name",
-        default="eoa-verifier",
-        help="KERIpy store name to create or reopen (default: eoa-verifier)",
-    )
-    start.add_argument(
+    parser.add_argument(
         "--alias",
-        default="verifier",
-        help="Service habitat alias to create or reopen (default: verifier)",
+        default=ServiceConfig.alias,
+        help="Service habitat alias to create or reopen (default: %(default)s)",
     )
-    start.add_argument(
-        "--base", default="", help="KERIpy store namespace (default: empty)"
+    _store_args(parser)
+    parser.add_argument(
+        "--host",
+        default=ServiceConfig.host,
+        help="HTTP bind address (default: %(default)s)",
     )
-    start.add_argument(
-        "--head-dir",
-        help="KERIpy storage root override (default: KERIpy store defaults/fallbacks)",
-    )
-    start.add_argument(
-        "--host", default="127.0.0.1", help="HTTP bind address (default: 127.0.0.1)"
-    )
-    start.add_argument(
+    parser.add_argument(
         "--http-port",
         type=int,
-        default=9724,
-        help="HTTP listening port; 0 selects an available port (default: 9724)",
+        default=ServiceConfig.http_port,
+        help="HTTP listening port; 0 selects an available port (default: %(default)s)",
     )
-    start.add_argument(
+    parser.add_argument(
         "--passcode", help="Optional passcode for the KERIpy keystore (default: none)"
     )
-    start.add_argument(
+    parser.add_argument(
         "--incept-file",
         help="JSON inception options for a new identity only (default: built-in inception options)",
     )
-    start.add_argument(
+    parser.add_argument(
         "--webhook-url", help="Configured destination for association-status events"
     )
-    start.add_argument("--webhook-oobi", help="Optional response-signer OOBI URL")
-    start.add_argument(
+    parser.add_argument("--webhook-oobi", help="Optional response-signer OOBI URL")
+    parser.add_argument(
         "--webhook-timeout",
         type=float,
-        default=10.0,
-        help="Overall request timeout in seconds (default: 10)",
+        default=ServiceConfig.webhook_timeout,
+        help="Overall request timeout in seconds (default: %(default)s)",
     )
-    start.add_argument(
+    parser.add_argument(
         "--webhook-interval",
         type=float,
-        default=1.0,
-        help="Minimum seconds between request starts (default: 1)",
+        default=ServiceConfig.webhook_interval,
+        help="Minimum seconds between request starts (default: %(default)s)",
     )
-    start.add_argument(
+    parser.add_argument(
         "--webhook-backoff-base",
         type=float,
-        default=1.0,
-        help="Initial retry lower bound in seconds; upper is twice this (default: 1)",
+        default=ServiceConfig.webhook_backoff_base,
+        help="Initial retry lower bound in seconds; upper is twice this (default: %(default)s)",
     )
-    start.add_argument(
+    parser.add_argument(
         "--webhook-backoff-cap",
         type=float,
-        default=150.0,
-        help="Retry lower-bound cap in seconds; upper is twice this (default: 150)",
+        default=ServiceConfig.webhook_backoff_cap,
+        help="Retry lower-bound cap in seconds; upper is twice this (default: %(default)s)",
     )
-    start.add_argument("--webhook-max-attempts", type=int, default=3)
-    for phase in ("delivery", "verification", "grant", "acceptance"):
-        retry = commands.add_parser(
-            f"retry-{phase}",
-            help=f"Resume a corrected {phase} dead letter with service stopped",
-        )
-        retry.add_argument(
-            "identifier", help="Event ID, association SAID, or Grant notice ID"
-        )
-        retry.add_argument("--name", default="eoa-verifier")
-        retry.add_argument("--base", default="")
-        retry.add_argument("--head-dir")
-    args = vars(parser.parse_args(argv))
-    if args["command"].startswith("retry-"):
-        from keri.db import dbing
+    parser.add_argument(
+        "--webhook-max-attempts", type=int, default=ServiceConfig.webhook_max_attempts
+    )
 
-        from eoa_verifier.associations.accepting import AcceptanceService
-        from eoa_verifier.delivery.delivering import DeliveryService
-        from eoa_verifier.persistence.basing import VerifierBaser
-        from eoa_verifier.receiving.replaying import GrantReplayService
-        from eoa_verifier.verification.verifying import VerificationService
 
-        try:
-            with dbing.openLMDB(
-                cls=VerifierBaser,
-                name=args["name"],
-                base=args["base"],
-                headDirPath=args["head_dir"],
-                temp=False,
-            ) as baser:
-                actions = {
-                    "retry-delivery": DeliveryService(
-                        DeliveryReader(baser),
-                        DeliveryWriter(baser),
-                        association_reader=AssociationReader(baser),
-                    ).retry,
-                    "retry-verification": VerificationService(
-                        VerificationReader(baser), VerificationWriter(baser)
-                    ).retry,
-                    "retry-grant": GrantReplayService(
-                        GrantReader(baser), GrantWriter(baser)
-                    ).retry,
-                    "retry-acceptance": AcceptanceService(
-                        AssociationReader(baser),
-                        AssociationWriter(baser),
-                        verification_reader=VerificationReader(baser),
-                    ).retry,
-                }
-                actions[args["command"]](args["identifier"])
-        except (ValueError, OSError) as exc:
-            print(f"eoa-verifier: {exc}", file=sys.stderr)
-            return 1
-        return 0
-    args.pop("command")
-    args.pop("action")
-    try:
-        run_service(ServiceConfig(**args))
-    except (ValueError, OSError, kering.KeriError) as exc:
-        print(f"eoa-verifier: {exc}", file=sys.stderr)
-        return 1
-    return 0
+def start_service(args):
+    """Validate explicit CLI settings, then delegate store/scheduler ownership to the runtime."""
+    config = ServiceConfig(
+        trusted_geda_aid=args.trusted_geda_aid,
+        rpc_url=args.rpc_url,
+        chain_id=args.chain_id,
+        name=args.name,
+        alias=args.alias,
+        base=args.base,
+        head_dir=args.head_dir,
+        host=args.host,
+        http_port=args.http_port,
+        passcode=args.passcode,
+        incept_file=args.incept_file,
+        webhook_url=args.webhook_url,
+        webhook_oobi=args.webhook_oobi,
+        webhook_timeout=args.webhook_timeout,
+        webhook_interval=args.webhook_interval,
+        webhook_backoff_base=args.webhook_backoff_base,
+        webhook_backoff_cap=args.webhook_backoff_cap,
+        webhook_max_attempts=args.webhook_max_attempts,
+    )
+    run_service(config)
+
+
+def _open_store(args):
+    """Return KERIpy's persistent application-store context for one offline command.
+
+    The caller enters/exits this context; no habitat, network task or unrelated
+    feature service is created. Operators must stop the running service first.
+    """
+    return dbing.openLMDB(
+        cls=VerifierBaser,
+        name=args.name,
+        base=args.base,
+        headDirPath=args.head_dir,
+        temp=False,
+    )
+
+
+def retry_delivery(args):
+    """Resume one delivery event while retaining its destination cooldown and exact bytes."""
+    from eoa_verifier.delivery.delivering import DeliveryService
+
+    with _open_store(args) as baser:
+        DeliveryService(
+            DeliveryReader(baser),
+            DeliveryWriter(baser),
+            association_reader=AssociationReader(baser),
+        ).retry(args.identifier)
+
+
+def retry_verification(args):
+    """Resume one initial-verification dead letter with a fresh attempt budget."""
+    from eoa_verifier.verification.verifying import VerificationService
+
+    with _open_store(args) as baser:
+        VerificationService(VerificationReader(baser), VerificationWriter(baser)).retry(
+            args.identifier
+        )
+
+
+def retry_grant(args):
+    """Resume one corrected Grant notice without creating an intake parser or network task."""
+    from eoa_verifier.receiving.replaying import GrantReplayService
+
+    with _open_store(args) as baser:
+        GrantReplayService(GrantReader(baser), GrantWriter(baser)).retry(
+            args.identifier
+        )
+
+
+def retry_acceptance(args):
+    """Resume one acceptance dead letter, preserving its completed verification result."""
+    from eoa_verifier.associations.accepting import AcceptanceService
+
+    with _open_store(args) as baser:
+        AcceptanceService(
+            AssociationReader(baser),
+            AssociationWriter(baser),
+            verification_reader=VerificationReader(baser),
+        ).retry(args.identifier)
 
 
 if __name__ == "__main__":
