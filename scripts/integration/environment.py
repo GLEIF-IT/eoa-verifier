@@ -226,7 +226,7 @@ def present_credential(root: Path, configuration: dict, said: str) -> None:
 def wait_for_status(
     configuration: dict, said: str, expected: str, timeout: float = 25
 ) -> dict:
-    """Wait for public stored state and, when present, its authenticated delivery ACK."""
+    """Wait for public stored state and, when present, its HTTP delivery completion."""
     deadline = time.monotonic() + timeout
     last = None
     while time.monotonic() < deadline:

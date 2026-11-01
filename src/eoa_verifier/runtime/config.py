@@ -36,7 +36,7 @@ class ServiceConfig:
     incept_file: str | None = None
     # Use disposable KERIpy stores and remove them on close; intended for tests.
     temp: bool = False
-    # Configure both to enable durable acceptance/outbox for one trusted destination.
+    # Optional destination URL; acceptance runs even without webhook delivery.
     webhook_url: str | None = None
     # Operational seconds: one in-flight request; backoff range is [lower, 2 * lower].
     webhook_max_attempts: int = 3

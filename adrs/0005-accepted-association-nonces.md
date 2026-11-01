@@ -43,6 +43,6 @@ Uniqueness is local to that verifier store, not shared across independent deploy
 
 [Verifier API v1](../protocol/verifier-api-v1/README.md) owns acceptance behavior;
 [external-association-v1](../protocol/external-association-v1/README.md) owns signed
-fields and syntax. Transport replay claims and Ethereum transaction nonces are
-separate concerns. See [testing](../docs/testing.md) for process-race, crash,
+fields and syntax. HTTP signatures use no transport nonce ledger; Ethereum
+transaction nonces are a separate concern. See [testing](../docs/testing.md) for process-race, crash,
 rollback, exact-key and witnessed-intake coverage.

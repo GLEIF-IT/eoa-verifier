@@ -28,9 +28,9 @@ accepts KERIpy inception options for a new identity, including witnesses.
 Send CESR to `/`; `/health` reports liveness. The listener defaults to loopback.
 
 Add `--webhook-url https://receiver.example/hook`
-to enable application acceptance and delivery. Configure both together. The peer's
-current key state must already be KERIpy-accepted by this verifier; missing
-keys leave delivery blocked pending correction. Omitting both retains verification-only operation.
+to enable delivery of accepted/revoked status. Acceptance also runs without a
+webhook. A plain target needs no KERI setup. If it signs responses, provision its
+accepted key state through CESR intake; unknown signing keys block delivery.
 
 Public `GET /v1/associations/{said}/status` returns stored `pending`, `rejected`,
 `verifying`, `waiting`, `dead-letter`, `verified`, `accepted` or `revoked` status and any initial account observation.
@@ -51,7 +51,7 @@ state stays in local storage. After correcting the cause, an embedding caller ca
 with `service.sender.service.retry(event_id)`; restart alone does not unblock it.
 There is no retry REST route; the [operator guide](docs/operations.md#delivery-failures)
 also describes an offline resume for standalone deployments. Old acceptance events superseded by revocation stay
-stored and blocked; revocation requires its own ACK. No periodic verification or
+stored and blocked; revocation requires its own successful delivery. No periodic verification or
 account checks run, and Ethereum publication remains the oracle's responsibility.
 
 | Option                   | Default | Meaning                                               |
@@ -195,7 +195,7 @@ before using this revision with existing stores or an oracle deployment.
 This repository owns [external-association-v1](protocol/external-association-v1/README.md),
 its sole packaged schema, proof vectors, generator and conformance tests, plus
 [verifier-api-v1](protocol/verifier-api-v1/README.md) and the shared signed
-webhook/ACK profile. Oracle owns its selection/publication API; Comply owns the
+webhook signature profile. Oracle owns its selection/publication API; Comply owns the
 registry ABI and calldata fixtures.
 
 For an independent witnessed local environment, see [the integration commands](scripts/integration/README.md).

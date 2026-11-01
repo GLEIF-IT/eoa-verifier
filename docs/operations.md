@@ -146,8 +146,9 @@ that dependency requires checking its accepted-event write order and requalifyin
 
 Transient network/HTTP failures retry automatically with persisted destination
 cooldown, up to `--webhook-max-attempts` (default three). Exhaustion moves the event
-to the durable dead-letter queue. Each attempt signs the same immutable event bytes anew. Only an expected
-authenticated HTTP 200 ACK completes it. Observation age never triggers refresh.
+to the durable dead-letter queue. Each attempt signs the same immutable event bytes
+anew. Any complete HTTP 2xx response completes delivery after verification of any
+supplied signature. Observation age never triggers refresh.
 Malformed HTTP chunk framing closes the affected client without stopping sibling
 tasks. RPC observations use a three-attempt verification budget; malformed webhook responses leave their
 events blocked and undelivered for correction and explicit resumption.
@@ -174,12 +175,12 @@ eoa-verifier retry-delivery "$EVENT_ID" --name verifier --head-dir /var/lib/eoa-
 ```
 
 Use the same name/base/head directory as startup, then restart. An embedding
-application can call `service.sender.request(event_id)`. Both paths explicitly
+application can call `service.sender.service.retry(event_id)`. Both paths explicitly
 requeue a dead letter and reset its bounded attempt budget, retaining immutable
-event bytes and destination cooldown. They never mark an ACK. An obsolete event
+event bytes and destination cooldown. They never mark delivery complete. An obsolete event
 remains ineligible for delivery even if an operator retries it.
 
-Do not edit event bytes, delete replay records or clear accepted/revoked status to
+Do not edit event bytes, delete consumed association nonces or clear accepted/revoked status to
 retry delivery. There is no retry REST route. Undelivered revocation can leave a
 downstream mapping active until delivery and withdrawal finish. Source-chain
 monitoring, periodic account rechecks and advanced Ethereum recovery are outside

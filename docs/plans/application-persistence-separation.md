@@ -47,7 +47,7 @@ tested integrity boundary, not a reason to wrap every business read in a writer.
 | `verification/worker.py:EoaVerifierDoer` | Wallet proof policy, RPC client lifetime/result decoding, retry classification and cue construction | Account-observation adapter owns RPC mechanics; verification service owns proof/account policy and outcome classification; doer drives the exchange |
 | `associations/accepting.py`, `revoking.py` | Scheduling, direct KERIpy/application reads, eligibility decisions and multi-store sequencing | Acceptance/revocation services own the operations; doers delegate; KERIpy evidence adapter exposes facts and revocation identifiers |
 | `associations/statusing.py:StatusEnd` | Falcon handling, multi-table reads, phase precedence and response construction | Status query service builds the detached view; endpoint maps it to HTTP |
-| `delivery/delivering.py:WebhookSender` | Queue access, attempt budgets/backoff, HTTP lifecycle, authentication/ACK policy and persistence | Delivery service owns progression; HTTP adapter owns I/O; explicit ACK rules and authentication service produce outcomes |
+| `delivery/delivering.py:WebhookSender` | Queue access, attempt budgets/backoff, HTTP lifecycle, response policy and persistence | Delivery service owns progression; HTTP adapter owns I/O; explicit HTTP completion rules and optional signature verification produce outcomes |
 | `delivery/authing.py:HttpSignatures` | Signatures and accepted-key access | Stateless HTTP content verification; Oracle separately authorizes its producer; no transport replay store |
 | `runtime/serving.py:VerifierService.__init__` | Composition plus scope/history checks, inception-file reading, schema installation and identity bootstrap | Explicit bootstrap operation precedes composition; runtime retains resource and HIO lifetime ownership |
 | `runtime/cli.py` retry dispatch | Commands invoke workflow methods on the database object | CLI opens resources and invokes the owning service's retry operation |
@@ -91,7 +91,7 @@ slice; these are responsibility placements, not a one-class-per-file mandate.
 - `delivery/delivering.py`: delivery service and thin scheduled entry point;
   `delivery/httping.py` owns request/client lifetime; `delivery/signatures.py` owns
   signature parsing/base construction; `delivery/authing.py` orchestrates trusted
-  keys, signature checks and replay claims.
+  keys and signature checks without transport persistence.
 - `runtime/bootstrap.py`: startup scope/integrity/identity/schema orchestration.
   `runtime/serving.py` composes dependencies and retains store/socket shutdown order.
 
@@ -151,7 +151,7 @@ serializes records before opening its write transaction. Within the transaction:
 No workflow callback, clock lookup, budget decision, network call or policy
 calculation runs inside the writer. Each write method names a concrete transition and fixes its write set. Services
 choose separate methods for local-only acceptance versus acceptance with delivery,
-verified versus rejected completion, and delivery acknowledgment versus deferral
+verified versus rejected completion, and delivery completion versus deferral
 or dead letter. No source/target phase strings, direction flags, optional outcome
 records or catch-all transition function select tables inside persistence. Repeat
 short transaction bodies where necessary to make each legal transition readable.
@@ -199,7 +199,7 @@ execution in a persistence callback or add a generic multi-item batch API.
 | Delivery attempt | Updated attempt record and request-start schedule |
 | Delivery completion/defer/dead letter | Prepared delivery progress, destination schedule and matching phase references |
 | Manual retry | Prepared reset record, phase movement and due index where applicable |
-| Transport authentication | Atomic no-overwrite replay claim after signature/context validation |
+| HTTP signature verification | No persistence effect; event handling owns deduplication |
 
 For acceptance, the service reads existing status and prepares the outcome.
 The successful acceptance writer still uses no-overwrite nonce insertion. If a
@@ -259,9 +259,10 @@ replay between those commits remains idempotent. No cross-environment transactio
    event construction above storage; extract the status query and fixed-key startup scope
    checks. Wire retry-acceptance. Preserve nonce contention and both
    KERIpy/application and status/outbox commit gaps explicitly.
-4. **Delivery and authentication.** Separate retry/ACK/application progression from
-   HTTP effects and signature mechanics. Wire retry-delivery, retain mandatory
-   replay claims, and remove the corresponding policy-bearing Baser methods.
+4. **Delivery and authentication.** Separate retry/completion/application progression
+   from HTTP effects and signature mechanics. Wire retry-delivery and remove the
+   corresponding policy-bearing Baser methods. The subsequent optional-signature
+   refactor removes transport replay claims entirely.
 5. **Composition, tooling and final qualification.** Complete bootstrap extraction,
    update fixture adapters/documentation and remove any remaining obsolete entry
    points. Verify Baser contains only table/lifecycle responsibility and that no

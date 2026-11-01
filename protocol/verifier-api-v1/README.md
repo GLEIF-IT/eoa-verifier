@@ -122,7 +122,7 @@ but not signed; Oracle's configured route/query validation remains separate.
 
 ## Downstream consumers
 
-Durable delivery ACK, Oracle selection and confirmed on-chain endorsement are
+HTTP delivery completion, Oracle selection and confirmed on-chain endorsement are
 separate milestones. Oracle owns [oracle-api-v1](https://github.com/GLEIF-IT/vlei-oracle/blob/main/protocol/oracle-api-v1/README.md),
 including ownership, replacement and withdrawal. Oracle supersession is not a
 verifier status and cannot revoke acceptance here. Contracts own their
@@ -144,7 +144,7 @@ selection decision, not a verifier status.
 
 [carrier]: ../external-association-v1/eoa-v1/README.md
 
-## Status event and application ACK
+## Status event and HTTP completion
 
 The initial acceptance shape is:
 
@@ -181,19 +181,22 @@ Verified association revocation creates a second event: `statusRevision: 2`,
 `reasonCode: "REVOKED"`. Keep the original `association` and `accountObservation` objects;
 the issuance anchor must not become the revocation anchor. Commit revocation and
 this event together, using the original delivery destination. Revocation is terminal
-for that SAID and requires its own ACK; the initial event’s ACK cannot complete it.
+for that SAID and requires its own successful delivery; completion of the initial
+event cannot complete the revocation event.
 
 POST the exact stored bytes to the configured destination with the service
-signature profile. Completion requires an authenticated HTTP 200 response bound
-to that attempt, with exactly this JSON object (`stored` is a boolean):
+signature profile. Any complete HTTP 2xx response completes delivery after any
+supplied signature verifies. There is no required response body. Oracle returns
+a signed storage result like this after committing (`stored` is a boolean):
 
 ```json
 {"eventId": "example-association:1", "stored": true}
 ```
 
-The receiver signs only after durable status-event storage. Redelivery keeps the event/body
-and gets a fresh transport signature; the receiver acknowledges duplicates without
-repeating effects. A signature on an error response does not complete delivery.
+Oracle signs only after durable status-event storage. Redelivery keeps the event/body
+and gets a fresh transport signature; Oracle accepts duplicates without repeating
+effects. Other targets may return unsigned success. A signature on an error
+response does not complete delivery.
 
 
 ## Evidence intake

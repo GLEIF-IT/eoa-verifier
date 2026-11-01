@@ -21,7 +21,7 @@ flowchart TB
     KW -->|"IPEX Grant + KERI evidence"| V
     V -->|"Initial account check"| ETH
     V -->|"KERI AID-signed status updates"| T
-    T -->|"Authenticated ACK"| V
+    T -->|"HTTP success with optional signature"| V
 ```
 
 The KERI wallet embeds the EIP-712 proof, issues the untargeted ACDC and presents the
