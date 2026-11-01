@@ -8,13 +8,18 @@ import pytest
 from keri.db import dbing
 
 from eoa_verifier.persistence.basing import VerifierBaser
+from eoa_verifier.persistence.reading import ApplicationReader
 from eoa_verifier.persistence.records import (
     DestinationSchedule,
     VerificationRecord,
     VerificationResult,
 )
 from eoa_verifier.persistence.writing import ApplicationWriter
-from tests.support.acceptance import accept_verified_result
+from tests.support.acceptance import (
+    accept_verified_result,
+    acceptance_service,
+    retirement_service,
+)
 from tests.support.services import verification_service
 
 
@@ -54,7 +59,7 @@ def test_duplicates_completion_and_restart(tmp_path):
         )
         assert baser.pending.get(keys=("b",)) is None
         assert baser.results.get(keys=("b",)) == result
-        assert baser.next_acceptance() == result
+        assert ApplicationReader(baser).acceptance() == result
     finally:
         baser.close()
 
@@ -114,7 +119,7 @@ def test_acceptance_and_delivery_progress_survive_reopen(verified_store):
     baser.close()
     baser.reopen()
     associationStatus = accept_verified_result(baser)
-    assert baser.next_acceptance() is None
+    assert ApplicationReader(baser).acceptance() is None
     assert baser.delivery_ready.get(keys=(associationStatus.eventId,)) is not None
     baser.record_attempt(associationStatus.eventId)
     baser.delivery_result(associationStatus.eventId, error="connection failed")
@@ -171,7 +176,7 @@ def test_rejected_result_cannot_create_acceptance_or_event(verified_store):
         VerificationResult("rejected", "rejected", "wrong schema")
     )
     with pytest.raises(ValueError, match="verified result"):
-        baser.accept(
+        acceptance_service(baser).accept(
             "rejected",
             associationFacts={"issuerAid": "issuer"},
             nonce="other",
@@ -188,6 +193,52 @@ def test_missing_original_delivery_cannot_silently_retire_locally(verified_store
     associationStatus = accept_verified_result(baser)
     baser.outbox.rem(keys=(associationStatus.eventId,))
     with pytest.raises(ValueError, match="delivery event is absent"):
-        baser.retire("association")
+        retirement_service(baser).retire("association")
     assert baser.associations.get(keys=("association",)) == associationStatus
     assert baser.accepted_nonces.cntAll() == 1
+
+
+@pytest.mark.parametrize("retirement", [False, True])
+def test_status_and_event_write_failure_aborts_entire_transition(
+    verified_store, retirement
+):
+    """Fail after the outbox write and prove status, event and nonce remain atomic."""
+    from types import SimpleNamespace
+
+    baser = verified_store
+    previous = accept_verified_result(baser) if retirement else None
+    env = baser.env
+
+    class Transaction:
+        def __enter__(self):
+            self.txn = env.begin(write=True)
+            return self
+
+        def __exit__(self, kind, value, traceback):
+            self.txn.abort() if kind else self.txn.commit()
+
+        def __getattr__(self, name):
+            return getattr(self.txn, name)
+
+        def put(self, *args, **kwa):
+            result = self.txn.put(*args, **kwa)
+            if kwa.get("db") == baser.outbox.sdb:
+                raise RuntimeError("after event write")
+            return result
+
+    def begin(**kwa):
+        return Transaction() if kwa.get("write") else env.begin(**kwa)
+
+    with (
+        patch.object(baser, "env", SimpleNamespace(begin=begin)),
+        pytest.raises(RuntimeError, match="after event write"),
+    ):
+        if retirement:
+            retirement_service(baser).retire("association")
+        else:
+            accept_verified_result(baser)
+    assert baser.associations.get(keys=("association",)) == previous
+    assert baser.accepted_nonces.cntAll() == int(retirement)
+    assert baser.outbox.cntAll() == int(retirement)
+    assert baser.delivery_ready.cntAll() == int(retirement)
+    assert baser.accepting.cntAll() == int(not retirement)

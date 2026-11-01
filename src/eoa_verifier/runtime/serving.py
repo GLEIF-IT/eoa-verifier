@@ -24,9 +24,11 @@ from keri.vc import protocoling
 from keri.vdr import credentialing, verifying
 from keri.vdr import eventing as veventing
 
-from ..associations.accepting import AcceptanceDoer
-from ..associations.retiring import RetirementDoer
-from ..associations.statusing import StatusEnd
+from ..associations.accepting import AcceptanceDoer, AcceptanceService
+from ..associations.evidence import AssociationEvidence
+from ..associations.integrity import AssociationIntegrity
+from ..associations.retiring import RetirementDoer, RetirementService
+from ..associations.statusing import StatusEnd, StatusQuery
 from ..delivery.delivering import WebhookSender
 from ..persistence.basing import VerifierBaser
 from ..persistence.reading import ApplicationReader
@@ -57,7 +59,9 @@ class VerifierService(doing.DoDoer):
         inception options apply only to that creation. HIO network Doers own
         their sockets. kwa is passed to HIO DoDoer.
         """
-        baser.bind_verification_scope(
+        AssociationIntegrity(
+            ApplicationReader(baser), ApplicationWriter(baser)
+        ).bind_verification_scope(
             trusted_geda_aid=config.trusted_geda_aid, chain_id=config.chain_id
         )
         self.config = config
@@ -107,7 +111,10 @@ class VerifierService(doing.DoDoer):
         oobiing.loadEnds(app=app, hby=hby, prefix="/ext")
         app.add_route("/", CesrEnd(msgs=receiver.msgs))
         app.add_route("/health", HealthEnd())
-        app.add_route("/v1/associations/{said}/status", StatusEnd(baser))
+        app.add_route(
+            "/v1/associations/{said}/status",
+            StatusEnd(StatusQuery(ApplicationReader(baser))),
+        )
         server = http.Server(
             host=config.host,
             port=config.http_port,
@@ -144,7 +151,15 @@ class VerifierService(doing.DoDoer):
                 ),
             ),
         ]
-        doers.append(RetirementDoer(baser=baser, rgy=rgy))
+        doers.append(
+            RetirementDoer(
+                RetirementService(
+                    ApplicationReader(baser),
+                    ApplicationWriter(baser),
+                    AssociationEvidence(rgy),
+                )
+            )
+        )
         self.sender = None
         if config.webhook_url:
             self.sender = WebhookSender(
@@ -159,10 +174,13 @@ class VerifierService(doing.DoDoer):
             doers.append(self.sender)
         doers.append(
             AcceptanceDoer(
-                baser=baser,
-                rgy=rgy,
-                destination=config.webhook_url,
-                peer_aid=config.webhook_aid,
+                AcceptanceService(
+                    ApplicationReader(baser),
+                    ApplicationWriter(baser),
+                    AssociationEvidence(rgy),
+                    destination=config.webhook_url,
+                    peer_aid=config.webhook_aid,
+                ),
             )
         )
         self.hby, self.hab, self.rgy, self.baser, self.app = (

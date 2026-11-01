@@ -10,6 +10,10 @@ def due_key(when, identifier):
     return f"{int(when * 1_000_000):016x}.{identifier}".encode()
 
 
+class NonceConflict(Exception):
+    """Another acceptance owns the nonce; the attempted write set was aborted."""
+
+
 class ApplicationWriter:
     """Persist concrete application transitions without running workflow policy."""
 
@@ -154,3 +158,88 @@ class ApplicationWriter:
             if acceptance_raw is not None:
                 txn.put(key, acceptance_raw, db=db.accepting.sdb)
             txn.delete(key, db=db.verifying.sdb)
+
+    def move_acceptance(self, previous, record, *, to_dead):
+        """Persist a prepared acceptance/dead-letter move against its expected source."""
+        db = self._db
+        source, target = (
+            (db.accepting, db.acceptance_dead)
+            if to_dead
+            else (db.acceptance_dead, db.accepting)
+        )
+        key, expected, raw = (
+            record.associationSaid.encode(),
+            source.serializer(previous),
+            target.serializer(record),
+        )
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=source.sdb) != expected:
+                raise ValueError("acceptance work is absent or changed")
+            txn.put(key, raw, db=target.sdb)
+            txn.delete(key, db=source.sdb)
+
+    def save_acceptance(
+        self, status, claim, delivery=None, reference=None, schedule=None
+    ):
+        """Insert one prepared outcome with its optional nonce/event obligation atomically.
+
+        False reports an existing immutable association. NonceConflict aborts the
+        entire write set so the service can inspect the owner and prepare rejection.
+        """
+        from .keys import nonce_key
+
+        db = self._db
+        key, raw = status.associationSaid.encode(), db.associations.serializer(status)
+        claim_key = nonce_key(claim.issuerAid, claim.nonce) if claim else None
+        claim_raw = db.accepted_nonces.serializer(claim) if claim else None
+        event_key = delivery.eventId.encode() if delivery else None
+        event_raw = db.outbox.serializer(delivery) if delivery else None
+        ref_raw = db.delivery_ready.serializer(reference) if reference else None
+        schedule_key = delivery.destination.encode() if schedule else None
+        schedule_raw = db.destinations.serializer(schedule) if schedule else None
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.associations.sdb) is not None:
+                return False
+            if claim is not None and not txn.put(
+                claim_key, claim_raw, db=db.accepted_nonces.sdb, overwrite=False
+            ):
+                raise NonceConflict()
+            txn.put(key, raw, db=db.associations.sdb)
+            if event_raw is not None:
+                txn.put(event_key, event_raw, db=db.outbox.sdb)
+                txn.put(event_key, ref_raw, db=db.delivery_ready.sdb)
+            if schedule_raw is not None:
+                txn.put(
+                    schedule_key, schedule_raw, db=db.destinations.sdb, overwrite=False
+                )
+            txn.delete(key, db=db.accepting.sdb)
+        return True
+
+    def save_retirement(self, previous, status, delivery=None, reference=None):
+        """Replace the expected association and insert its prepared revocation event."""
+        db = self._db
+        key = status.associationSaid.encode()
+        expected, raw = (
+            db.associations.serializer(previous),
+            db.associations.serializer(status),
+        )
+        event_key = delivery.eventId.encode() if delivery else None
+        event_raw = db.outbox.serializer(delivery) if delivery else None
+        ref_raw = db.delivery_ready.serializer(reference) if reference else None
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.associations.sdb) != expected:
+                raise ValueError("association changed before retirement")
+            txn.put(key, raw, db=db.associations.sdb)
+            if event_raw is not None:
+                txn.put(event_key, event_raw, db=db.outbox.sdb)
+                txn.put(event_key, ref_raw, db=db.delivery_ready.sdb)
+
+    def bind_scope(self, scope):
+        """Insert a prepared scope once, rejecting a conflicting storage binding."""
+        db = self._db
+        raw = db.scope.serializer(scope)
+        with db.env.begin(write=True) as txn:
+            existing = txn.get(b"verification", db=db.scope.sdb)
+            if existing is not None and existing != raw:
+                raise ValueError("verifier scope changed")
+            txn.put(b"verification", raw, db=db.scope.sdb, overwrite=False)

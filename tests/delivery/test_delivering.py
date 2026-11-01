@@ -21,6 +21,7 @@ from eoa_verifier.delivery.delivering import (
 from eoa_verifier.persistence.basing import VerifierBaser
 from eoa_verifier.persistence.records import VerificationRecord, VerificationResult
 from eoa_verifier.persistence.writing import ApplicationWriter
+from tests.support.acceptance import acceptance_service, retirement_service
 from tests.support.network import free_port
 from tests.support.services import verification_service
 
@@ -150,7 +151,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
                 },
             )
         )
-        associationStatus = baser.accept(
+        associationStatus = acceptance_service(baser).accept(
             "association",
             associationFacts={"issuerAid": "issuer"},
             nonce="other",
@@ -161,7 +162,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
             # Initial delivery is already acknowledged; retirement needs its own
             # event ACK, even if the target signs another acceptance of event 1.
             baser.delivery_result(associationStatus.eventId)
-            associationStatus = baser.retire("association")
+            associationStatus = retirement_service(baser).retire("association")
         sender = WebhookSender(
             baser=baser,
             hab=sender_hab,
@@ -265,7 +266,7 @@ def test_malformed_chunk_response_preserves_pending_delivery(tmp_path):
                 eoaResult={"wallet": "wallet", "accountObservation": {}},
             )
         )
-        status = baser.accept(
+        status = acceptance_service(baser).accept(
             "association",
             associationFacts={"issuerAid": "issuer"},
             nonce="other",
@@ -313,7 +314,7 @@ def accept(baser, said):
             said, "verified", eoaResult={"wallet": "wallet", "accountObservation": {}}
         )
     )
-    return baser.accept(
+    return acceptance_service(baser).accept(
         said,
         associationFacts={"issuerAid": "issuer"},
         nonce=said,

@@ -119,6 +119,7 @@ def main(argv=None):
     if args["command"].startswith("retry-"):
         from keri.db import dbing
 
+        from eoa_verifier.associations.accepting import AcceptanceService
         from eoa_verifier.persistence.basing import VerifierBaser
         from eoa_verifier.persistence.reading import ApplicationReader
         from eoa_verifier.persistence.writing import ApplicationWriter
@@ -141,7 +142,9 @@ def main(argv=None):
                     "retry-grant": GrantReplayService(
                         ApplicationReader(baser), ApplicationWriter(baser)
                     ).retry,
-                    "retry-acceptance": baser.retry_acceptance,
+                    "retry-acceptance": AcceptanceService(
+                        ApplicationReader(baser), ApplicationWriter(baser)
+                    ).retry,
                 }
                 actions[args["command"]](args["identifier"])
         except (ValueError, OSError) as exc:

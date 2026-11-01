@@ -10,7 +10,7 @@ from keri.vdr import eventing
 
 from eoa_verifier.associations.retiring import RetirementDoer
 from eoa_verifier.persistence.registry import VerifierReger
-from tests.support.acceptance import accept_verified_result
+from tests.support.acceptance import accept_verified_result, retirement_service
 
 
 def revocation_serder(*, backers=False):
@@ -91,7 +91,7 @@ def test_retirement_ack_gap_repeats_only_the_same_event(verified_store, tmp_path
         cls=VerifierReger, name="retirement", headDirPath=str(tmp_path), temp=False
     ) as reger:
         reger.revocations.put(keys=("association",), val="revocation")
-        worker = RetirementDoer(baser=baser, rgy=SimpleNamespace(reger=reger))
+        worker = RetirementDoer(retirement_service(baser, SimpleNamespace(reger=reger)))
         with (
             patch.object(
                 reger.revocations,

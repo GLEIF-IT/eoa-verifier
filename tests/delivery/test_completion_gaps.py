@@ -9,6 +9,7 @@ from keri.app import habbing
 from eoa_verifier.delivery.authing import ServiceAuthenticator
 from eoa_verifier.delivery.delivering import WebhookSender
 from scripts.integration.receiver import ReceiptStore, Receiver
+from tests.support.acceptance import acceptance_service
 from tests.support.network import free_port
 
 
@@ -39,7 +40,7 @@ def test_real_sender_recovers_commit_ack_gaps(
             server=http.Server(host="127.0.0.1", port=port, app=app)
         )
         baser = verified_store
-        associationStatus = baser.accept(
+        associationStatus = acceptance_service(baser).accept(
             "association",
             associationFacts={"issuerAid": sender_hab.pre},
             nonce="gap-fixture",

@@ -1,33 +1,26 @@
-"""Public stored-status reads; no authentication, verification or network refresh."""
+"""Detached status projection and its thin informational HTTP endpoint."""
 
 from dataclasses import asdict
 
 import falcon
 
-from eoa_verifier.persistence.reading import ApplicationReader
 
+class StatusQuery:
+    """Build one stored association view without effects or work discovery."""
 
-class StatusEnd:
-    """Borrow the application store; GET is an informational view, not a signed event."""
+    def __init__(self, reader):
+        self.reader = reader
 
-    def __init__(self, baser):
-        self.baser = baser
-
-    def on_get(self, req, rep, said):
-        """Handle GET /v1/associations/{said}/status without request signatures.
-
-        Return HTTP 200 JSON for known pending, completed, accepted or revoked candidates;
-        return 404 for unknown SAIDs. Observation timestamps/block identifiers are
-        informational. This method reads stored records only and never calls RPC.
-        """
-        associationStatus = self.baser.associations.get(keys=(said,))
-        verificationResult = self.baser.results.get(keys=(said,))
-        phase, verification = ApplicationReader(self.baser).verification_progress(said)
-        deadLetterResult = self.baser.acceptance_dead.get(keys=(said,))
+    def get(self, said):
+        """Return a detached public view, or None for an unknown candidate."""
+        associationStatus = self.reader.association(said)
+        verificationResult = self.reader.verification_result(said)
+        phase, verification = self.reader.verification_progress(said)
+        deadLetterResult = self.reader.acceptance(said, dead=True)
         if associationStatus is not None:
             statusBody = asdict(associationStatus)
             delivery = (
-                self.baser.outbox.get(keys=(associationStatus.eventId,))
+                self.reader.delivery(associationStatus.eventId)
                 if associationStatus.eventId
                 else None
             )
@@ -74,5 +67,19 @@ class StatusEnd:
                 "accountObservation": None,
             }
         else:
+            return None
+        return statusBody
+
+
+class StatusEnd:
+    """Map the status query to GET /v1/associations/{said}/status."""
+
+    def __init__(self, query):
+        self.query = query
+
+    def on_get(self, req, rep, said):
+        """Return known status as JSON, or HTTP 404; never refresh chain state."""
+        status = self.query.get(said)
+        if status is None:
             raise falcon.HTTPNotFound(title="Unknown association")
-        rep.media = statusBody
+        rep.media = status

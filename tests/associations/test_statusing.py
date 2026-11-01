@@ -3,14 +3,15 @@
 import falcon
 from falcon.testing import TestClient
 
-from eoa_verifier.associations.statusing import StatusEnd
+from eoa_verifier.associations.statusing import StatusEnd, StatusQuery
+from eoa_verifier.persistence.reading import ApplicationReader
 from eoa_verifier.persistence.records import (
     DestinationSchedule,
     VerificationRecord,
     VerificationResult,
 )
 from eoa_verifier.persistence.writing import ApplicationWriter
-from tests.support.acceptance import accept_verified_result
+from tests.support.acceptance import accept_verified_result, acceptance_service
 from tests.support.services import verification_service
 
 
@@ -18,7 +19,10 @@ def test_public_get_returns_stored_status_and_old_observation(verified_store):
     """Unauthenticated GET distinguishes known states; old observations remain accepted."""
     baser = verified_store
     app = falcon.App()
-    app.add_route("/v1/associations/{said}/status", StatusEnd(baser))
+    app.add_route(
+        "/v1/associations/{said}/status",
+        StatusEnd(StatusQuery(ApplicationReader(baser))),
+    )
     client = TestClient(app)
     ApplicationWriter(baser).enqueue_verification(
         VerificationRecord("rejected", "grant")
@@ -54,7 +58,10 @@ def test_public_status_does_not_disclose_other_delivery_activity(verified_store)
     baser.delivery_result(associationStatus.eventId)
     delivery = baser.outbox.get(keys=(associationStatus.eventId,))
     app = falcon.App()
-    app.add_route("/v1/associations/{said}/status", StatusEnd(baser))
+    app.add_route(
+        "/v1/associations/{said}/status",
+        StatusEnd(StatusQuery(ApplicationReader(baser))),
+    )
     client = TestClient(app)
     path = "/v1/associations/association/status"
     before = client.simulate_get(path).json
@@ -66,7 +73,7 @@ def test_public_status_does_not_disclose_other_delivery_activity(verified_store)
     verification_service(baser).finish(
         VerificationResult("other", "verified", eoaResult=result.eoaResult)
     )
-    other = baser.accept(
+    other = acceptance_service(baser).accept(
         "other",
         associationFacts={"issuerAid": "issuer"},
         nonce="other",
@@ -91,7 +98,10 @@ def test_waiting_and_dead_letter_are_passive_statuses(verified_store):
 
     baser = verified_store
     app = falcon.App()
-    app.add_route("/v1/associations/{said}/status", StatusEnd(baser))
+    app.add_route(
+        "/v1/associations/{said}/status",
+        StatusEnd(StatusQuery(ApplicationReader(baser))),
+    )
     client = falcon.testing.TestClient(app)
     ApplicationWriter(baser).enqueue_verification(
         VerificationRecord("waiting", "grant")
@@ -110,7 +120,7 @@ def test_waiting_and_dead_letter_are_passive_statuses(verified_store):
         client.simulate_get("/v1/associations/waiting/status").json["status"]
         == "dead-letter"
     )
-    baser.stop_acceptance("association", "revoked before acceptance")
+    acceptance_service(baser).stop("association", "revoked before acceptance")
     stopped = client.simulate_get("/v1/associations/association/status").json
     assert stopped["phase"] == "acceptance" and stopped["status"] == "dead-letter"
     assert baser.accepted_nonces.cntAll() == 0
