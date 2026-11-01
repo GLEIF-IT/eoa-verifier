@@ -11,6 +11,15 @@ The service uses [HIO structured concurrency](adrs/0003-hio-structured-concurren
 For installation, peer introduction, restart and delivery recovery, see the
 [operator guide](docs/operations.md).
 
+Start with the [partner integration quickstart](docs/integration-quickstart.md)
+for a short walkthrough and issuance/revocation diagram. Issuers and advanced
+users can follow the [KERI integration guide](docs/keri-integration.md).
+
+For a local wallet-to-webhook demo: `./scripts/demo.sh run`, then
+`./scripts/demo.sh revoke` and `./scripts/demo.sh events`. The
+[setup section](docs/integration-quickstart.md#setup-and-dependencies) lists host
+prerequisites; the script prepares the remaining tools and services.
+
 ## Run
 
 Requires Python 3.12.6 or newer. Install with `python -m pip install .`, then:

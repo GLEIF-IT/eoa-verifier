@@ -160,6 +160,7 @@ def start(root: Path, configuration: dict, arguments) -> None:
 def issue_or_revoke(root: Path, arguments) -> None:
     """Run a single native ceremony and emit only its JSON descriptor to stdout."""
     from .ceremony import complete_ceremony, open_ceremony
+    from .wallet import TEST_KEYS
 
     if arguments.command == "issue" and arguments.nonce is None:
         raise ValueError("issue requires --nonce")
@@ -170,7 +171,7 @@ def issue_or_revoke(root: Path, arguments) -> None:
             ceremonyGen = ceremony.bootstrap_sources()
         elif arguments.command == "issue":
             ceremonyGen = ceremony.issue_association(
-                "0x" + "0" * 63 + str(arguments.wallet), arguments.nonce
+                TEST_KEYS[arguments.wallet], arguments.nonce
             )
         else:
             ceremonyGen = ceremony.revoke_association(arguments.said)

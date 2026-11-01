@@ -81,7 +81,11 @@ def start_receiver(root: Path, configuration: dict) -> None:
 def verifier_command(root: Path, configuration: dict) -> list[str]:
     """Construct the supported installed CLI without posting keys or hidden peers."""
     command = [
-        str(Path(configuration["python"]).with_name("eoa-verifier")),
+        # Bypass generated shell shebang wrappers, which can expand literal '$'
+        # in long/space-containing install paths. This is the same installed CLI.
+        configuration["python"],
+        "-m",
+        "eoa_verifier.runtime.cli",
         "server",
         "start",
         "--name",

@@ -35,6 +35,7 @@ def prepare_run(
     witness_count: int,
     wheel: Path | None = None,
     tool_revision: str | None = None,
+    purpose: str = "qualification",
 ) -> None:
     """Create one fresh run, install its wheel, and issue its real source chain.
 
@@ -51,6 +52,12 @@ def prepare_run(
     root.mkdir(mode=0o700, parents=True)
     for name in ("logs", "wheels", "credentials", "tools"):
         (root / name).mkdir()
+    # Record ownership before build/install so a failed preparation can still
+    # be stopped and explicitly cleaned without adopting an unknown directory.
+    save_json(
+        root / "run.json",
+        {"owner": OWNER, "root": str(root), "purpose": purpose, "prepared": False},
+    )
     installation = prepare_installation(
         root, source, wheel=wheel, tool_revision=tool_revision
     )
@@ -59,6 +66,7 @@ def prepare_run(
         "version": 1,
         "owner": OWNER,
         "root": str(root),
+        "purpose": purpose,
         **installation,
         "chainId": 31337,
         "anvil": anvil,

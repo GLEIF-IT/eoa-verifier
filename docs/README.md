@@ -1,5 +1,7 @@
 # EOA Verifier documentation
 
+- [Partner integration quickstart](integration-quickstart.md): wallet signing, issuance/revocation flow, webhook handling, status lookup and a minimal service start.
+- [KERI integration guide](keri-integration.md): credential/evidence preparation, IPEX framing, trust introduction, registered HTTP routes and recovery.
 - [External association v1](../protocol/external-association-v1/README.md): credential/schema, challenge and reference vectors.
 - [Verifier API v1](../protocol/verifier-api-v1/README.md): evidence intake, acceptance/public status and shared signed delivery.
 - [Operations](operations.md): install, trust introduction, persistence, delivery recovery and limitations.

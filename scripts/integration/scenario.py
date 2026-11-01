@@ -15,9 +15,7 @@ from .environment import (
 )
 from .processes import stop
 from .services import request_json
-
-# Public deterministic wallet keys for independent-wallet and nonce-reuse cases.
-TEST_KEYS = {1: "0x" + "0" * 63 + "1", 2: "0x" + "0" * 63 + "2"}
+from .wallet import TEST_KEYS
 
 
 def run_flow(root: Path, configuration: dict) -> None:

@@ -20,7 +20,8 @@ from keri.db import basing
 from keri.help import helping
 
 from eoa_verifier.verification.constants import LE_SCHEMA, QVI_SCHEMA
-from eoa_verifier.verification.eoa import build_challenge
+from eoa_verifier.verification.eoa import build_challenge, verify_eoa_proof
+
 from .artifacts import load_json, save_json
 from .issuers import (
     IssuerEscrows,
@@ -127,7 +128,7 @@ class IssuerCeremony:
         proof implementation. A valid reused nonce is allowed at issuance so the
         Verifier can exercise its own acceptance policy.
         """
-        chain, registry = self._association_context()
+        chain, _registry = self._association_context()
         challenge = build_challenge(
             issuer_aid=chain["issuerAid"],
             le_vlei_said=chain["leSaid"],
@@ -137,9 +138,29 @@ class IssuerCeremony:
         signature = Account.sign_message(
             encode_typed_data(full_message=challenge), wallet_key
         ).signature
-        credential = association_from_challenge(
-            challenge, "0x" + signature.hex(), registry.regk
+        return (
+            yield from self.issue_signed_association(challenge, "0x" + signature.hex())
         )
+
+    def issue_signed_association(self, challenge: dict, signature: str) -> Generator:
+        """Verify an externally signed challenge, then issue/anchor/export its association.
+
+        The issuer and LE source must match this run's real holder; the wallet
+        proof and configured chain must match before any TEL issuance is started.
+        Nonce reuse remains Verifier acceptance policy, not an issuer ledger.
+        """
+        chain, registry = self._association_context()
+        message = challenge["message"]
+        if (
+            message["issuerAid"] != chain["issuerAid"]
+            or message["leVleiSaid"] != chain["leSaid"]
+            or challenge["domain"]["chainId"] != str(self.configuration["chainId"])
+        ):
+            raise ValueError(
+                "Challenge does not belong to this LE holder and local chain"
+            )
+        credential = association_from_challenge(challenge, signature, registry.regk)
+        verify_eoa_proof(credential.sad)
         yield from issue_credential(self.issuers["le"], registry, credential)
         (self.root / "credentials" / f"{credential.said}.json").write_bytes(
             credential.raw

@@ -1,10 +1,10 @@
 """Build a Verifier wheel and its isolated tooling environment from explicit inputs."""
 
 import hashlib
-from pathlib import Path
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 from .artifacts import copy_tool_inputs, snapshot_source
 
@@ -34,8 +34,11 @@ def prepare_installation(
             else copy_tool_inputs(source, snapshot)
         )
         provenance["revision"] = tool_revision
+    # Resolve launcher symlinks before venv records its base-interpreter home.
+    # In particular, uv's ~/.local/bin shim is not the Python installation root.
+    base_python = str(Path(sys._base_executable).resolve())
     subprocess.run(
-        [sys.executable, "-m", "venv", "--symlinks", str(root / "venv")], check=True
+        [base_python, "-m", "venv", "--symlinks", str(root / "venv")], check=True
     )
     python = str(root / "venv/bin/python")
     with (root / "logs/build.log").open("w") as log:
