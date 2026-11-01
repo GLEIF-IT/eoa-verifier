@@ -20,7 +20,7 @@ from eoa_verifier.associations.retiring import RetirementDoer
 from eoa_verifier.runtime.config import ServiceConfig
 from eoa_verifier.verification.constants import LE_SCHEMA, QVI_SCHEMA
 from eoa_verifier.verification.eoa import build_challenge
-from tests.support.issuers import (
+from scripts.integration.issuers import (
     KEY,
     IssuerEscrows,
     anchor,
@@ -358,9 +358,9 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             yield from send(revocation)
             deadline = workflow.tyme + 5
             while runtime.rgy.reger.getTae(dbing.snKey(creder.said, 1)) is None:
-                assert (
-                    workflow.tyme < deadline
-                ), "revocation did not enter KERIpy anchor escrow"
+                assert workflow.tyme < deadline, (
+                    "revocation did not enter KERIpy anchor escrow"
+                )
                 yield 0.01
             retirement = next(d for d in runtime.doers if isinstance(d, RetirementDoer))
             retirement.recur(workflow.tyme)
@@ -377,9 +377,9 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             while (
                 runtime.rgy.reger.tevers[creder.regi].vcState(creder.said).et != "rev"
             ):
-                assert (
-                    workflow.tyme < deadline
-                ), "verified revocation escrow did not resolve"
+                assert workflow.tyme < deadline, (
+                    "verified revocation escrow did not resolve"
+                )
                 yield 0.01
             assert runtime.baser.associations.get(keys=(creder.said,)) == accepted
             workflow.remove([runtime, client_doer])

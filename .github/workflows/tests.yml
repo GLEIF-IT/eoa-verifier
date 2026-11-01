@@ -26,9 +26,10 @@ jobs:
       - name: Test installed package outside checkout
         run: |
           mkdir "$RUNNER_TEMP/qualification"
-          cp -R tests protocol "$RUNNER_TEMP/qualification/"
+          cp -R tests protocol scripts "$RUNNER_TEMP/qualification/"
           cp pytest.ini "$RUNNER_TEMP/qualification/"
           cd "$RUNNER_TEMP/qualification"
+          export EOA_VERIFIER_WHEEL="$(find "$GITHUB_WORKSPACE/dist" -name 'eoa_verifier-*.whl' -print -quit)"
           anvil --version
           "$RUNNER_TEMP/verifier-tests/bin/eoa-verifier" server start --help
           "$RUNNER_TEMP/verifier-tests/bin/python" -m pytest -q tests
