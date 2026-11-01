@@ -19,7 +19,7 @@ Keep the src layout and six sibling leaf component packages:
 | runtime | CLI, validated ServiceConfig, service composition and resource lifetime |
 | receiving | CESR HTTP intake, shared parser/escrows, Grant replay and enqueue |
 | verification | Initial credential-chain, wallet-proof and account checks, including RPC |
-| associations | Acceptance, retirement and public stored-status projection |
+| associations | Acceptance, revocation and public stored-status projection |
 | delivery | HTTP authentication, nonce claims, webhook attempts, retries and ACK policy |
 | persistence | Durable schemas, detached reads and atomic saves of prepared records |
 
@@ -46,7 +46,7 @@ commits prepared records. Feature services choose transitions and construct even
 They are stored schemas, not a general collection of application models.
 
 Retain one VerifierBaser and one application LMDB transaction boundary. Completion
-writes results/removes pending work atomically. Acceptance and retirement each
+writes results/removes pending work atomically. Acceptance and revocation each
 commit association status and its immutable outbox event together. Event creation
 belongs to association services; delivery sends stored bytes. KERIpy evidence
 stores remain separate. Durable phase queues bridge commit gaps; the KERIpy
@@ -95,7 +95,7 @@ This pre-1.0 reorganization moves Python import paths; the installed
 | eoa_verifier.serving (VerifierService/run_service) | eoa_verifier.runtime.serving |
 | eoa_verifier.basing (record dataclasses) | eoa_verifier.persistence.records |
 | eoa_verifier.basing (VerifierBaser) | eoa_verifier.persistence.basing |
-| eoa_verifier.accepting/retiring/statusing | eoa_verifier.associations.accepting/retiring/statusing |
+| eoa_verifier.accepting/statusing | eoa_verifier.associations.accepting/statusing |
 | eoa_verifier.authing/delivering | eoa_verifier.delivery.authing/delivering |
 | eoa_verifier.rpc | eoa_verifier.verification.rpc |
 

@@ -73,14 +73,16 @@ verification remains visible separately in the application store. See
 [ADR 0005](../adrs/0005-accepted-association-nonces.md) for transaction boundaries and
 the per-store scope of this policy.
 
-Accepted status remains valid indefinitely. To retire it, deliver the association's
-revocation TEL and its anchored/witnessed issuer KEL evidence through the
+Accepted status remains valid indefinitely. The issuer issues the credential's
+TEL revocation. To apply it to local association status, deliver that TEL event
+and its anchored/witnessed issuer KEL evidence through the
 same CESR HTTP transport. Grant receipt or ACDC bytes alone are not revocation proof.
-KERIpy validation/escrows must accept the revocation. Retirement persists across
+KERIpy must validate the evidence before the verifier records revoked status.
+The verifier does not issue the TEL revocation. Revoked status persists across
 restart and creates its own immutable event requiring its own authenticated ACK
 when the association had an original outbox obligation. Local-only acceptance
-retires locally without an event.
-Retiring an old association does not retire its replacement.
+becomes revoked locally without an event.
+Revoking an old association does not revoke its replacement.
 
 ## Verification and intake failures
 
@@ -169,4 +171,4 @@ Use the current [Verifier API](../protocol/verifier-api-v1/README.md) with a com
 consumer. Application stores require the current acceptance policy and have no
 old-format readers, migrations or backfill. Preserve operator data and select
 fresh demonstration stores deliberately. Oracle selection/supersession does not
-retire Verifier acceptance; verified association revocation does.
+revoke Verifier acceptance; verified association revocation does.

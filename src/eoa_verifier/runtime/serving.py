@@ -1,4 +1,4 @@
-"""Compose KERIpy intake, initial verification, retirement and status delivery."""
+"""Compose KERIpy intake, initial verification, revocation and status delivery."""
 
 from collections import deque
 
@@ -24,7 +24,7 @@ from keri.vdr import eventing as veventing
 
 from ..associations.accepting import AcceptanceDoer, AcceptanceService
 from ..associations.evidence import AssociationEvidence
-from ..associations.retiring import RetirementDoer, RetirementService
+from ..associations.revoking import RevocationDoer, RevocationService
 from ..associations.statusing import StatusEnd, StatusQuery
 from ..delivery.delivering import WebhookSender
 from ..delivery.keys import ServiceKeys
@@ -128,8 +128,8 @@ class VerifierService(doing.DoDoer):
             ),
         ]
         doers.append(
-            RetirementDoer(
-                RetirementService(
+            RevocationDoer(
+                RevocationService(
                     reader,
                     writer,
                     AssociationEvidence(rgy),

@@ -23,7 +23,7 @@ from eoa_verifier.persistence.basing import VerifierBaser
 from eoa_verifier.persistence.reading import ApplicationReader
 from eoa_verifier.persistence.records import VerificationRecord, VerificationResult
 from eoa_verifier.persistence.writing import ApplicationWriter
-from tests.support.acceptance import acceptance_service, retirement_service
+from tests.support.acceptance import acceptance_service, revocation_service
 from tests.support.network import free_port
 from tests.support.services import delivery_service, verification_service
 
@@ -42,8 +42,8 @@ from tests.support.services import delivery_service, verification_service
         "timeout",
         "refused",
         "disconnect",
-        "retirement",
-        "retirement-initial-ack",
+        "revocation",
+        "revocation-initial-ack",
         "lost-ack",
         "unauthorized",
     ],
@@ -104,7 +104,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
                             if reply == "wrong-event"
                             else (
                                 "association:1"
-                                if reply == "retirement-initial-ack"
+                                if reply == "revocation-initial-ack"
                                 else event_id
                             )
                         ),
@@ -163,11 +163,11 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
             destination=target,
             peer_aid=receiver_hab.pre,
         )
-        if reply.startswith("retirement"):
-            # Initial delivery is already acknowledged; retirement needs its own
+        if reply.startswith("revocation"):
+            # Initial delivery is already acknowledged; revocation needs its own
             # event ACK, even if the target signs another acceptance of event 1.
             delivery_service(baser).acknowledge(associationStatus.eventId)
-            associationStatus = retirement_service(baser).retire("association")
+            associationStatus = revocation_service(baser).apply_revocation("association")
         sender = WebhookSender(
             reader=ApplicationReader(baser),
             writer=ApplicationWriter(baser),
@@ -211,7 +211,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
         delivery = baser.outbox.get(keys=(associationStatus.eventId,))
         assert parent.done
         assert delivery.acknowledged == (
-            reply in ("stored", "stored-query", "retirement", "lost-ack")
+            reply in ("stored", "stored-query", "revocation", "lost-ack")
         )
         assert delivery.attempts == (2 if reply == "lost-ack" else 1)
         assert received_bodies == (
@@ -220,7 +220,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
             else [delivery.body.encode()] * delivery.attempts
         )
         assert bool(delivery.error) == (
-            reply not in ("stored", "stored-query", "retirement", "lost-ack")
+            reply not in ("stored", "stored-query", "revocation", "lost-ack")
         )
 
         if reply == "disconnect":

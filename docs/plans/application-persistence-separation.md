@@ -34,7 +34,7 @@ tested integrity boundary, not a reason to wrap every business read in a writer.
 | --- | --- | --- |
 | `persistence/basing.py:begin_grant`, `settle_grant`, `retry_grant` | Active/due/new priority, attempt accounting, outcome messages, retry deadlines, phase selection and writes | Grant replay service decides; detached reads supply candidates; writer commits the chosen records/index changes |
 | `next_verification`, `defer_verification`, `finish`, `retry_verification`, `stop_acceptance`, `retry_acceptance` | Retry and completion policy plus atomic queue/result updates | Verification and acceptance services decide; persistence applies each prepared transition |
-| `accept`, `retire`, `_status_delivery`, `nonce_key` | Acceptance prerequisites, protocol validation, nonce-conflict policy, status/event construction, serialization and writes | Association services and event builder prepare outcomes; writer enforces uniqueness and commits status/claim/outbox together; key encoding remains persistence-owned |
+| `accept`, `apply_revocation`, `_status_delivery`, `nonce_key` | Acceptance prerequisites, protocol validation, nonce-conflict policy, status/event construction, serialization and writes | Association services and event builder prepare outcomes; writer enforces uniqueness and commits status/claim/outbox together; key encoding remains persistence-owned |
 | `next_delivery`, `record_attempt`, `delivery_result`, `retry_delivery` | Work selection, attempt/error state, success inference from empty error, schedule reset and table updates | Delivery service chooses explicit outcomes and schedule values; writer persists prepared delivery/phase/schedule records |
 | `bind_verification_scope`, `validate_nonce_history`, `_read_claim` | Startup trust policy, cross-record integrity decisions and full-history reading | Delete the history audit and paging; bootstrap checks one scope record; the nonce key alone enforces consumption |
 | `first_record`, `due_record`, `verification_progress` | Mostly storage queries; `due_record` also consumes an index and decides eligibility | Detached read functions; querying never consumes work or chooses retry policy |
@@ -42,7 +42,7 @@ tested integrity boundary, not a reason to wrap every business read in a writer.
 | `verification/coordinating.py:VerificationCoordinator` | HIO request/cue plumbing, evidence decisions and direct application-table access | Verification service owns attempts/results/rechecks; coordinator handles scheduling and correlation |
 | `verification/credentials.py` | KERIpy KERI retrieval/read-through caches, schema/anchor mechanisms and application LE/QVI/issuer policy | Evidence adapter exposes detached facts and KERIpy validation results; credential rules evaluate trust/profile requirements |
 | `verification/worker.py:EoaVerifierDoer` | Wallet proof policy, RPC client lifetime/result decoding, retry classification and cue construction | Account-observation adapter owns RPC mechanics; verification service owns proof/account policy and outcome classification; doer drives the exchange |
-| `associations/accepting.py`, `retiring.py` | Scheduling, direct KERIpy/application reads, eligibility decisions and multi-store sequencing | Acceptance/retirement services own the operations; doers delegate; KERIpy evidence adapter exposes facts and revocation identifiers |
+| `associations/accepting.py`, `revoking.py` | Scheduling, direct KERIpy/application reads, eligibility decisions and multi-store sequencing | Acceptance/revocation services own the operations; doers delegate; KERIpy evidence adapter exposes facts and revocation identifiers |
 | `associations/statusing.py:StatusEnd` | Falcon handling, multi-table reads, phase precedence and response construction | Status query service builds the detached view; endpoint maps it to HTTP |
 | `delivery/delivering.py:WebhookSender` | Queue access, attempt budgets/backoff, HTTP lifecycle, authentication/ACK policy and persistence | Delivery service owns progression; HTTP adapter owns I/O; explicit ACK rules and authentication service produce outcomes |
 | `delivery/authing.py:ServiceAuthenticator` | Key retrieval, signature mechanics, trust/time rules and replay consumption | Keep a clearly named authentication service; separate signature codec from its key and replay-store dependencies; successful authentication explicitly includes nonce claiming |
@@ -82,9 +82,9 @@ slice; these are responsibility placements, not a one-class-per-file mandate.
   `verification/evidence.py` isolates KERIpy evidence access;
   `verification/observing.py` isolates account RPC observation. Keep credential
   rules and EOA rules with their existing feature modules.
-- `associations/accepting.py`, `retiring.py`, `statusing.py`: concrete services and
+- `associations/accepting.py`, `revoking.py`, `statusing.py`: concrete services and
   small scheduling/HTTP adapters. `associations/events.py` owns the shared pure
-  event/Delivery construction used by acceptance and retirement.
+  event/Delivery construction used by acceptance and revocation.
 - `delivery/delivering.py`: delivery service and thin scheduled entry point;
   `delivery/httping.py` owns request/client lifetime; `delivery/signatures.py` owns
   signature parsing/base construction; `delivery/authing.py` orchestrates trusted
@@ -192,7 +192,7 @@ execution in a persistence callback or add a generic multi-item batch API.
 | Verification claim/defer/completion | Active/waiting/dead membership and due index; completed result plus acceptance obligation and removal of active verification |
 | Acceptance | Accepted nonce claim, association status, optional immutable Delivery and ready reference, optional destination initialization, acceptance removal |
 | Nonce-conflict rejection | Rejected association status and acceptance removal; no new nonce claim or outbox event |
-| Retirement | Revoked status and immutable second Delivery/reference when configured |
+| Revocation | Revoked status and immutable second Delivery/reference when configured |
 | Delivery attempt | Updated attempt record and request-start schedule |
 | Delivery completion/defer/dead letter | Prepared delivery progress, destination schedule and matching phase references |
 | Manual retry | Prepared reset record, phase movement and due index where applicable |
@@ -211,7 +211,7 @@ state where a consumed nonce exists without its accepted association.
 Verified TEL revocation is a deliberate exception to moving every atomic write out
 of the KERIpy database extension. VerifierReger.putTel must continue committing the
 accepted KERIpy TEL index and revocation identifiers together. This is a KERIpy
-persistence projection, not application retirement policy. Retirement service first
+persistence projection, not application revocation policy. Revocation service first
 commits the application status/event, then removes the KERIpy revocation record;
 replay between those commits remains idempotent. No cross-environment transaction.
 
@@ -252,7 +252,7 @@ replay between those commits remains idempotent. No cross-environment transactio
 2. **Verification and evidence.** Move claim/retry/completion decisions to the
    verification service; separate KERIpy evidence access and account observation
    from policy and HIO scheduling. Wire retry-verification and delete old methods.
-3. **Association lifecycle and status.** Move acceptance/rejection, retirement and
+3. **Association lifecycle and status.** Move acceptance/rejection, revocation and
    event construction above storage; extract the status query and fixed-key startup scope
    checks. Wire retry-acceptance. Preserve nonce contention and both
    KERIpy/application and status/outbox commit gaps explicitly.
@@ -279,9 +279,9 @@ qualification and the qualified contract revision.
 - Slice 1: [PR #28](https://github.com/GLEIF-IT/eoa-verifier/pull/28), Grant service/KERIpy adapter and atomic replay completion. Focused checks: 25 passed.
 - Slice 2: [PR #29](https://github.com/GLEIF-IT/eoa-verifier/pull/29), verification service, KERIpy credential evidence and account observation adapters. Focused checks: 119 passed; installed-wheel CI gates merge.
 
-- Slice 3: [PR #30](https://github.com/GLEIF-IT/eoa-verifier/pull/30), acceptance/retirement services, status query, atomic conflict handling. The temporary nonce audit/page design from this slice is deleted by slice 5: direct nonce keys replace it.
+- Slice 3: [PR #30](https://github.com/GLEIF-IT/eoa-verifier/pull/30), acceptance/revocation services, status query, atomic conflict handling. The temporary nonce audit/page design from this slice is deleted by slice 5: direct nonce keys replace it.
 
-- Slice 4: [PR #31](https://github.com/GLEIF-IT/eoa-verifier/pull/31), delivery service with explicit outcomes, owned HTTP adapter, pure signature codec and KERIpy key adapter. Focused checks: 106 passed; late-completion and public retirement checks passed.
+- Slice 4: [PR #31](https://github.com/GLEIF-IT/eoa-verifier/pull/31), delivery service with explicit outcomes, owned HTTP adapter, pure signature codec and KERIpy key adapter. Focused checks: 106 passed; late-completion and public revocation checks passed.
 
 - Slice 5: [PR #32](https://github.com/GLEIF-IT/eoa-verifier/pull/32), bootstrap and fixture receipt separation, final documentation, and explicit named persistence transitions throughout. Removed the intermediate `move_grant`, `move_verification`, directional acceptance and flag-driven delivery saves. Focused transition/lifecycle checks: 89 passed. Final adapter/runtime/receipt checks: 26 passed. Installed-wheel CI: 249 passed. Tests use explicit runtime notifier/parser/replay-service handles; the duplicate-Grant lookup closes its reader before replay.
 
@@ -309,7 +309,7 @@ merging; current revisions and final results are recorded in those PRs.
   Offline retry policy prepares records above storage, preserving signed bytes
   and the unresolved-transaction fence. This extends the coordinated Oracle PR
   beyond its original pin-only scope.
-- Acceptance and retirement already read one dedicated queue. Cross-phase status
+- Acceptance and revocation already read one dedicated queue. Cross-phase status
   lookups remain bounded, read-only queries for one identifier. Comply has no
   corresponding queue-selection or generic phase-transition API.
 
@@ -349,3 +349,22 @@ are detached before decisions/effects; and all durable boundaries remain qualifi
 Review the dependency direction and source manually. No architecture-check script,
 docs-check script, generic repository framework, extra locking or compatibility API
 is part of this work.
+
+## Revocation terminology follow-up
+
+The issuer issues credential TEL revocation; KERIpy validates the evidence; the
+verifier applies it to local association status. Oracle receives revoked status
+and withdraws an endorsement. Replacement supersedes an association without
+revoking its credential. Deleted functionality is removed.
+
+The associations module is `revoking.py`, with `RevocationService`,
+`RevocationDoer` and `apply_revocation(credSaid)`. Persistence uses
+`record_revocation` and `record_revocation_and_queue_delivery`; test composition
+uses `revocation_service`. Oracle's qualification operation is
+`revoke_associations`, and contract withdrawal retains `withdrawEndorsement`.
+Comply describes removed APIs and delayed endorsement withdrawal explicitly.
+
+This follow-up changes Python API names and terminology only. Preserve wire
+values, LMDB keys/layout, event IDs, atomic writes, phase operations and direct
+nonce consumption. No aliases or fallback imports remain. Coordinated PRs record
+focused, installed-wheel and paired qualification evidence and exact pins.

@@ -43,7 +43,7 @@ SAID. Another SAID reusing the nonce is locally `rejected` with `NONCE_REUSED`;
 initial verification remains `verified`. Revocation and downstream selection supersession do not
 release claims. See [ADR 0005](../../adrs/0005-accepted-association-nonces.md).
 Only acceptance
-(`status: "accepted"`) and later association retirement (`status: "revoked"`,
+(`status: "accepted"`) and later association revocation (`status: "revoked"`,
 `reasonCode: "REVOKED"`) are webhook events; initial rejection/unavailability is
 available through public stored status, not sent as a status event.
 
@@ -58,8 +58,8 @@ reassessments. Initial source-chain validation remains mandatory.
 The sender resumes explicit LMDB delivery phases across restart, validates HTTP success,
 the signed request reference and event-storage acknowledgment before completion, and
 signs every retry anew. Permanent failures stay blocked until correction and
-explicit resumption; transient failures retry up to a finite attempt budget. Acceptance events replaced by terminal retirement
-remain stored but are not sent after retirement.
+explicit resumption; transient failures retry up to a finite attempt budget. Acceptance events replaced by terminal revocation
+remain stored but are not sent after revocation.
 
 Completed verification queues acceptance atomically. Acceptance consumes that
 phase and queues its webhook obligation atomically. Delivery references move from
@@ -81,10 +81,10 @@ Only the worker retries, using yielding waits. These are operational defaults,
 not cryptographic requirements; the authenticated ACK protocol is unchanged.
 
 Associations arrive through IPEX Grant with supporting KERI evidence.
-Grant receipt or credential bytes alone do not prove revocation. Retire an
-association only after KERIpy verification accepts its revocation evidence,
-then persist retirement and a separate webhook obligation requiring its own
-acknowledgement. Retirement survives restart and duplicate/reordered delivery;
+Grant receipt or credential bytes alone do not prove revocation. The issuer issues
+the credential TEL revocation. After KERIpy validates that evidence, the verifier
+records revoked association status and a separate webhook obligation requiring its own
+acknowledgement. Revocation survives restart and duplicate/reordered delivery;
 an older success event cannot restore a revoked association.
 
 Sign outbound requests with the EOA Verifier AID using KERI HTTP
@@ -144,7 +144,7 @@ signatures never consume a nonce or establish application acceptance.
 Durable delivery ACK, Oracle selection and confirmed on-chain endorsement are
 separate milestones. Oracle owns [oracle-api-v1](https://github.com/GLEIF-IT/vlei-oracle/blob/main/protocol/oracle-api-v1/README.md),
 including ownership, replacement and withdrawal. Oracle supersession is not a
-verifier status and cannot retire acceptance here. Contracts own their
+verifier status and cannot revoke acceptance here. Contracts own their
 [registry interface](https://github.com/GLEIF-IT/vlei-comply/blob/main/docs/oracle-registry.md).
 
 ## Stored status
@@ -198,8 +198,8 @@ its age never expires acceptance. `eventId` combines association SAID and status
 Verified association revocation creates a second event: `statusRevision: 2`,
 `eventId: "example-association:2"`, `status: "revoked"`, and
 `reasonCode: "REVOKED"`. Keep the original `association` and `accountObservation` objects;
-the issuance anchor must not become the revocation anchor. Commit retirement and
-this event together, using the original delivery destination. Retirement is terminal
+the issuance anchor must not become the revocation anchor. Commit revocation and
+this event together, using the original delivery destination. Revocation is terminal
 for that SAID and requires its own ACK; the initial event’s ACK cannot complete it.
 
 POST the exact stored bytes to the configured destination with the service

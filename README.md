@@ -34,7 +34,7 @@ keys leave delivery blocked pending correction. Omitting both retains verificati
 
 Public `GET /v1/associations/{said}/status` returns stored `pending`, `rejected`,
 `verifying`, `waiting`, `dead-letter`, `verified`, `accepted` or `revoked` status and any initial account observation.
-Accepted/retired records also expose their current event’s delivery progress and
+Accepted/revoked records also expose their current event’s delivery progress and
 errors. Unknown SAIDs return 404.
 GET requires no signature and performs no RPC or refresh.
 
@@ -50,8 +50,8 @@ Permanent HTTP, payload, signature or configuration failures remain visible as
 state stays in local storage. After correcting the cause, an embedding caller can resume
 with `service.sender.request(event_id)`; restart alone does not unblock it.
 There is no retry REST route; the [operator guide](docs/operations.md#delivery-failures)
-also describes an offline resume for standalone deployments. Old acceptance events superseded by retirement stay
-stored and blocked; retirement requires its own ACK. No periodic verification or
+also describes an offline resume for standalone deployments. Old acceptance events superseded by revocation stay
+stored and blocked; revocation requires its own ACK. No periodic verification or
 account checks run, and Ethereum publication remains the oracle's responsibility.
 
 | Option                   | Default | Meaning                                               |
@@ -69,7 +69,7 @@ account checks run, and Ethereum publication remains the oracle's responsibility
 | `runtime` | `cli`, `config`, `serving`: arguments, validated configuration, KERIpy stores and HIO task/resource ownership. |
 | `receiving` | `directing`, `grants`: finite CESR HTTP intake, shared parser/escrows, IPEX replay and duplicate-safe work creation. |
 | `verification` | `coordinating`, `credentials`, `eoa`, `worker`, `rpc`: initial credential/wallet/account verification; `constants`, `schema_cache`, `errors` support that contract. |
-| `associations` | `accepting`, `retiring`, `statusing`: application acceptance, verified association revocation and public stored status. |
+| `associations` | `accepting`, `revoking`, `statusing`: application acceptance, verified association revocation and public stored status. |
 | `delivery` | `authing`, `delivering`: signed transport/replay protection and webhook attempts, retry pacing and ACK policy. |
 | `persistence` | `records`, `basing`, `registry`: durable record schemas and atomic verification, acceptance/outbox and delivery transitions. |
 
@@ -123,13 +123,15 @@ for `rev`/`brv` in that same registry environment. Native KERIpy validation and
 escrows still decide whether an event is accepted. Unanchored evidence creates
 no revocation record.
 
-`RetirementDoer` consumes one `(credSaid, telEvtSaid)` record, retires only its exact accepted association
+The issuer issues the credential TEL revocation; KERIpy validates it. The
+verifier records the resulting local association status and does not issue a
+revocation itself. `RevocationDoer` consumes one `(credSaid, telEvtSaid)` record, records revoked status for only its exact accepted association
 and commits its immutable second delivery event before removing the revocation record.
 Restart safely repeats either side of this two-store commit boundary. Completed
 association history is never scanned. Revocation before acceptance is caught by
 the final verification check and the local acceptance guard. Original issuance
 facts, observation and destination are preserved; other associations for the
-wallet are untouched. Previously accepted records still retire with sending
+wallet are untouched. Previously accepted records still become revoked with sending
 disabled, retaining any original delivery obligations.
 
 `run_service()` owns shared stores through KERIpy context managers.

@@ -1,4 +1,8 @@
-"""Idempotent application retirement after accepted KERIpy TEL revocation."""
+"""Apply already-validated credential TEL revocation to local association status.
+
+The issuer issues the TEL revocation. KERIpy validates it; this module records
+the resulting association status and delivery obligation without issuing a TEL event.
+"""
 
 from dataclasses import replace
 
@@ -9,8 +13,8 @@ from eoa_verifier.persistence.records import DeliveryReference
 from .events import status_delivery
 
 
-class RetirementService:
-    """Commit application retirement before acknowledging its separate KERIpy record."""
+class RevocationService:
+    """Commit application revocation before acknowledging its separate KERIpy record."""
 
     def __init__(self, reader, writer, evidence=None):
         """Borrow detached application adapters and optional KERIpy revocation access."""
@@ -24,14 +28,14 @@ class RetirementService:
         credSaid, _telEvtSaid = revocationIds
         status = self.reader.association(credSaid)
         if status is not None and status.status == "accepted":
-            self.retire(credSaid)
+            self.apply_revocation(credSaid)
         self.evidence.remove_revocation(credSaid)
 
-    def retire(self, credSaid):
+    def apply_revocation(self, credSaid):
         """Prepare revoked status and its second immutable event from accepted facts."""
         previous = self.reader.association(credSaid)
         if previous is None or previous.status not in ("accepted", "revoked"):
-            raise ValueError("retirement requires an accepted association")
+            raise ValueError("revocation requires an accepted association")
         if previous.status == "revoked":
             return previous
         original = self.reader.delivery(previous.eventId) if previous.eventId else None
@@ -54,19 +58,19 @@ class RetirementService:
             else None
         )
         if delivery is None:
-            self.writer.retire_association(previous, status)
+            self.writer.record_revocation(previous, status)
         else:
-            self.writer.retire_and_queue_delivery(
+            self.writer.record_revocation_and_queue_delivery(
                 previous, status, delivery, DeliveryReference(delivery.eventId)
             )
         return status
 
 
-class RetirementDoer(doing.Doer):
-    """Schedule one KERIpy-to-application retirement operation per turn."""
+class RevocationDoer(doing.Doer):
+    """Schedule one KERIpy-to-application revocation operation per turn."""
 
     def __init__(self, service, tock=0.25, **kwa):
-        """Borrow the retirement operation and configure its scheduler interval."""
+        """Borrow the revocation operation and configure its scheduler interval."""
         self.service = service
         super().__init__(tock=tock, **kwa)
 

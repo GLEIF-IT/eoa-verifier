@@ -10,12 +10,12 @@ from falcon.testing import TestClient
 from eoa_verifier.associations.statusing import StatusEnd, StatusQuery
 from eoa_verifier.persistence.reading import ApplicationReader
 from eoa_verifier.persistence.records import DestinationSchedule
-from tests.support.acceptance import accept_verified_result, retirement_service
+from tests.support.acceptance import accept_verified_result, revocation_service
 from tests.support.services import delivery_service
 
 
-def test_retirement_commits_its_own_event_once_and_preserves_facts(verified_store):
-    """A failed retirement rolls back; a committed one survives replay with its own pending ACK."""
+def test_revocation_commits_its_own_event_once_and_preserves_facts(verified_store):
+    """A failed revocation rolls back; a committed one survives replay with its own pending ACK."""
 
     baser = verified_store
     associationStatus = accept_verified_result(baser)
@@ -32,14 +32,14 @@ def test_retirement_commits_its_own_event_once_and_preserves_facts(verified_stor
         ),
         pytest.raises(RuntimeError, match="write failed"),
     ):
-        retirement_service(baser).retire("association")
+        revocation_service(baser).apply_revocation("association")
     assert baser.associations.get(keys=("association",)) == associationStatus
     assert baser.outbox.get(keys=("association:2",)) is None
 
-    revokedStatus = retirement_service(baser).retire("association")
+    revokedStatus = revocation_service(baser).apply_revocation("association")
     baser.close()
     baser.reopen()
-    assert retirement_service(baser).retire("association") == revokedStatus
+    assert revocation_service(baser).apply_revocation("association") == revokedStatus
     assert (
         accept_verified_result(baser) == revokedStatus
     )  # No reacceptance after revocation.

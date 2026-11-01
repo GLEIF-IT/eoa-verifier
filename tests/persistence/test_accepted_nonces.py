@@ -19,7 +19,7 @@ from eoa_verifier.persistence.records import (
 from eoa_verifier.persistence.writing import ApplicationWriter
 from tests.support.acceptance import (
     acceptance_service,
-    retirement_service,
+    revocation_service,
 )
 from tests.support.issuers import candidate
 from tests.support.services import verification_service
@@ -146,7 +146,7 @@ def test_global_nonce_rejection_survives_revocation_and_reopen(tmp_path, deliver
         assert baser.accepted_nonces.get(keys=("nonce",)).associationSaid == "first"
         with baser.env.begin() as txn:
             assert txn.get(b"nonce", db=baser.accepted_nonces.sdb) is not None
-        retirement_service(baser).retire("first")
+        revocation_service(baser).apply_revocation("first")
         baser.close()
         baser.reopen()
         assert accept(baser, "first", delivery=delivery).status == "revoked"

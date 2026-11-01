@@ -1,1 +1,1 @@
-"""Association acceptance, retirement and stored status."""
+"""Association acceptance, revocation and stored status."""

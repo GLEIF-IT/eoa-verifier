@@ -20,7 +20,7 @@ TEST_KEYS = {1: "0x" + "0" * 63 + "1", 2: "0x" + "0" * 63 + "2"}
 
 
 def run_flow(root: Path, configuration: dict) -> None:
-    """Qualify acceptance, nonce rejection, receipt durability and exact retirement.
+    """Qualify acceptance, nonce rejection, receipt durability and exact revocation.
 
     Require a fresh scenario but preserve its stores/evidence after completion.
     Each ceremony closes issuer stores before service restart or public reads.

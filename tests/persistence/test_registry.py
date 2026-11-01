@@ -1,4 +1,4 @@
-"""Atomic KERIpy TEL revocation records and idempotent application retirement."""
+"""Atomic KERIpy TEL revocation records and idempotent application revocation."""
 
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -8,9 +8,9 @@ from keri import core
 from keri.db import dbing
 from keri.vdr import eventing
 
-from eoa_verifier.associations.retiring import RetirementDoer
+from eoa_verifier.associations.revoking import RevocationDoer
 from eoa_verifier.persistence.registry import VerifierReger
-from tests.support.acceptance import accept_verified_result, retirement_service
+from tests.support.acceptance import accept_verified_result, revocation_service
 
 
 def revocation_serder(*, backers=False):
@@ -83,15 +83,17 @@ def test_failed_revocation_record_write_rolls_back_keripy_acceptance():
         assert reger.putTel(key, telSerder.saidb)
 
 
-def test_retirement_ack_gap_repeats_only_the_same_event(verified_store, tmp_path):
+def test_revocation_ack_gap_repeats_only_the_same_event(verified_store, tmp_path):
     """Reopening after application commit repeats its exact event before clearing the revocation record."""
     baser = verified_store
     associationStatus = accept_verified_result(baser)
     with dbing.openLMDB(
-        cls=VerifierReger, name="retirement", headDirPath=str(tmp_path), temp=False
+        cls=VerifierReger, name="revocation", headDirPath=str(tmp_path), temp=False
     ) as reger:
         reger.revocations.put(keys=("association",), val="revocation")
-        worker = RetirementDoer(retirement_service(baser, SimpleNamespace(reger=reger)))
+        revocationDoer = RevocationDoer(
+            revocation_service(baser, SimpleNamespace(reger=reger))
+        )
         with (
             patch.object(
                 reger.revocations,
@@ -100,7 +102,7 @@ def test_retirement_ack_gap_repeats_only_the_same_event(verified_store, tmp_path
             ),
             pytest.raises(RuntimeError, match="interrupted acknowledgement"),
         ):
-            worker.recur(0)
+            revocationDoer.recur(0)
         revokedStatus = baser.associations.get(keys=("association",))
         assert (
             revokedStatus.status == "revoked"
@@ -111,7 +113,7 @@ def test_retirement_ack_gap_repeats_only_the_same_event(verified_store, tmp_path
         baser.reopen()
         reger.close()
         reger.reopen()
-        worker.recur(0)
+        revocationDoer.recur(0)
         assert reger.next_revocation() is None
         assert baser.outbox.get(keys=(revokedStatus.eventId,)).body == body
         assert baser.outbox.cntAll() == 2
