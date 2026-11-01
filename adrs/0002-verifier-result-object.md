@@ -6,7 +6,7 @@ Date: 2026-10-27
 The association ACDC and a delivery event serve different purposes. Use a small
 ordinary JSON status object, not another credential or validator framework.
 
-Persist immutable event bytes with acceptance or verified retirement. Keep
+Persist immutable event bytes with acceptance or verified revocation. Keep
 mutable attempt progress separate. A retry preserves event identity/body and
 uses fresh transport authentication. Delivery completes only on a correlated
 authenticated durable-storage ACK. Public GET is a separate stored-state view.

@@ -20,8 +20,8 @@ external-association profile conformance suite and reference vectors.
 | Detached readers | tests/persistence/test_reading.py |
 | LMDB nonce claims/durability | tests/persistence/test_accepted_nonces.py |
 | Delivery authentication and sender | tests/delivery/test_authing.py and test_delivering.py |
-| Acceptance/retirement workers with witnessed evidence | tests/integration/test_ipex_verification.py |
-| Atomic retirement plus public visibility | tests/integration/test_acceptance_status.py |
+| Acceptance/revocation workers with witnessed evidence | tests/integration/test_ipex_verification.py |
+| Atomic revocation plus public visibility | tests/integration/test_acceptance_status.py |
 
 Use ::test_function_name for one function and -k expression for a class or method.
 Reusable issuer, service ownership, network and acceptance construction is in

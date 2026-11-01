@@ -15,7 +15,7 @@ class AssociationEvidence:
         return self._rgy.reger.next_revocation()
 
     def remove_revocation(self, cred_said):
-        """Acknowledge KERIpy revocation after idempotent application retirement."""
+        """Acknowledge KERIpy revocation after revoked association status is durably recorded."""
         self._rgy.reger.revocations.rem(keys=(cred_said,))
 
     def issuance_facts(self, credSaid):

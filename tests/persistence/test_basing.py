@@ -18,7 +18,7 @@ from eoa_verifier.persistence.writing import ApplicationWriter
 from tests.support.acceptance import (
     accept_verified_result,
     acceptance_service,
-    retirement_service,
+    revocation_service,
 )
 from tests.support.services import delivery_service, verification_service
 
@@ -191,26 +191,26 @@ def test_rejected_result_cannot_create_acceptance_or_event(verified_store):
     assert list(baser.outbox.getItemIter()) == []
 
 
-def test_missing_original_delivery_cannot_silently_retire_locally(verified_store):
+def test_missing_original_delivery_cannot_silently_revoke_locally(verified_store):
     """Local-only acceptance is explicit; a lost delivery obligation is corruption."""
     baser = verified_store
     associationStatus = accept_verified_result(baser)
     baser.outbox.rem(keys=(associationStatus.eventId,))
     with pytest.raises(ValueError, match="delivery event is absent"):
-        retirement_service(baser).retire("association")
+        revocation_service(baser).apply_revocation("association")
     assert baser.associations.get(keys=("association",)) == associationStatus
     assert baser.accepted_nonces.cntAll() == 1
 
 
-@pytest.mark.parametrize("retirement", [False, True])
+@pytest.mark.parametrize("revocation", [False, True])
 def test_status_and_event_write_failure_aborts_entire_transition(
-    verified_store, retirement
+    verified_store, revocation
 ):
     """Fail after the outbox write and prove status, event and nonce remain atomic."""
     from types import SimpleNamespace
 
     baser = verified_store
-    previous = accept_verified_result(baser) if retirement else None
+    previous = accept_verified_result(baser) if revocation else None
     env = baser.env
 
     class Transaction:
@@ -237,12 +237,12 @@ def test_status_and_event_write_failure_aborts_entire_transition(
         patch.object(baser, "env", SimpleNamespace(begin=begin)),
         pytest.raises(RuntimeError, match="after event write"),
     ):
-        if retirement:
-            retirement_service(baser).retire("association")
+        if revocation:
+            revocation_service(baser).apply_revocation("association")
         else:
             accept_verified_result(baser)
     assert baser.associations.get(keys=("association",)) == previous
-    assert baser.accepted_nonces.cntAll() == int(retirement)
-    assert baser.outbox.cntAll() == int(retirement)
-    assert baser.delivery_ready.cntAll() == int(retirement)
-    assert baser.accepting.cntAll() == int(not retirement)
+    assert baser.accepted_nonces.cntAll() == int(revocation)
+    assert baser.outbox.cntAll() == int(revocation)
+    assert baser.delivery_ready.cntAll() == int(revocation)
+    assert baser.accepting.cntAll() == int(not revocation)

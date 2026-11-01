@@ -26,13 +26,13 @@ def acceptance_service(baser):
     return AcceptanceService(ApplicationReader(baser), ApplicationWriter(baser))
 
 
-def retirement_service(baser, rgy=None):
-    """Compose idempotent retirement; KERIpy evidence is optional for direct operations."""
+def revocation_service(baser, rgy=None):
+    """Compose idempotent revocation; KERIpy evidence is optional for direct operations."""
     from eoa_verifier.associations.evidence import AssociationEvidence
-    from eoa_verifier.associations.retiring import RetirementService
+    from eoa_verifier.associations.revoking import RevocationService
     from eoa_verifier.persistence.reading import ApplicationReader
     from eoa_verifier.persistence.writing import ApplicationWriter
 
-    return RetirementService(
+    return RevocationService(
         ApplicationReader(baser), ApplicationWriter(baser), AssociationEvidence(rgy)
     )

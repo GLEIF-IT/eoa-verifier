@@ -17,7 +17,7 @@ from keri.core import coring, scheming
 from keri.db import basing, dbing
 from keri.help import helping
 
-from eoa_verifier.associations.retiring import RetirementDoer
+from eoa_verifier.associations.revoking import RevocationDoer
 from eoa_verifier.persistence.keys import nonce_key
 from eoa_verifier.persistence.reading import ApplicationReader
 from eoa_verifier.receiving.grants import GrantNotificationDoer
@@ -50,7 +50,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
 
     Own isolated KERIpy stores/processes with ExitStack and all network tasks with
     HIO. Missing Anvil fails rather than skips. Test delayed evidence across restart,
-    acceptance with verified issuance facts, delayed-anchor retirement across restart,
+    acceptance with verified issuance facts, delayed-anchor revocationDoer across restart,
     duplicate delivery, incomplete HTTP input before evidence/revocation, revocation
     during initial RPC, and invalid proof/relationships.
     """
@@ -385,7 +385,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             )
 
             # A fresh Grant still embeds issuance. Neither it nor unanchored TEL
-            # evidence can retire an association; wait for actual KERIpy escrow.
+            # evidence can revoke an association; wait for actual KERIpy escrow.
             yield from revoke_credential(issuers["le"], registries["le"], creder)
             yield from send(grant(le, le_rgy, creder, runtime.hab.pre))
             revocation = le_rgy.reger.cloneTvtAt(creder.said, sn=1)
@@ -397,8 +397,10 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
                     "revocation did not enter KERIpy anchor escrow"
                 )
                 yield 0.01
-            retirement = next(d for d in runtime.doers if isinstance(d, RetirementDoer))
-            retirement.recur(workflow.tyme)
+            revocationDoer = next(
+                d for d in runtime.doers if isinstance(d, RevocationDoer)
+            )
+            revocationDoer.recur(workflow.tyme)
             assert (
                 runtime.rgy.reger.tevers[creder.regi].vcState(creder.said).et == "iss"
             )
@@ -408,7 +410,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
 
             # Model loss between accepted KERIpy TEL and application commit. Only
             # the missing KEL arrives now: no further Grant notification is needed.
-            runtime.remove([retirement])
+            runtime.remove([revocationDoer])
             yield from send(b"".join(le.db.clonePreIter(pre=le.pre)))
             deadline = workflow.tyme + 5
             while (
@@ -483,9 +485,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
                 and "revoked" in rejectedResult.reason
             )
             assert (
-                runtime.baser.accepted_nonces.get(
-                    keys=(nonce_key(raced.sad["u"]),)
-                )
+                runtime.baser.accepted_nonces.get(keys=(nonce_key(raced.sad["u"]),))
                 is None
             )
             coordinator.extend([verifier_loop])

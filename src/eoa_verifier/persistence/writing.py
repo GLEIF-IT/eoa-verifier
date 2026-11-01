@@ -384,7 +384,7 @@ class ApplicationWriter:
             txn.delete(key, db=db.accepting.sdb)
         return True
 
-    def retire_association(self, previous, status):
+    def record_revocation(self, previous, status):
         """Replace accepted status with revoked status without delivery."""
         db = self._db
         key = status.associationSaid.encode()
@@ -394,10 +394,12 @@ class ApplicationWriter:
         )
         with db.env.begin(write=True) as txn:
             if txn.get(key, db=db.associations.sdb) != expected:
-                raise ValueError("association changed before retirement")
+                raise ValueError("association changed before revocation")
             txn.put(key, raw, db=db.associations.sdb)
 
-    def retire_and_queue_delivery(self, previous, status, delivery, reference):
+    def record_revocation_and_queue_delivery(
+        self, previous, status, delivery, reference
+    ):
         """Replace accepted status with revoked status and its ready revocation event."""
         db = self._db
         key = status.associationSaid.encode()
@@ -409,7 +411,7 @@ class ApplicationWriter:
         ref_raw = db.delivery_ready.serializer(reference)
         with db.env.begin(write=True) as txn:
             if txn.get(key, db=db.associations.sdb) != expected:
-                raise ValueError("association changed before retirement")
+                raise ValueError("association changed before revocation")
             txn.put(key, raw, db=db.associations.sdb)
             txn.put(event_key, event_raw, db=db.outbox.sdb)
             txn.put(event_key, ref_raw, db=db.delivery_ready.sdb)
