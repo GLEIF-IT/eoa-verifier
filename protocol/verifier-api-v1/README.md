@@ -81,7 +81,7 @@ Only the worker retries, using yielding waits. These are operational defaults,
 not cryptographic requirements; the authenticated ACK protocol is unchanged.
 
 Associations arrive through IPEX Grant with supporting KERI evidence.
-Grant receipt or credential bytes alone do not prove revocation. The issuer issues
+Receiving a Grant or credential bytes alone do not prove revocation. The issuer issues
 the credential TEL revocation. After KERIpy validates that evidence, the verifier
 records revoked association status and a separate webhook obligation requiring its own
 acknowledgement. Revocation survives restart and duplicate/reordered delivery;
@@ -122,7 +122,7 @@ and status `0`; ACKs use action `ack`, HTTP status `200` and the original
 `nonce:Content-Digest` reference. The actual response status must also be `200`.
 ACK policy belongs to the webhook delivery components, which use the common
 `sign()` and `verify()` operations. The webhook receiver signs after durable
-receipt; the sender validates response status, request/event correlation and
+storage; the sender validates response status, request/event correlation and
 application ACK payload before completing delivery. Authentication alone can
 succeed for a signed error response and does not imply delivery success.
 
@@ -192,7 +192,7 @@ The initial acceptance shape is:
 ```
 
 Identifiers above are illustrative. Issuance identifies the verified anchor in the
-issuer's KEL, not receipt order. The observation records the initial check only;
+issuer's KEL, not arrival order. The observation records the initial check only;
 its age never expires acceptance. `eventId` combines association SAID and status revision.
 
 Verified association revocation creates a second event: `statusRevision: 2`,
@@ -210,7 +210,7 @@ to that attempt, with exactly this JSON object (`stored` is a boolean):
 {"eventId": "example-association:1", "stored": true}
 ```
 
-The receiver signs only after durable event receipt. Redelivery keeps the event/body
+The receiver signs only after durable status-event storage. Redelivery keeps the event/body
 and gets a fresh transport signature; the receiver acknowledges duplicates without
 repeating effects. A signature on an error response does not complete delivery.
 
@@ -223,4 +223,4 @@ remote evidence; complete messages may enter KERIpy state even if a later messag
 is incomplete. Missing source evidence uses native escrows. `GET /health` is
 liveness only; KERIpy also exposes public OOBI introduction routes. See
 [operations](../../docs/operations.md) for peer introduction, bounded framing and
-the known native receipt-couple shortage limitation.
+the known KERIpy receipt-couple shortage limitation.

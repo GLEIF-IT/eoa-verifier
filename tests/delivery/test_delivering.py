@@ -97,7 +97,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
                     )  # Durable receiver behavior is qualified against the real oracle too.
                     if len(received_bodies) == 1:
                         rep.status = (
-                            503  # Receipt committed, but its accepting ACK was lost.
+                            503  # Status event committed, but its signed ACK was lost.
                         )
                         return
                 ack = json.dumps(

@@ -6,10 +6,10 @@ only that run; they never retarget previously accepted delivery obligations.
 
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import time
+from pathlib import Path
 from urllib.request import Request, urlopen
 
 from .artifacts import load_json, save_json
@@ -301,7 +301,7 @@ def _check_chain(configuration: dict) -> bool:
 
 
 def _start_receiver(root: Path, configuration: dict) -> None:
-    """Start the focused receiver and wait for its persisted-receipt read endpoint."""
+    """Start the focused receiver and wait for its stored-status-event read endpoint."""
     tool = Path(configuration["tool"]).with_name("receiver.py")
     launch(
         root,

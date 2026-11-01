@@ -60,7 +60,7 @@ can reject it during acceptance.
 
 A caller owning the full stack can start this fixture with `--rpc-url URL
 --webhook-url URL --webhook-aid AID --peer-kel FILE`. The caller owns that chain
-and receiver; this mode starts neither Anvil nor the focused receipt fixture.
+and receiver; this mode starts neither Anvil nor the focused status-event fixture.
 Repeat the original options on restart. Configuration changes require a new run.
 
 The modules keep CLI dispatch, artifact/build selection, process lifetimes,

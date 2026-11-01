@@ -39,7 +39,7 @@ class Receiver(doing.DoDoer):
 
         An outward onceParsator yield requests more bytes. Each HTTP request is
         complete, so discard its remainder and close that generator on a yield.
-        The pinned parser has a separate receipt-shortage path that does not yield;
+        The pinned parser has a separate KERIpy receipt-couple shortage path that does not yield;
         this boundary does not remedy that dependency defect.
         Complete evidence still uses the shared KERIpy processors and escrows.
         """
@@ -50,9 +50,7 @@ class Receiver(doing.DoDoer):
             if not frame and self.msgs:
                 frame = self.msgs.popleft()
             if frame:
-                parser = self.parser.onceParsator(
-                    ims=frame, framed=True, local=False
-                )
+                parser = self.parser.onceParsator(ims=frame, framed=True, local=False)
                 try:
                     try:
                         next(parser)

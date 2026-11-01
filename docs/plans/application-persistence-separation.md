@@ -48,7 +48,7 @@ tested integrity boundary, not a reason to wrap every business read in a writer.
 | `delivery/authing.py:ServiceAuthenticator` | Key retrieval, signature mechanics, trust/time rules and replay consumption | Keep a clearly named authentication service; separate signature codec from its key and replay-store dependencies; successful authentication explicitly includes nonce claiming |
 | `runtime/serving.py:VerifierService.__init__` | Composition plus scope/history checks, inception-file reading, schema installation and identity bootstrap | Explicit bootstrap operation precedes composition; runtime retains resource and HIO lifetime ownership |
 | `runtime/cli.py` retry dispatch | Commands invoke workflow methods on the database object | CLI opens resources and invokes the owning service's retry operation |
-| `scripts/integration/receiver.py` | HTTP handling, receipt/conflict decisions, several writes and ACK-loss injection | Small fixture receipt operation separates durable receipt behavior from HTTP and fault injection; keep it a focused fixture |
+| `scripts/integration/receiver.py` | HTTP handling, status-event/conflict decisions, several writes and ACK-loss injection | Small fixture status-event operation separates durable status-event storage from HTTP and fault injection; keep it a focused fixture |
 
 Keep existing boundaries that already fit: pure EOA challenge/proof functions in
 `verification/eoa.py`, the JSON-RPC envelope adapter in `verification/rpc.py`, CESR
@@ -239,7 +239,7 @@ replay between those commits remains idempotent. No cross-environment transactio
 - Startup: move scope/history rules above storage; isolate identity/inception and
   schema installation from service assembly. Partial startup still closes acquired
   resources; shutdown stops child doers before their borrowed stores close.
-- Fixture receiver: separate receipt persistence from HTTP and deliberate ACK-loss
+- Fixture receiver: separate status-event persistence from HTTP and deliberate ACK-loss
   behavior. Preserve its diagnostic API and fault timing; do not grow it into an
   alternative production Oracle or adopt its fixtures as application policy.
 
@@ -283,7 +283,7 @@ qualification and the qualified contract revision.
 
 - Slice 4: [PR #31](https://github.com/GLEIF-IT/eoa-verifier/pull/31), delivery service with explicit outcomes, owned HTTP adapter, pure signature codec and KERIpy key adapter. Focused checks: 106 passed; late-completion and public revocation checks passed.
 
-- Slice 5: [PR #32](https://github.com/GLEIF-IT/eoa-verifier/pull/32), bootstrap and fixture receipt separation, final documentation, and explicit named persistence transitions throughout. Removed the intermediate `move_grant`, `move_verification`, directional acceptance and flag-driven delivery saves. Focused transition/lifecycle checks: 89 passed. Final adapter/runtime/receipt checks: 26 passed. Installed-wheel CI: 249 passed. Tests use explicit runtime notifier/parser/replay-service handles; the duplicate-Grant lookup closes its reader before replay.
+- Slice 5: [PR #32](https://github.com/GLEIF-IT/eoa-verifier/pull/32), bootstrap and fixture status-event separation, final documentation, and explicit named persistence transitions throughout. Removed the intermediate `move_grant`, `move_verification`, directional acceptance and flag-driven delivery saves. Focused transition/lifecycle checks: 89 passed. Final adapter/runtime/status-event checks: 26 passed. Installed-wheel CI: 249 passed. Tests use explicit runtime notifier/parser/replay-service handles; the duplicate-Grant lookup closes its reader before replay.
 
 Coordinated qualification: [Oracle PR #59](https://github.com/GLEIF-IT/vlei-oracle/pull/59)
 advances the exact verifier pin while retaining contract
@@ -373,7 +373,7 @@ Review and qualification: [Verifier #33](https://github.com/GLEIF-IT/eoa-verifie
 [Oracle #60](https://github.com/GLEIF-IT/vlei-oracle/pull/60), and
 [Comply #19](https://github.com/GLEIF-IT/vlei-comply/pull/19). Focused checks passed:
 40 verifier revocation/delivery/IPEX cases, 4 registry recovery cases after the
-final variable rename, 23 Oracle selection/receipt/posting cases, and 20 Comply
+final variable rename, 23 Oracle selection/status-event/posting cases, and 20 Comply
 wallet-association cases. Those PRs record final installed-wheel and paired test
 results against the exact coordinated pins before merge.
 
@@ -405,7 +405,7 @@ necessary when a restarted service has a lower configured attempt budget.
 Deferral and activation retain separate deadline insertion/removal operations.
 
 VerifierReger's atomic TEL projection, evidence/Grant/key adapters and integration
-ReceiptStore retain their focused responsibilities. Storage keys, wire contracts,
+StatusEventStore retain their focused responsibilities. Storage keys, wire contracts,
 nonce-only consumption, revocation naming and queue priority are unchanged.
 
 Function names use their feature class as context: GrantReader.active and
@@ -427,3 +427,17 @@ removed. The advisory record uses startup.; no old binding reader or migration
 is introduced. Work, results, consumed nonces and delivery records are unchanged.
 Runtime tests cover first use, changed settings with retained data, quiet reopen
 and changing back. The README and operator guide describe the responsibility.
+
+## Status-event terminology
+
+The integration receiver uses StatusEventStore, StatusEventService and
+StatusEventConflict. event_json returns the retained JSON string; record_event
+commits it with delivery-attempt accounting; stored_events returns detached
+diagnostics. Variables distinguish statusEventBytes, statusEventJson, the parsed
+statusEvent and ackBytes. A signed ACK confirms durable status-event storage,
+not Ethereum publication. Actual KERI witness receipts retain their names.
+
+This is a source/API naming change: immutable-body checks, replay protection,
+restart and post-commit ACK-loss behavior, wire values and subdatabase names stay
+unchanged. The coordinated PRs record focused, installed-wheel and paired
+qualification results against exact dependency revisions.

@@ -15,7 +15,7 @@ sequenceDiagram
     participant V as EOA Verifier
     participant R as Configured Ethereum RPC
     participant C as Trusted webhook consumer
-    I->>V: IPEX Grant + source credentials, KEL/TEL, receipts
+    I->>V: IPEX Grant + source credentials, KEL/TEL, KERI witness receipts
     V->>V: Native parse/escrows, durable pending work
     V->>V: Check schemas/SAIDs, LE/QVI trust, issuer/holder and witnessed issuance
     V->>V: Reconstruct challenge, verify canonical EOA proof
@@ -34,7 +34,7 @@ sequenceDiagram
             V->>V: Atomically commit nonce claim, acceptance and optional outbox
             opt Webhook configured
                 V->>C: Authenticated immutable acceptance event
-                C->>C: Commit durable receipt
+                C->>C: Commit durable status event
                 C-->>V: Authenticated correlated ACK
                 V->>V: Complete delivery, retry same event if ACK is lost
             end

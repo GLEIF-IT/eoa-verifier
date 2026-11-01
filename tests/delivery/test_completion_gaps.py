@@ -14,7 +14,7 @@ from eoa_verifier.delivery.keys import ServiceKeys
 from eoa_verifier.persistence.associations import AssociationReader
 from eoa_verifier.persistence.delivery import DeliveryReader, DeliveryWriter
 from eoa_verifier.persistence.transport import claim_nonce
-from scripts.integration.receiver import ReceiptService, ReceiptStore, Receiver
+from scripts.integration.receiver import Receiver, StatusEventService, StatusEventStore
 from tests.support.acceptance import acceptance_service
 from tests.support.network import free_port
 
@@ -36,14 +36,14 @@ def test_real_sender_recovers_commit_ack_gaps(
         receiver.psr.parse(ims=bytearray(sender_hab.makeOwnEvent(sn=0)))
         port = free_port()
         target = f"http://127.0.0.1:{port}/hook"
-        store = ReceiptStore(receiver.db)
+        store = StatusEventStore(receiver.db)
         auth = ServiceAuthenticator(
             keys=ServiceKeys(receiver_hab),
             claim_nonce=store.claim_nonce,
             peer_aid=sender_hab.pre,
         )
         app = falcon.App()
-        app.add_route("/hook", Receiver(auth, ReceiptService(store), target))
+        app.add_route("/hook", Receiver(auth, StatusEventService(store), target))
         server = http.ServerDoer(
             server=http.Server(host="127.0.0.1", port=port, app=app)
         )
@@ -109,13 +109,13 @@ def test_real_sender_recovers_commit_ack_gaps(
             assert not baser.outbox.get(keys=(associationStatus.eventId,)).acknowledged
             baser.close()
             baser.reopen()
-            # Rebind receipt subdatabases after a KERIpy database reopen.
+            # Rebind status-event subdatabases after a KERIpy database reopen.
             receiver.db.close(clear=False)
             receiver.db.reopen()
-            store = ReceiptStore(receiver.db)
+            store = StatusEventStore(receiver.db)
             auth.claim_nonce = store.claim_nonce
             app = falcon.App()
-            app.add_route("/hook", Receiver(auth, ReceiptService(store), target))
+            app.add_route("/hook", Receiver(auth, StatusEventService(store), target))
             server = http.ServerDoer(
                 server=http.Server(host="127.0.0.1", port=port, app=app)
             )

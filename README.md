@@ -97,7 +97,7 @@ Initial flow: IPEX Grant acceptance → embed replay and durable work → KERIpy
 credential checks → wallet proof and chain/block/code observation → final local
 KERIpy-state check after the RPC wait → a completed result. Missing artifacts
 or unusable RPC responses leave unfinished work for retry. KERIpy acceptance is
-separate from receipt of bytes; KELs, TELs, credentials and schemas live in the
+separate from arrival of bytes; KELs, TELs, credentials and schemas live in the
 KERIpy Habery/Reger stores, not in the work record.
 
 Each worker handles one item at a time. A native Grant notice is durably handed
@@ -172,7 +172,7 @@ Ed25519 service AIDs at threshold one are supported. See the
 
 `WebhookSender` uses these common primitives and owns ACK policy: actual HTTP 200,
 expected peer, exact attempt reference and a `stored: true` acknowledgment for the event.
-The receiver commits durable event receipt before signing an ACK and acknowledges
+The receiver commits durable status-event storage before signing an ACK and acknowledges
 redelivery without repeating effects. This does not confirm contract publication. See [Verifier API v1](protocol/verifier-api-v1/README.md)
 for event and ACK definitions. Authentication alone is not delivery
 completion or Ethereum confirmation.
