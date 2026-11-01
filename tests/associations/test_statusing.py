@@ -1,4 +1,4 @@
-"""associations/test_statusing.py."""
+"""Passive local status projection, phase visibility and per-association delivery diagnostics."""
 
 import falcon
 from falcon.testing import TestClient

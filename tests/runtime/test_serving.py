@@ -1,4 +1,4 @@
-"""runtime/test_serving.py."""
+"""Runtime composition, advisory settings and child-before-store resource cleanup."""
 
 from dataclasses import replace
 from unittest.mock import patch
@@ -41,6 +41,7 @@ def test_children_stop_before_borrowed_stores_close(config, mode):
         """Record shutdown while the stores borrowed by a child are still usable."""
 
         def exit(self):
+            """Assert borrowed stores remain open during child shutdown and record that shutdown."""
             assert service.baser.opened and service.hby.db.opened
             stopped.append(True)
 
@@ -48,12 +49,14 @@ def test_children_stop_before_borrowed_stores_close(config, mode):
         """Fail after earlier siblings entered, exercising HIO unwinding."""
 
         def enter(self, *, temp=None):
+            """Raise during HIO entry after earlier siblings have borrowed the open stores."""
             raise RuntimeError("entry failure")
 
     class Service(VerifierService):
         """Append lifecycle probes to otherwise normal application wiring."""
 
         def __init__(self, *args, **kwa):
+            """Compose the real service, retain its listener for assertions, and append lifecycle probes."""
             super().__init__(*args, **kwa)
             self.server = next(
                 d.server for d in self.doers if isinstance(d, http.ServerDoer)
@@ -90,6 +93,7 @@ def test_cleanup_failure_still_stops_siblings_before_stores(config):
         """Record that the surviving sibling closes before the outer stores."""
 
         def exit(self):
+            """Prove a surviving sibling stops while the stores it borrowed are still open."""
             assert service.baser.opened and service.hby.db.opened
             stopped.append(True)
 
@@ -97,6 +101,7 @@ def test_cleanup_failure_still_stops_siblings_before_stores(config):
         """Raise from a finalizer to exercise the service’s sibling-cleanup loop."""
 
         def exit(self):
+            """Raise a finalizer failure so sibling cleanup and exception aggregation are exercised."""
             raise RuntimeError("cleanup failure")
 
     with pytest.raises(ExceptionGroup, match="Service cleanup failed") as caught:

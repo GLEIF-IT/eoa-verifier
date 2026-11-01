@@ -33,7 +33,15 @@ class RevocationService:
         self.evidence.remove_revocation(credSaid)
 
     def apply_revocation(self, credSaid):
-        """Prepare revoked status and its second immutable event from accepted facts."""
+        """Return revoked local status, preserving the original facts and delivery target.
+
+        credSaid must already be accepted or revoked; otherwise raise ValueError.
+        The scheduled caller supplies KERIpy-validated TEL revocation, never an issuer
+        instruction to create one. Repeated application returns stored revoked status.
+        Commit status and, if initial acceptance had delivery, its immutable revision-2
+        event together. A missing original outbox event fails before any mutation.
+        The separate TEL queue is acknowledged by process_one only after this commit.
+        """
         previous = self.reader.association(credSaid)
         if previous is None or previous.status not in ("accepted", "revoked"):
             raise ValueError("revocation requires an accepted association")

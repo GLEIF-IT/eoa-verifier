@@ -1,4 +1,9 @@
-"""integration/test_ipex_verification.py."""
+"""Witnessed issuer-chain and IPEX integration through the real Verifier runtime.
+
+Retain the independent habitats, source credentials, witness evidence, HTTP
+transport and Anvil observation. Restart and hostile ordering exercise durable
+phase boundaries rather than a second verification simulator.
+"""
 
 import shutil
 import subprocess

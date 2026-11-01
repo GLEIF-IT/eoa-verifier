@@ -1,7 +1,7 @@
 # URL-only webhooks with optional signature verification
 
-Status: implemented; final installed-wheel and paired qualification gates the
-coordinated Verifier and Oracle PRs.
+Status: implemented and qualified by the full installed-wheel suites and the
+maintained paired scenario, including the subsequent OOBI startup qualification.
 
 ## Decision
 

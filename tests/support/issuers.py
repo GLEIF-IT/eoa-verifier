@@ -1,4 +1,8 @@
-"""support/issuers.py."""
+"""Public-key fixture credentials and signed IPEX notices for focused component tests.
+
+A syntactic candidate is not accepted credential evidence. Full witnessed
+issuance belongs to the integration ceremony and end-to-end tests.
+"""
 
 from eth_account import Account
 from eth_account.messages import encode_typed_data
@@ -8,6 +12,7 @@ from keri.core import coring
 from eoa_verifier.verification.eoa import build_challenge
 from scripts.integration.issuers import association_from_challenge
 
+# Public deterministic wallet key for syntactic fixture credentials, not real funds.
 KEY = "0x" + "0" * 63 + "1"
 
 

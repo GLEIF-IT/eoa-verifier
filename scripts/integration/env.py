@@ -16,7 +16,9 @@ from pathlib import Path
 from .environment import clean_run, load_run, prepare_run, present_credential, start_run
 from .processes import is_running, process_records, stop
 
+# Repository root used to snapshot this command and owned integration inputs.
 SOURCE = Path(__file__).resolve().parents[2]
+# Public lifecycle commands plus narrow internal daemon entry points.
 COMMANDS = (
     "prepare",
     "start",

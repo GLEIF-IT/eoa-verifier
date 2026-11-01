@@ -225,6 +225,7 @@ def test_transient_attempt_budget_moves_to_dead_letter_without_history_scan(outb
     )
 
     def unavailable(delivery):
+        """Yield once, then simulate a retryable network failure without running an HTTP peer."""
         yield 0.0
         raise TimeoutError("unavailable")
 

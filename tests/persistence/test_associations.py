@@ -39,23 +39,29 @@ def test_status_and_event_write_failure_aborts_entire_transition(
     env = baser.env
 
     class Transaction:
+        """Delegate a real transaction and interrupt immediately after its outbox write."""
         def __enter__(self):
+            """Open a real test-owned LMDB write transaction and return this wrapper."""
             self.txn = env.begin(write=True)
             return self
 
         def __exit__(self, kind, value, traceback):
+            """Abort on an exception or commit on normal exit, preserving real LMDB atomicity."""
             self.txn.abort() if kind else self.txn.commit()
 
         def __getattr__(self, name):
+            """Delegate unmodified transaction operations to the underlying LMDB transaction."""
             return getattr(self.txn, name)
 
         def put(self, *args, **kwa):
+            """Perform the real put, then interrupt after an outbox mutation so all writes must roll back."""
             result = self.txn.put(*args, **kwa)
             if kwa.get("db") == baser.outbox.sdb:
                 raise RuntimeError("after event write")
             return result
 
     def begin(**kwa):
+        """Wrap write transactions for fault injection and leave ordinary readers unchanged."""
         return Transaction() if kwa.get("write") else env.begin(**kwa)
 
     with (

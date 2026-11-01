@@ -56,17 +56,22 @@ def test_failed_revocation_record_write_rolls_back_keripy_acceptance():
         real = reger.env
 
         class Transaction:
+            """Delegate TEL-index writes and refuse the associated revocation-record write."""
             def __enter__(self):
+                """Open a real test-owned LMDB write transaction and return this wrapper."""
                 self.txn = real.begin(write=True)
                 return self
 
             def __exit__(self, kind, value, traceback):
+                """Abort on an exception or commit on normal exit, preserving real LMDB atomicity."""
                 self.txn.abort() if kind else self.txn.commit()
 
             def get(self, *args, **kwargs):
+                """Read through the underlying transaction without emulating database state."""
                 return self.txn.get(*args, **kwargs)
 
             def put(self, *args, **kwargs):
+                """Refuse revocation-record storage while allowing the preceding TEL-index write to execute."""
                 if kwargs["db"] == reger.revocations.sdb:
                     raise RuntimeError("revocation record unavailable")
                 return self.txn.put(*args, **kwargs)

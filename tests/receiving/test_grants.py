@@ -1,4 +1,4 @@
-"""receiving/test_grants.py."""
+"""One-notice Grant replay, bounded missing-evidence retries and atomic verification enqueue."""
 
 from contextlib import ExitStack
 from types import SimpleNamespace
@@ -113,7 +113,9 @@ def test_signed_bad_embed_is_consumed_and_valid_work_progresses(config, bad):
             ticks = []
 
             class Heartbeat(doing.Doer):
+                """Record a scheduler turn after malformed Grant intake to detect sibling starvation."""
                 def recur(self, tyme):
+                    """Record this turn and stop after the probe has collected its required observation count."""
                     ticks.append(tyme)
                     return True
 
@@ -145,7 +147,9 @@ def test_one_notice_per_turn_and_bounded_missing_material(config):
         counts = []
 
         class Heartbeat(doing.Doer):
+            """Observe notifier depth for three turns while Grant intake advances one item per turn."""
             def recur(self, tyme):
+                """Record this turn and stop after the probe has collected its required observation count."""
                 counts.append(runtime.notifier.noter.getNoteCnt())
                 return len(counts) == 3
 
@@ -198,20 +202,26 @@ def test_completion_rollback_preserves_active_grant(config):
         env = runtime.baser.env
 
         class Transaction:
+            """Use a real write transaction but fail removal of the active Grant after enqueue."""
             def __enter__(self):
+                """Open a real test-owned LMDB write transaction and return this wrapper."""
                 self.txn = env.begin(write=True)
                 return self
 
             def __exit__(self, kind, value, traceback):
+                """Abort on an exception or commit on normal exit, preserving real LMDB atomicity."""
                 self.txn.abort() if kind else self.txn.commit()
 
             def get(self, *args, **kwa):
+                """Read through the underlying transaction without emulating database state."""
                 return self.txn.get(*args, **kwa)
 
             def put(self, *args, **kwa):
+                """Delegate the real enqueue write; the later deletion is the injected failure boundary."""
                 return self.txn.put(*args, **kwa)
 
             def delete(self, *args, **kwa):
+                """Interrupt active-Grant removal after verification work was enqueued in the same transaction."""
                 raise RuntimeError("after enqueue")
 
         with (

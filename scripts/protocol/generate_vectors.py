@@ -19,8 +19,11 @@ from eoa_verifier.verification.eoa import (
     build_challenge,
 )
 
+# Repository root owning the reference vector artifacts.
 ROOT = Path(__file__).resolve().parents[2]
+# Authored EOA-profile conformance output directory, separate from packaged schema.
 EOA_PROFILE = ROOT / "protocol" / "external-association-v1" / "eoa-v1"
+# Public deterministic signing key for reproducible vectors; not a deployable secret.
 PUBLIC_TEST_KEY = "0x" + "0" * 63 + "1"
 
 

@@ -19,6 +19,8 @@ class VerifierReger(viring.Reger):
         """Bind the revocation table after opening all KERIpy registry subdatabases."""
         super().reopen(**kwa)
         try:
+            # Credential SAID -> validated revocation TEL event SAID (UTF-8 strings).
+            # Written with the accepted TEL index; removed after local revocation commits.
             self.revocations = subing.Suber(db=self, subkey="verifier-revocations.")
         except Exception:
             self.close()
@@ -26,7 +28,13 @@ class VerifierReger(viring.Reger):
         return self.env
 
     def putTel(self, key, val):
-        """Insert an accepted TEL index and, for rev/brv, its exact credential SAID."""
+        """Insert an accepted TEL index and atomically queue rev/brv identifiers.
+
+        key is KERIpy's credential-prefix/sequence-number key; val is the TEL event
+        SAID bytes. Require its already-stored tvts event bytes, raising ValueError if
+        absent. Return the no-overwrite index insertion result. Only a new rev/brv index
+        writes credential SAID -> TEL event SAID; native callers own validation.
+        """
         pre, _ = dbing.splitKeySN(key)
         with self.env.begin(write=True) as txn:
             raw = txn.get(dbing.dgKey(pre, val), db=self.tvts)

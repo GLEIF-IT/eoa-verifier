@@ -1,4 +1,4 @@
-"""receiving/test_directing.py."""
+"""HTTP/CESR framing and request isolation before KERIpy evidence acceptance."""
 
 import falcon
 import pytest

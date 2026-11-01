@@ -12,6 +12,7 @@ from .builds import prepare_installation
 from .infrastructure import infrastructure
 from .processes import free_port, is_running, launch, process_records, stop, wait_ready
 
+# Run-manifest ownership marker checked before inspecting or removing resources.
 OWNER = "eoa-verifier-integration"
 
 

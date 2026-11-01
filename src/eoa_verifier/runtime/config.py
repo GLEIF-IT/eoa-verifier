@@ -10,7 +10,14 @@ from keri.core import coring
 
 @dataclass(frozen=True)
 class ServiceConfig:
-    """Service identity, local storage and initial-verification network settings."""
+    """Immutable startup input validated before any service resources are opened.
+
+    Field comments define trust, storage and timing units. name/base/head_dir select
+    stores while alias selects the service habitat within Habery. webhook_url alone
+    needs no receiver identity; webhook_oobi only introduces keys for optional signed
+    responses. Network timing options do not create credential expiry. Validation
+    errors propagate to the CLI; secrets are excluded from the generated repr.
+    """
 
     # Configured trust root for QVI issuance and delegation; required canonical AID.
     trusted_geda_aid: str

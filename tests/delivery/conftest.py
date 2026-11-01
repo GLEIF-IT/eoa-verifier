@@ -1,4 +1,4 @@
-"""delivery/conftest.py."""
+"""Isolated peer identities, accepted signing keys and outbox stores for delivery tests."""
 
 import pytest
 from keri.app import habbing

@@ -29,26 +29,32 @@ def test_completion_rollback_after_result_write():
             """Delegate commit/abort to LMDB, injecting failure only at pending deletion."""
 
             def __enter__(self):
+                """Enter a real LMDB write transaction and expose the fault-injecting wrapper."""
                 self.txn = real_env.begin(write=True)
                 self.txn.__enter__()
                 return self
 
             def __exit__(self, *args):
+                """Let the real transaction commit or abort according to the propagated exception."""
                 return self.txn.__exit__(*args)
 
             def get(self, *args, **kwa):
+                """Delegate reads to the real write transaction."""
                 return self.txn.get(*args, **kwa)
 
             def put(self, *args, **kwa):
+                """Store the prepared result in the real transaction before the later failure."""
                 return self.txn.put(*args, **kwa)
 
             def delete(self, *args, **kwa):
+                """Interrupt phase deletion so the preceding result write must abort with it."""
                 raise RuntimeError("between writes")
 
         class FailingEnvironment:
             """Supply the transaction fault without changing LMDB commit semantics."""
 
             def begin(self, **kwa):
+                """Supply the real-transaction fault wrapper at the writer entry point."""
                 return FailingTransaction()
 
         with (

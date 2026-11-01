@@ -1,6 +1,9 @@
-"""Start a vLEI External Association verifier with the Externally Owned Account profile integration.
+"""Public Verifier CLI for service startup and offline dead-letter recovery.
 
-Supports verification of both sides of an Ethereum to vLEI association.
+Parse operator configuration before opening stores. Startup owns the scheduled
+service lifetime; retry commands open only the persistent application store and
+require the running service to be stopped. No issuer or Ethereum posting keys
+are accepted here.
 """
 
 import argparse

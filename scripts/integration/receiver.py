@@ -24,8 +24,11 @@ class StatusEventStore:
 
     def __init__(self, db):
         """Bind disjoint non-duplicate event, attempt and control subdatabases."""
+        # Event ID -> exact UTF-8 JSON body; retain bytes for duplicate/conflict checks.
         self.events = subing.Suber(db=db, subkey="fixture.events.")
+        # Event ID -> decimal authenticated attempt count, committed with event bytes.
         self.attempts = subing.Suber(db=db, subkey="fixture.attempts.")
+        # "dropped" -> "true": persistent sentinel for one deliberate post-commit ACK loss.
         self.control = subing.Suber(db=db, subkey="fixture.control.")
 
     def event_json(self, event_id):

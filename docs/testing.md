@@ -88,3 +88,24 @@ OOBI introduction tests exercise real HTTP and the pinned KERIpy resolver.
 Resolution requires accepted key state; Oracle also binds it to the authorized
 producer AID. Rotation is retrieved from the same OOBI on restart. Startup no
 longer imports public KEL files. Credential/TEL evidence transport is unchanged.
+
+## Maintainer documentation
+
+Module docstrings explain responsibility and boundaries; class/function docstrings
+explain ownership, representations, outcomes and relevant failures. Short methods
+share their class contract rather than repeating it. Document tests by the behavior
+and failure boundary they protect, including nested doubles and embedded subprocess
+programs. A seeded verification result is not proof of witnessed credential validity.
+
+Read persistence/basing.py for each application's key/value map and records.py for
+field units and meaning. VerifierReger adds only the validated-revocation queue to
+KERIpy's registry environment: issuer revocation is validated by KERIpy, recorded
+atomically with its TEL index, then applied to local status before acknowledgement.
+Do not duplicate the inherited KERIpy schema here. Services prepare outcomes outside
+write transactions; persistence methods make the explicit atomic changes.
+
+For documentation-only changes, compare Python ASTs after removing docstrings,
+including separately parsing any embedded executable Python. Preserve signatures,
+assertions, parameter matrices, fixture topology and packaged schema/vector bytes.
+Build/install the wheel and collect tests outside the checkout; existing CI remains
+the functional gate. No dedicated documentation-check script or new CI gate is needed.
