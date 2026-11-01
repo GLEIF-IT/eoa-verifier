@@ -4,7 +4,12 @@ from .queues import due_key, due_record
 
 
 class GrantReader:
-    """Borrow the open store for grants persistence only."""
+    """Read detached Grant replay records from a borrowed, open VerifierBaser.
+
+    Point reads and phase-head reads close their LMDB readers before returning.
+    Missing point keys return None. No read claims work, applies retry policy or
+    keeps a transaction alive while the caller makes a decision.
+    """
 
     def __init__(self, baser):
         """Borrow the application's already-open store."""
@@ -24,7 +29,14 @@ class GrantReader:
 
 
 class GrantWriter:
-    """Borrow the open store for grants persistence only."""
+    """Persist prepared Grant replay records through explicit atomic transitions.
+
+    The caller selects the outcome and supplies typed records before entry. Each
+    operation serializes its write set before opening one short write transaction;
+    no network I/O or scheduler yield occurs inside it. Methods taking previous
+    compare that expected record with stored bytes and raise ValueError on a
+    changed/missing source, aborting the write set. The caller owns the open store.
+    """
 
     def __init__(self, baser):
         """Borrow the application's already-open store."""

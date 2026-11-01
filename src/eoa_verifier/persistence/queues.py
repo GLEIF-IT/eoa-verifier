@@ -8,7 +8,13 @@ def first_record(table):
 
 
 def due_record(schedule, waiting):
-    """Return the earliest waiting record without applying clock policy or deleting it."""
+    """Detach the earliest indexed waiting record, or None when the index is empty.
+
+    schedule maps deadline/item keys to waiting-table keys. Copy/read the record
+    inside a bounded reader and close it before returning. A dangling index raises
+    ValueError. A future deadline still returns its record: the service, not this
+    read helper, decides whether it is due. Neither table is changed.
+    """
     with schedule.db.env.begin() as txn, txn.cursor(db=schedule.sdb) as cursor:
         if not cursor.first():
             return None

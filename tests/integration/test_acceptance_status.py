@@ -1,4 +1,4 @@
-"""integration/test_acceptance_status.py."""
+"""Validated revocation, atomic local status changes and public visibility across component boundaries."""
 
 import json
 from unittest.mock import patch

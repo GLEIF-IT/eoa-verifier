@@ -24,7 +24,9 @@ def test_webhook_waits_for_accepted_oobi_key_state(config, with_kel, start_delay
         url = f"http://127.0.0.1:{port}/oobi/{hab.pre}"
 
         class OtherKelOobi:
+            """Serve another AID's KEL while HTTP metadata claims the expected response signer."""
             def on_get(self, req, rep, aid):
+                """Return a successful CESR response whose declared AID has no events in its body."""
                 rep.content_type = "application/json+cesr"
                 rep.set_header(ending.OOBI_AID_HEADER, hab.pre)
                 rep.data = bytes(other.makeOwnEvent(sn=0))
@@ -45,6 +47,7 @@ def test_webhook_waits_for_accepted_oobi_key_state(config, with_kel, start_delay
             assert service.sender not in service.doers
 
             def wait(tymth, tock=0.0, **opts):
+                """Start a delayed peer if requested, assert resolution/key-state gating, and stop both services."""
                 yield tock
                 if start_delay:
                     yield start_delay

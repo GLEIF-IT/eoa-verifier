@@ -1,4 +1,8 @@
-"""verification/test_worker.py."""
+"""Wallet/account outcomes through real HIO HTTP and deterministic RPC response doubles.
+
+These tests cover client lifetime, failure classification and canonical account
+observations. They complement the Anvil integration rather than replacing it.
+"""
 
 import falcon
 import pytest

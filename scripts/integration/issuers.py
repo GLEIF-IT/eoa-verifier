@@ -18,6 +18,7 @@ from eoa_verifier.verification.constants import (
 )
 from eoa_verifier.verification.eoa import DOMAIN_TAG, PROOF_ALGORITHM, build_challenge
 
+# Public deterministic secp256k1 fixture key; never an operator or production secret.
 KEY = "0x" + "0" * 63 + "1"
 
 

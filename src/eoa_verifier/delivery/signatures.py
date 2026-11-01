@@ -12,7 +12,9 @@ from keri import kering
 from keri.core import coring
 from keri.end import ending
 
+# Ordered coverage used by both siginput construction and verification.
 FIELDS = ("@method", "@path", "content-digest")
+# Single CESR signature marker shared with the pinned KERIpy HTTP profile.
 LABEL = "sig0"
 
 
@@ -21,7 +23,11 @@ class AuthenticationError(ValueError):
 
 
 def body_digest(body):
-    """Return SHA-256 Content-Digest for the exact transmitted bytes."""
+    """Return the RFC 9530 SHA-256 Content-Digest value for exact body bytes.
+
+    Format the raw digest as standard base64 in sha-256=:...:. This is an HTTP
+    representation digest, not a CESR SAID; include it in the signed input.
+    """
     return "sha-256=:" + base64.b64encode(hashlib.sha256(body).digest()).decode() + ":"
 
 

@@ -6,7 +6,12 @@ from eoa_verifier.persistence.records import Delivery
 
 
 def status_delivery(associationStatus, *, status_revision, destination):
-    """Serialize one immutable v1 event for URL-only webhook delivery."""
+    """Build a Delivery record from prepared association status, revision and target URL.
+
+    Serialize deterministic compact/sorted v1 JSON, including reasonCode only when
+    present. Return an unsent record; this function performs no signing, storage or
+    HTTP I/O. Once committed, callers resend these exact body bytes.
+    """
     statusEvent = {
         "version": "1",
         "eventId": associationStatus.eventId,

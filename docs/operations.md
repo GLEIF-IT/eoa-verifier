@@ -94,7 +94,7 @@ request processing is not an atomic batch. Missing verification evidence still
 uses KERIpy escrows.
 Initial checks must finish before acceptance. Without webhook configuration, the
 service accepts locally and consumes the exact nonce, but creates no delivery
-obligation. Public `delivery` is null. Another SAID reusing an accepted pair becomes
+obligation. Public `delivery` is null. Another SAID reusing an accepted nonce becomes
 locally rejected with `NONCE_REUSED`, even after revocation or downstream supersession. Initial
 verification remains visible separately in the application store. See
 [ADR 0005](../adrs/0005-accepted-association-nonces.md) for transaction boundaries and

@@ -122,7 +122,7 @@ to one SAID, atomically with immutable facts and any configured outbox obligatio
 Another SAID using that nonce becomes locally `rejected` with `NONCE_REUSED`; its
 initial verification remains `verified`. Same-SAID replay is idempotent, and
 revocation/supersession never releases the nonce.
-Nonces contain 1–128 ASCII characters from `[A-Za-z0-9_-]`; storage uses ordinary
+Nonces contain 1–128 ASCII characters from `[A-Za-z0-9_-]`; storage uses
 the exact nonce bytes as Komer keys. See [ADR 0005](adrs/0005-accepted-association-nonces.md).
 
 Acceptance runs with or without webhooks. With no target, public `delivery` is null;
@@ -159,7 +159,11 @@ CESR-stream PUT, with 204 acknowledging intake only. Explicit POST queries are
 unsupported; PUT streams are not filtered. `Receiver` schedules the shared KERIpy
 parser and escrows. There is no mailbox polling, mailbox store or SSE query service.
 
-See the [testing guide](docs/testing.md) for component and integration lookup.
+See the [testing guide](docs/testing.md) for component and integration lookup
+and maintainer documentation conventions. Each local LMDB subdatabase has its
+key/value/purpose documented beside its binding in `VerifierBaser.reopen` or
+`VerifierReger.reopen`; persistent record fields are described in
+`persistence/records.py`.
 
 ## HTTP signature primitives
 

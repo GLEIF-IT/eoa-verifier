@@ -1,4 +1,8 @@
-"""support/services.py."""
+"""Compose actual feature services and own isolated KERIpy/application store lifetimes.
+
+verifier_service lends an unscheduled runtime; entered_service enters HIO tasks
+without advancing time. Callers retain that distinction when driving tests.
+"""
 
 from contextlib import contextmanager
 

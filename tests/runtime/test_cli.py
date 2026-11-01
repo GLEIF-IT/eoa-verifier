@@ -1,4 +1,4 @@
-"""runtime/test_cli.py."""
+"""Public CLI options and offline recovery against the selected persistent application store."""
 
 import pytest
 

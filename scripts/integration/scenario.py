@@ -16,6 +16,7 @@ from .environment import (
 from .processes import stop
 from .services import request_json
 
+# Public deterministic wallet keys for independent-wallet and nonce-reuse cases.
 TEST_KEYS = {1: "0x" + "0" * 63 + "1", 2: "0x" + "0" * 63 + "2"}
 
 
@@ -93,7 +94,7 @@ def _issue(root: Path, wallet_key: str, nonce: str) -> dict:
 
 
 def _reject_reused_nonce(root: Path, configuration: dict, nonce: str) -> dict:
-    """Prove a valid different-wallet credential cannot reuse an accepted pair."""
+    """Prove a valid different-wallet credential cannot reuse any accepted nonce."""
     duplicate = _issue(root, TEST_KEYS[2], nonce)
     present_credential(root, configuration, duplicate["said"])
     rejectedStatus = wait_for_status(configuration, duplicate["said"], "rejected")

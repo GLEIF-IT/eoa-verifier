@@ -54,7 +54,18 @@ class AcceptanceService:
             )
 
     def accept(self, credSaid, *, associationFacts, nonce, destination=None):
-        """Accept once or reject nonce reuse; same-SAID races return their committed status."""
+        """Accept a verified credential once, or record a global nonce-reuse rejection.
+
+        credSaid identifies a completed verified result. associationFacts is copied
+        from accepted evidence by the scheduled caller; nonce is its exact profile
+        string. destination optionally creates a signed-delivery obligation. Prepare
+        all records before the atomic writer claims the nonce and saves status/event.
+
+        Return the committed AssociationStatus, including an existing same-SAID result
+        without rewriting it. A different credential reusing any consumed nonce becomes
+        rejected/NONCE_REUSED with no event. Missing verification or malformed nonce
+        raises ValueError; a failed transaction publishes no partial acceptance.
+        """
         previous = self.reader.association(credSaid)
         if previous is not None:
             return previous

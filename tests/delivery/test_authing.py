@@ -116,6 +116,7 @@ def test_partial_or_changed_response_headers_never_fall_back(peers, header, chan
 
 
 def test_keyid_and_required_coverage_cannot_be_substituted(peers):
+    """Reject substitutions of the signer identity or required digest coverage in signed input."""
     sender, receiver = peers
     headers = sender.sign(**message())
     for changed in (
@@ -129,6 +130,7 @@ def test_keyid_and_required_coverage_cannot_be_substituted(peers):
 
 
 def test_empty_signed_response(peers):
+    """Verify the digest and signature of a zero-length body through the pure signature adapter."""
     sender, receiver = peers
     context = dict(message(), body=b"")
     assert (

@@ -11,6 +11,11 @@ from scripts.integration.artifacts import source_revision
 
 @pytest.mark.parametrize("local_only", [False, True])
 def test_installed_verifier_qualifies_without_oracle_or_comply(tmp_path, local_only):
+    """Build and qualify the standalone installed Verifier with its witnessed source chain.
+
+    Run local-only and signed-webhook modes through the supported fixture CLI,
+    including persistent restart and revocation, without an Oracle or Comply process.
+    """
     root = Path(__file__).resolve().parents[2]
     wheel = os.environ.get("EOA_VERIFIER_WHEEL")
     assert wheel and Path(wheel).is_file(), (

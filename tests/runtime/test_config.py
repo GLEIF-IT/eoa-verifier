@@ -1,4 +1,4 @@
-"""runtime/test_config.py."""
+"""Reject webhook URLs whose path/query spelling the pinned HIO client would rewrite."""
 
 from dataclasses import replace
 

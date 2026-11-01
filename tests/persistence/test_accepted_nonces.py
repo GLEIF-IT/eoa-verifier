@@ -1,4 +1,9 @@
-"""persistence/test_accepted_nonces.py."""
+"""Exact nonce-key consumption, atomic acceptance and independent-process durability.
+
+Use real LMDB transactions and subprocess death to distinguish aborted writes
+from committed consumption. Verification is seeded at this storage boundary;
+the witnessed integration tests separately establish credential validity.
+"""
 
 import subprocess
 import sys
@@ -27,7 +32,9 @@ from tests.support.issuers import candidate
 from tests.support.persistence import enqueue_verification
 from tests.support.services import verification_service
 
+# Child program: root/SAID/mode arguments; stdin releases the race barrier.
 WORKER = """
+'''Accept one seeded credential in a real child process, optionally dying at a commit boundary.'''
 import os, sys
 from keri.db import dbing
 from eoa_verifier.persistence.basing import VerifierBaser
@@ -44,14 +51,19 @@ with dbing.openLMDB(cls=VerifierBaser, name="process", headDirPath=root, temp=Fa
         from types import SimpleNamespace
         env = baser.env
         class InterruptedTransaction:
+            '''Delegate a real write transaction and exit after the nonce write, before commit.'''
             def __enter__(self):
+                '''Open the real transaction and return the fault wrapper.'''
                 self.txn = env.begin(write=True)
                 return self
             def __exit__(self, kind, value, traceback):
+                '''Preserve normal commit/abort semantics when the process is not killed.'''
                 self.txn.abort() if kind else self.txn.commit()
             def __getattr__(self, name):
+                '''Delegate all unaffected operations to the real transaction.'''
                 return getattr(self.txn, name)
             def put(self, *args, **kwargs):
+                '''Perform the actual put, then exit without cleanup at the consumed-nonce boundary.'''
                 result = self.txn.put(*args, **kwargs)
                 if kwargs.get("db") == baser.accepted_nonces.sdb:
                     os._exit(23)
@@ -79,6 +91,11 @@ def verify(baser, said):
 
 
 def accept(baser, said, *, issuer="issuer", nonce="nonce", delivery=True):
+    """Accept a pre-verified fixture candidate with chosen issuer/nonce and optional delivery.
+
+    Use the real acceptance service and atomic writers. The caller seeds initial
+    verification separately; this helper does not establish credential validity.
+    """
     return acceptance_service(baser).accept(
         said,
         associationFacts={"issuerAid": issuer},
@@ -89,6 +106,12 @@ def accept(baser, said, *, issuer="issuer", nonce="nonce", delivery=True):
 
 @pytest.mark.parametrize("delivery", [False, True])
 def test_global_nonce_rejection_survives_revocation_and_reopen(tmp_path, delivery):
+    """A consumed nonce rejects every different credential, across issuers and restart.
+
+    Same-credential replay stays idempotent. Exercise delivery-enabled and local-only
+    acceptance, preserve distinct valid nonce bytes, and prove revocation never
+    releases the consumed key or fabricates an old delivery obligation.
+    """
     with dbing.openLMDB(
         cls=VerifierBaser, name="nonces", headDirPath=str(tmp_path), temp=False
     ) as baser:
@@ -202,6 +225,11 @@ def test_scope_reopen_does_not_audit_nonce_or_association_values():
 
 @pytest.mark.parametrize("same_said", [False, True])
 def test_independent_process_race_has_one_owner(tmp_path, same_said):
+    """Race four real LMDB processes at one nonce without an application lock.
+
+    Different credentials yield one acceptance; same-credential contenders observe
+    the same committed acceptance. Reopen and require one nonce, status and event.
+    """
     options = dict(
         cls=VerifierBaser, name="process", headDirPath=str(tmp_path), temp=False
     )
@@ -256,6 +284,11 @@ def test_independent_process_race_has_one_owner(tmp_path, same_said):
 
 
 def test_process_death_before_and_after_commit(tmp_path):
+    """Terminate a child without Python cleanup on either side of the atomic acceptance commit.
+
+    Reopen the real store after each exit: pre-commit mutation leaves no partial
+    nonce/status/event; post-commit death retains all three and idempotent replay.
+    """
     options = dict(
         cls=VerifierBaser, name="process", headDirPath=str(tmp_path), temp=False
     )
@@ -289,6 +322,7 @@ def test_process_death_before_and_after_commit(tmp_path):
     "nonce", ["x", "N" * 128, "aZ09_-", "25C89E61-21F8-4CCF-948D-46D1FBB7BAE8"]
 )
 def test_ascii_boundaries_are_preserved_in_lmdb(nonce):
+    """Keep accepted nonce keys equal to their exact ASCII bytes and below the LMDB key limit."""
     with dbing.openLMDB(cls=VerifierBaser) as baser:
         key = nonce_key(nonce)
         assert key == nonce.encode("ascii")
@@ -317,6 +351,7 @@ def test_ascii_boundaries_are_preserved_in_lmdb(nonce):
     ],
 )
 def test_invalid_nonce_is_rejected_without_consumption(nonce):
+    """Reject malformed nonce values before any nonce, association status or delivery is written."""
     credential = candidate()
     with dbing.openLMDB(cls=VerifierBaser) as baser:
         enqueue_verification(baser, VerificationRecord("candidate", "grant"))

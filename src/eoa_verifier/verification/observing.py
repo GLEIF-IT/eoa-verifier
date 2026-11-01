@@ -45,7 +45,8 @@ class AccountObserver:
         """Yield for eth_chainId and return its integer value if it matches expected_chain_id.
 
         Use the worker's per-call timeout; raise ValueError for a noncanonical quantity
-        or another network. Transport and envelope failures propagate to _verify_one.
+        or another network. Transport and envelope failures propagate to the worker,
+        which classifies them as retry cues.
         """
         chain = yield from request_rpc(
             client,

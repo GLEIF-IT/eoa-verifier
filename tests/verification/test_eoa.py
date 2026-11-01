@@ -1,4 +1,4 @@
-"""verification/test_eoa.py."""
+"""Agreement between packaged carrier-schema and pure EOA nonce validation boundaries."""
 
 from importlib.resources import files
 
@@ -12,6 +12,7 @@ from tests.support.issuers import candidate
 
 
 def schema():
+    """Load the installed association schema as a KERIpy Schemer for boundary checks."""
     return scheming.Schemer(
         raw=files("eoa_verifier.verification")
         .joinpath("schema_data/external-association-v1.json")
@@ -23,6 +24,7 @@ def schema():
     "nonce", ["x", "N" * 128, "aZ09_-", "25C89E61-21F8-4CCF-948D-46D1FBB7BAE8"]
 )
 def test_ascii_boundaries_are_preserved_in_schema(nonce):
+    """Require the schema and nonce validator to accept identical allowed ASCII boundary values."""
     contract = schema()
     assert contract.said == ASSOCIATION_SCHEMA
     credential = candidate()
@@ -55,6 +57,7 @@ def test_ascii_boundaries_are_preserved_in_schema(nonce):
     ],
 )
 def test_invalid_nonce_is_rejected_by_schema_and_proof(nonce):
+    """Require the schema and pure nonce validator to reject the same malformed values."""
     credential = candidate()
     credential["u"] = nonce
     assert not Draft7Validator(schema().sed).is_valid(credential)

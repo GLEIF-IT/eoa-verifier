@@ -24,6 +24,14 @@ class Receiver(doing.DoDoer):
     tasks, not the borrowed stores."""
 
     def __init__(self, parser, *, msg_tock, escrow_tock, **kwa):
+        """Borrow the shared KERIpy parser and schedule request parsing and escrow work.
+
+        parser must contain the KEL, reply, exchange, TEL and credential processors
+        composed by the runtime. msg_tock and escrow_tock are HIO scheduling intervals
+        in seconds, independently of application retry deadlines. kwa is forwarded to
+        DoDoer. This object owns its message deck and tasks; stores and processors
+        remain borrowed until the enclosing runtime has stopped those tasks.
+        """
         self.parser = parser
         self.msgs = decking.Deck()
         super().__init__(
@@ -86,6 +94,11 @@ class CesrEnd:
     There is no SSE/query response service; unsupported methods return Falcon 405."""
 
     def __init__(self, msgs):
+        """Borrow the receiver's completed-request deck for this HTTP resource.
+
+        msgs receives a separate bytearray for each completed request. Construction
+        opens no store or socket; the HTTP server and Receiver own those lifetimes.
+        """
         self.msgs = msgs
 
     def on_post(self, req, rep):
@@ -147,6 +160,11 @@ class CesrEnd:
         self._enqueue_request(rep, req.bounded_stream.read())
 
     def _enqueue_request(self, rep, msg):
+        """Copy msg into the request deck and set rep to intake-only HTTP 204.
+
+        Disable caching and close the HTTP connection. The queued bytes have not yet
+        been parsed, verified or durably accepted; Receiver processes them later.
+        """
         self.msgs.append(bytearray(msg))
         rep.set_header("Cache-Control", "no-cache")
         rep.set_header("connection", "close")

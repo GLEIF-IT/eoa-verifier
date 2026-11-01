@@ -1,4 +1,4 @@
-"""support/acceptance.py."""
+"""Construct concrete association services and seed accepted fixture status at their explicit boundaries."""
 
 from eoa_verifier.persistence.associations import AssociationReader, AssociationWriter
 from eoa_verifier.persistence.delivery import DeliveryReader

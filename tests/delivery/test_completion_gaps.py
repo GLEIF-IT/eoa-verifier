@@ -75,6 +75,7 @@ def test_real_sender_recovers_commit_ack_gaps(
             starting = baser.outbox.get(keys=(associationStatus.eventId,)).attempts
 
             def settled(tymth, tock=0.0, **kwargs):
+                """Yield until this attempt records delivery or a settled error, then stop its HTTP tasks."""
                 yield tock
                 while True:
                     delivery = baser.outbox.get(keys=(associationStatus.eventId,))

@@ -1,4 +1,4 @@
-"""support/network.py."""
+"""Allocate local ephemeral probe ports for isolated test listeners."""
 
 import socket
 

@@ -55,6 +55,7 @@ def test_owned_process_restart_and_stop_preserve_artifacts(tmp_path):
     ]
 
     def ready():
+        """Probe the owned local listener and close the probe socket before reporting readiness."""
         with socket.create_connection(("127.0.0.1", port), timeout=0.1):
             return True
 
@@ -82,6 +83,7 @@ def test_candidate_snapshot_preserves_work_and_excludes_ignored_stores(tmp_path)
     subprocess.run(["git", "init", "--quiet", str(source)], check=True)
 
     def git(*args):
+        """Run a Git command only in the disposable source fixture, retaining errors for assertions."""
         subprocess.run(
             ["git", "-C", str(source), *args], check=True, capture_output=True
         )

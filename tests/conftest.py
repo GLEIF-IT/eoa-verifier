@@ -1,4 +1,9 @@
-"""conftest.py."""
+"""Shared Verifier configuration and pre-verified application-store fixtures.
+
+These fixtures own isolated resources and seed only the unit boundary named by
+the test. Witnessed intake and installed-service qualification establish the
+full credential path separately.
+"""
 
 import pytest
 from keri import core
