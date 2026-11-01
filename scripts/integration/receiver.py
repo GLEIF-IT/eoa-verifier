@@ -9,13 +9,14 @@ from urllib.parse import urlsplit
 import falcon
 from hio.base import doing
 from hio.core import http
-from keri.app import habbing, httping, oobiing
+from keri.app import habbing, oobiing
 from keri.db import basing, subing
 from keri.end import ending
 from keri.help import helping
 
 from eoa_verifier.delivery.authing import AuthenticationError, HttpSignatures
 from eoa_verifier.delivery.keys import ServiceKeys
+from eoa_verifier.runtime.oobing import OobiClienter
 
 
 class StatusEventStore:
@@ -187,7 +188,7 @@ def main():
         url = config["verifierUrl"] + "/oobi/" + config["verifierAid"]
         hby.db.roobi.rem(keys=(url,))
         hby.db.oobis.pin(keys=(url,), val=basing.OobiRecord(date=helping.nowIso8601()))
-        resolver = oobiing.Oobiery(hby=hby, clienter=httping.Clienter())
+        resolver = oobiing.Oobiery(hby=hby, clienter=OobiClienter())
         store = StatusEventStore(hby.db)
         auth = HttpSignatures(
             keys=ServiceKeys(hab),

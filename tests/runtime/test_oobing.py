@@ -14,7 +14,8 @@ from tests.support.services import verifier_service
 
 
 @pytest.mark.parametrize("with_kel", [True, False])
-def test_webhook_waits_for_accepted_oobi_key_state(config, with_kel):
+@pytest.mark.parametrize("start_delay", [0.0, 0.2])
+def test_webhook_waits_for_accepted_oobi_key_state(config, with_kel, start_delay):
     """An HTTP success/resolved marker without the declared AID's validated KEL cannot start delivery."""
     with habbing.openHby(name="target", temp=True) as target:
         hab = target.makeHab(name="target")
@@ -45,6 +46,9 @@ def test_webhook_waits_for_accepted_oobi_key_state(config, with_kel):
 
             def wait(tymth, tock=0.0, **opts):
                 yield tock
+                if start_delay:
+                    yield start_delay
+                    parent.extend([server_doer])
                 while service.hby.db.roobi.get(keys=(url,)) is None:
                     yield 0.01
                 # Let the runtime's deferred sender observe the resolution outcome.
@@ -56,6 +60,12 @@ def test_webhook_waits_for_accepted_oobi_key_state(config, with_kel):
                 assert service.baser.outbox.cntAll() == 0
                 parent.remove([service, server_doer])
 
-            parent = doing.DoDoer(doers=[server_doer, service, doing.doify(wait)])
+            parent = doing.DoDoer(
+                doers=[
+                    *([server_doer] if not start_delay else []),
+                    service,
+                    doing.doify(wait),
+                ]
+            )
             doing.Doist(real=True, tock=0.01, limit=3).do(doers=[parent])
             assert parent.done
