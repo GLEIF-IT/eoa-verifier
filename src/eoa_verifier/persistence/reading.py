@@ -36,3 +36,30 @@ class ApplicationReader:
     def dead_grant(self, notice_id):
         """Return one identified Grant dead letter."""
         return self._db.grant_dead.get(keys=(notice_id,))
+
+    def verification(self, phase, cred_said=None):
+        """Return a point record or phase head; waiting heads follow the due index."""
+        tables = {
+            "pending": self._db.pending,
+            "verifying": self._db.verifying,
+            "waiting": self._db.waiting,
+            "dead-letter": self._db.verification_dead,
+        }
+        table = tables[phase]
+        if cred_said is not None:
+            return table.get(keys=(cred_said,))
+        if phase == "waiting":
+            return due_record(self._db.verification_due, table)
+        return first_record(table)
+
+    def verification_result(self, cred_said):
+        """Return the immutable result for one candidate."""
+        return self._db.results.get(keys=(cred_said,))
+
+    def verification_progress(self, cred_said):
+        """Read the stored phase of one candidate without scheduling work."""
+        for phase in ("pending", "verifying", "waiting", "dead-letter"):
+            record = self.verification(phase, cred_said)
+            if record is not None:
+                return phase, record
+        return None, None

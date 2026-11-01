@@ -15,7 +15,9 @@ from eoa_verifier.persistence.records import (
     VerificationRecord,
     VerificationResult,
 )
+from eoa_verifier.persistence.writing import ApplicationWriter
 from tests.support.issuers import candidate
+from tests.support.services import verification_service
 
 WORKER = """
 import os, sys
@@ -38,9 +40,9 @@ with dbing.openLMDB(cls=VerifierBaser, name="process", headDirPath=root, temp=Fa
 
 def verify(baser, said):
     """Seed only initial verification for storage-boundary tests, not intake qualification."""
-    baser.enqueue(VerificationRecord(said, "grant"))
-    baser.next_verification(now=0)
-    baser.finish(
+    ApplicationWriter(baser).enqueue_verification(VerificationRecord(said, "grant"))
+    verification_service(baser).next_verification(now=0)
+    verification_service(baser).finish(
         VerificationResult(
             said, "verified", eoaResult={"wallet": "wallet", "accountObservation": {}}
         )
@@ -312,9 +314,11 @@ def test_ascii_boundaries_are_preserved_in_lmdb(nonce):
 def test_invalid_nonce_is_rejected_without_consumption(nonce):
     credential = candidate()
     with dbing.openLMDB(cls=VerifierBaser) as baser:
-        baser.enqueue(VerificationRecord("candidate", "grant"))
-        baser.next_verification(now=0)
-        baser.finish(
+        ApplicationWriter(baser).enqueue_verification(
+            VerificationRecord("candidate", "grant")
+        )
+        verification_service(baser).next_verification(now=0)
+        verification_service(baser).finish(
             VerificationResult(
                 "candidate",
                 "verified",

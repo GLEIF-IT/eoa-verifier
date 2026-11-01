@@ -13,7 +13,9 @@ from eoa_verifier.persistence.records import (
     VerificationRecord,
     VerificationResult,
 )
+from eoa_verifier.persistence.writing import ApplicationWriter
 from tests.support.acceptance import accept_verified_result
+from tests.support.services import verification_service
 
 
 def test_duplicates_completion_and_restart(tmp_path):
@@ -21,24 +23,30 @@ def test_duplicates_completion_and_restart(tmp_path):
     baser = VerifierBaser(name="work", headDirPath=str(tmp_path), temp=False)
     try:
         verification = VerificationRecord("a", "first")
-        assert baser.enqueue(verification)
-        verification = baser.next_verification(now=0)
-        baser.defer_verification(
+        assert ApplicationWriter(baser).enqueue_verification(verification)
+        verification = verification_service(baser).next_verification(now=0)
+        verification_service(baser).defer_verification(
             verification, reason="missing source", next_attempt_at=5
         )
-        assert not baser.enqueue(VerificationRecord("a", "duplicate"))
-        baser.enqueue(VerificationRecord("b", "first"))
+        assert not ApplicationWriter(baser).enqueue_verification(
+            VerificationRecord("a", "duplicate")
+        )
+        ApplicationWriter(baser).enqueue_verification(VerificationRecord("b", "first"))
         result = VerificationResult(
             "b",
             "verified",
             eoaResult={"wallet": "wallet", "accountObservation": {"chainId": 31337}},
         )
-        baser.next_verification(now=0)
-        baser.finish(result)
-        baser.finish(result)
+        verification_service(baser).next_verification(now=0)
+        verification_service(baser).finish(result)
+        verification_service(baser).finish(result)
         with pytest.raises(ValueError, match="conflicting"):
-            baser.finish(VerificationResult("b", "rejected", "wrong"))
-        assert not baser.enqueue(VerificationRecord("b", "duplicate"))
+            verification_service(baser).finish(
+                VerificationResult("b", "rejected", "wrong")
+            )
+        assert not ApplicationWriter(baser).enqueue_verification(
+            VerificationRecord("b", "duplicate")
+        )
         baser.close()
         baser.reopen()
         assert baser.waiting.get(keys=("a",)) == VerificationRecord(
@@ -55,8 +63,8 @@ def test_completion_rollback_after_result_write():
     """A failure deleting pending work rolls back the result written in the same transaction."""
     with dbing.openLMDB(cls=VerifierBaser) as baser:
         verification = VerificationRecord("a", "first")
-        baser.enqueue(verification)
-        verification = baser.next_verification(now=0)
+        ApplicationWriter(baser).enqueue_verification(verification)
+        verification = verification_service(baser).next_verification(now=0)
         real_env = baser.env
 
         class FailingTransaction:
@@ -89,11 +97,13 @@ def test_completion_rollback_after_result_write():
             patch.object(baser, "env", FailingEnvironment()),
             pytest.raises(RuntimeError, match="between writes"),
         ):
-            baser.finish(VerificationResult("a", "verified"))
+            verification_service(baser).finish(VerificationResult("a", "verified"))
         assert baser.verifying.get(keys=("a",)) == verification
         assert baser.results.get(keys=("a",)) is None
         assert baser.accepting.cntAll() == 0
-        baser.finish(VerificationResult("a", "rejected", "invalid proof"))
+        verification_service(baser).finish(
+            VerificationResult("a", "rejected", "invalid proof")
+        )
         assert baser.pending.get(keys=("a",)) is None
         assert baser.results.get(keys=("a",)).reason == "invalid proof"
 
@@ -153,9 +163,13 @@ def test_failed_acceptance_rolls_back_status_and_event(verified_store):
 def test_rejected_result_cannot_create_acceptance_or_event(verified_store):
     """Rejected verification remains inspectable and never produces a success event."""
     baser = verified_store
-    baser.enqueue(VerificationRecord("rejected", "grant"))
-    baser.next_verification(now=0)
-    baser.finish(VerificationResult("rejected", "rejected", "wrong schema"))
+    ApplicationWriter(baser).enqueue_verification(
+        VerificationRecord("rejected", "grant")
+    )
+    verification_service(baser).next_verification(now=0)
+    verification_service(baser).finish(
+        VerificationResult("rejected", "rejected", "wrong schema")
+    )
     with pytest.raises(ValueError, match="verified result"):
         baser.accept(
             "rejected",

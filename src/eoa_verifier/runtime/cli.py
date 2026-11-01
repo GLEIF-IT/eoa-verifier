@@ -120,10 +120,10 @@ def main(argv=None):
         from keri.db import dbing
 
         from eoa_verifier.persistence.basing import VerifierBaser
-
         from eoa_verifier.persistence.reading import ApplicationReader
         from eoa_verifier.persistence.writing import ApplicationWriter
         from eoa_verifier.receiving.replaying import GrantReplayService
+        from eoa_verifier.verification.verifying import VerificationService
 
         try:
             with dbing.openLMDB(
@@ -135,7 +135,9 @@ def main(argv=None):
             ) as baser:
                 actions = {
                     "retry-delivery": baser.retry_delivery,
-                    "retry-verification": baser.retry_verification,
+                    "retry-verification": VerificationService(
+                        ApplicationReader(baser), ApplicationWriter(baser)
+                    ).retry,
                     "retry-grant": GrantReplayService(
                         ApplicationReader(baser), ApplicationWriter(baser)
                     ).retry,

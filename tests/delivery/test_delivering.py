@@ -20,7 +20,9 @@ from eoa_verifier.delivery.delivering import (
 )
 from eoa_verifier.persistence.basing import VerifierBaser
 from eoa_verifier.persistence.records import VerificationRecord, VerificationResult
+from eoa_verifier.persistence.writing import ApplicationWriter
 from tests.support.network import free_port
+from tests.support.services import verification_service
 
 
 @pytest.mark.parametrize(
@@ -134,9 +136,11 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
         else:
             server = http.Server(host="127.0.0.1", port=port, app=app)
             server_doer = http.ServerDoer(server=server)
-        baser.enqueue(VerificationRecord("association", "grant"))
-        baser.next_verification(now=0)
-        baser.finish(
+        ApplicationWriter(baser).enqueue_verification(
+            VerificationRecord("association", "grant")
+        )
+        verification_service(baser).next_verification(now=0)
+        verification_service(baser).finish(
             VerificationResult(
                 "association",
                 "verified",
@@ -250,9 +254,11 @@ def test_malformed_chunk_response_preserves_pending_delivery(tmp_path):
         hab = hby.makeHab(name="sender")
         server = tcp.Server(host="127.0.0.1", port=free_port())
         peer = BadResponsePeer(server=server)
-        baser.enqueue(VerificationRecord("association", "grant"))
-        baser.next_verification(now=0)
-        baser.finish(
+        ApplicationWriter(baser).enqueue_verification(
+            VerificationRecord("association", "grant")
+        )
+        verification_service(baser).next_verification(now=0)
+        verification_service(baser).finish(
             VerificationResult(
                 "association",
                 "verified",
@@ -300,9 +306,9 @@ def test_malformed_chunk_response_preserves_pending_delivery(tmp_path):
 
 def accept(baser, said):
     """Create a completed result and its event at one shared destination."""
-    baser.enqueue(VerificationRecord(said, "grant"))
-    baser.next_verification(now=0)
-    baser.finish(
+    ApplicationWriter(baser).enqueue_verification(VerificationRecord(said, "grant"))
+    verification_service(baser).next_verification(now=0)
+    verification_service(baser).finish(
         VerificationResult(
             said, "verified", eoaResult={"wallet": "wallet", "accountObservation": {}}
         )

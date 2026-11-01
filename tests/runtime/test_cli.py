@@ -2,7 +2,9 @@
 
 import pytest
 
+from eoa_verifier.persistence.writing import ApplicationWriter
 from eoa_verifier.runtime.cli import main
+from tests.support.services import verification_service
 
 
 def test_cli_documents_network_options_and_rejects_missing_config(capsys):
@@ -21,15 +23,18 @@ def test_cli_documents_network_options_and_rejects_missing_config(capsys):
 def test_retry_verification_command_uses_persistent_phase(tmp_path):
     """The operator command renews only an exhausted candidate's retry budget."""
     from keri.db import dbing
+
     from eoa_verifier.persistence.basing import VerifierBaser
     from eoa_verifier.persistence.records import VerificationRecord
 
     with dbing.openLMDB(
         cls=VerifierBaser, name="operator", headDirPath=str(tmp_path), temp=False
     ) as baser:
-        baser.enqueue(VerificationRecord("candidate", "grant"))
-        verification = baser.next_verification(now=0)
-        baser.defer_verification(
+        ApplicationWriter(baser).enqueue_verification(
+            VerificationRecord("candidate", "grant")
+        )
+        verification = verification_service(baser).next_verification(now=0)
+        verification_service(baser).defer_verification(
             verification, reason="RPC unavailable", next_attempt_at=5, max_attempts=1
         )
     arguments = [
