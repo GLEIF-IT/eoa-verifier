@@ -1,5 +1,9 @@
 # Standalone Verifier environment
 
+For the interactive Bash demo (automatic tool/dependency setup, separate wallet
+signing, issuance, revocation and visible webhooks), start with the
+[KERI integration guide](../../docs/keri-integration.md#turn-on-the-local-demo).
+
 Run from this repository root with Python 3.12.6+ and Anvil 1.5.1 on PATH. No
 Oracle, Comply, Solidity checkout or external schema service is required.
 Application code runs from an installed wheel in a run-owned virtual environment.

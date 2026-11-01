@@ -159,6 +159,8 @@ class Receiver:
             raise falcon.HTTPConflict(description=str(exc)) from exc
         except ValueError as exc:
             raise falcon.HTTPBadRequest(description=str(exc)) from exc
+        # Log only authenticated, durably stored public event bytes, including redelivery.
+        print("Webhook received " + statusEventBytes.decode(), flush=True)
         if self.drop_ack is not None and self.drop_ack():
             raise falcon.HTTPServiceUnavailable(
                 description="fixture dropped post-commit ACK"

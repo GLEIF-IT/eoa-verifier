@@ -118,3 +118,23 @@ def test_snapshot_refuses_source_overlap_before_writing(tmp_path, wheel_inputs):
     with pytest.raises(ValueError, match="outside its source"):
         copy(source, destination)
     assert not (source / "run").exists()
+
+
+def test_failed_preparation_retains_explicit_cleanup_ownership(tmp_path, monkeypatch):
+    """A dependency-install failure retains logs and ownership so cleanup needs no path guessing."""
+    from scripts.integration import environment
+
+    def failed_install(*args, **kwargs):
+        """Stop at the external dependency boundary, before any service process can start."""
+        raise RuntimeError("dependency unavailable")
+
+    monkeypatch.setattr(environment, "prepare_installation", failed_install)
+    root = tmp_path / "failed-demo"
+    with pytest.raises(RuntimeError, match="dependency unavailable"):
+        environment.prepare_run(
+            root, tmp_path / "source", witness_count=1, purpose="interactive-demo"
+        )
+    assert environment.load_run(root)["prepared"] is False
+    assert (root / "logs").is_dir()
+    environment.clean_run(root)
+    assert not root.exists()

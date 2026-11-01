@@ -5,6 +5,37 @@ signed agreement to an association. Receive accepted/revoked results through an
 ordinary JSON webhook without implementing KERI. On-chain publication is a separate
 Oracle step.
 
+## Setup and dependencies
+
+**Using a deployed Verifier:** you need an EIP-712-capable Ethereum wallet, your
+HTTPS webhook and an HTTP client such as curl. The operator/issuer team handles
+KERI, Python and chain configuration.
+
+**Trying everything locally:** use a Git checkout on macOS or Linux with Bash,
+Git, libsodium and either Python 3.12.6+ or [uv](https://docs.astral.sh/uv/getting-started/installation/).
+On macOS with Homebrew: `brew install uv libsodium`. For Linux setup, see the
+[advanced dependencies](keri-integration.md#setup-and-dependencies).
+
+From a fresh checkout (or skip clone/cd if already there):
+
+```sh
+git clone https://github.com/GLEIF-IT/eoa-verifier.git
+cd eoa-verifier
+./scripts/demo.sh run          # Set up infra, sign, issue, Grant, await accepted webhook
+./scripts/demo.sh revoke       # Revoke and await revoked webhook
+./scripts/demo.sh events       # Inspect both received JSON events
+./scripts/demo.sh logs --follow  # Watch receiver logs; Ctrl-C stops viewing
+./scripts/demo.sh down         # Stop processes; keep identities and chain state
+```
+
+First start installs isolated Python dependencies and reuses Foundry 1.5.1 or
+fetches its checksum-pinned release. It starts a witness/schema host, funded Anvil
+chain 31337, Verifier and visible webhook receiver, and creates a local test LE
+holder. The two public demo wallets receive 1,000 test ETH each. No Docker, Oracle,
+contract deployment or real credentials are needed. Default state is
+`~/.local/share/eoa-verifier/demo`; use `./scripts/demo.sh --run-dir /tmp/my-demo run`
+for another instance. These test identities/keys are not for real assets or vLEI use.
+
 ## Agree on the integration
 
 The deployment operator supplies the Verifier URL and configures your HTTPS webhook

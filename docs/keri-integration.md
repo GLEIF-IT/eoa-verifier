@@ -6,6 +6,124 @@ end-to-end diagram and receiver workflow. This guide covers the KERI side of tha
 same integration; the [Verifier protocol](../protocol/verifier-api-v1/README.md)
 owns the wire contract.
 
+## Setup and dependencies
+
+For a hosted integration, prepare the LE holder's KERI issuer stack and an
+Ethereum wallet capable of signing EIP-712; receive results at your HTTPS endpoint.
+To run the Verifier yourself, use Python 3.12.6+, libsodium, a trusted Ethereum RPC,
+and the agreed GEDA/network configuration. Use a fresh virtual environment so the
+pinned GLEIF KERI/HIO packages own their imports; see [operations](operations.md).
+
+For the turnkey demo, use macOS or glibc Linux (Intel/ARM), Bash, Git, libsodium
+and Python 3.12.6+ or uv. For example:
+
+```sh
+# macOS, with Homebrew already installed:
+brew install git uv libsodium
+
+# Debian/Ubuntu: install native prerequisites, then uv if needed:
+sudo apt-get update
+sudo apt-get install git curl libsodium-dev
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# Open a new shell so uv is on PATH.
+```
+
+See [uv installation](https://docs.astral.sh/uv/getting-started/installation/) for
+other installation methods. The Bash launcher supplies Homebrew's libsodium search
+path on macOS. For manual Python/service startup outside the launcher, set
+`DYLD_FALLBACK_LIBRARY_PATH` to include `$(brew --prefix libsodium)/lib` if the
+loader cannot find libsodium. First start needs network access to Python packages
+and GitHub releases. The demo builds/installs a wheel in a run-owned venv and
+reuses matching Foundry 1.5.1 tools or downloads/verifies the official archive into
+`~/.cache/eoa-verifier/foundry` (or `$XDG_CACHE_HOME/eoa-verifier/foundry`). It does
+not change your global Foundry installation or shell profile. Forge is included;
+no contracts need compiling/deploying for this Verifier-only flow.
+
+## Turn on the local demo
+
+From the repository root, one command prepares a witnessed GEDA/QVI/LE test chain,
+starts the witness/schema host, Anvil, installed Verifier and independent signed
+webhook receiver, then signs/issues/presents an association:
+
+```sh
+./scripts/demo.sh run
+./scripts/demo.sh status
+./scripts/demo.sh revoke
+./scripts/demo.sh events
+```
+
+Success waits for public `accepted`/`revoked` status **and** `delivery.delivered`.
+The receiver logs each authenticated, stored event as `Webhook received {...}`:
+
+```sh
+./scripts/demo.sh logs --follow                 # Receiver, including full payloads
+./scripts/demo.sh logs --service verifier       # Current Verifier log
+./scripts/demo.sh down                          # Stop; preserve stores and chain
+./scripts/demo.sh up                            # Reopen the same run
+./scripts/demo.sh clean                         # Only after down; delete demo state
+```
+
+Anvil runs on chain 31337 and funds public test wallets 1 and 2 with 1,000 test ETH
+once. Their keys are explicitly public in
+[`wallet.py`](../scripts/integration/wallet.py); never send real assets to them.
+Restart retains balances, identities, credentials, consumed nonces and received
+events. `status` lists dynamically selected loopback URLs, AIDs and artifact paths.
+No fixed ports or external Oracle/Comply checkout are required. One controller
+operates a run at a time; a foreign listener/process is never adopted or killed.
+
+For a second demo, put the global option before the command:
+
+```sh
+./scripts/demo.sh --run-dir /tmp/another-eoa-demo run
+./scripts/demo.sh --run-dir /tmp/another-eoa-demo revoke
+./scripts/demo.sh --run-dir /tmp/another-eoa-demo down
+```
+
+The default root is `~/.local/share/eoa-verifier/demo`. Preparation snapshots source
+and records wheel/content hashes. Restart uses that snapshot; after code changes,
+choose a fresh root or stop/clean/recreate the disposable demo. It creates a local
+test LE credential/holder; it does not import an existing production holder's keys
+or claim GLEIF production authority. Existing LE holders use their own KERI stack
+with the protocol steps below.
+
+## Drive the wallet and issuer separately
+
+To inspect every step instead of using `run`:
+
+```sh
+./scripts/demo.sh up
+./scripts/demo.sh challenge --wallet 1  # Prints the exact challenge/signature paths
+./scripts/demo.sh sign                 # Public test wallet signs challenge.json
+./scripts/demo.sh issue                # Local LE holder issues the association
+./scripts/demo.sh present              # IPEX Grant -> acceptance -> webhook
+./scripts/demo.sh revoke               # Issuer TEL revocation -> revoked webhook
+./scripts/demo.sh events
+```
+
+Each challenge defaults to a fresh nonce and gets its own directory under
+`ceremonies/`; previous signed artifacts stay available. `--nonce` can deliberately
+reuse one to exercise Verifier rejection; the issuer does not claim nonces. `issue` prints the credential SAID; `revoke --said SAID`
+selects an earlier accepted demo association. Repeated revocation of an already
+delivered revocation is harmless. `run --wallet 2` starts another independent
+ceremony. The Verifier's permanent nonce policy remains unchanged.
+
+For an external Ethereum wallet, generate typed data for its lowercase address:
+
+```sh
+./scripts/demo.sh challenge --wallet-address 0xYOUR_LOWERCASE_40_HEX_ADDRESS
+# Sign the returned challenge.json through your wallet's EIP-712 interface.
+# Save its result as JSON: {"signature":"0x..."} in /tmp/wallet-signature.json.
+./scripts/demo.sh issue --signature-file /tmp/wallet-signature.json
+./scripts/demo.sh present
+./scripts/demo.sh revoke
+```
+
+Use the RPC URL from `status` and chain 31337 when connecting an external wallet.
+`sign` accepts only the numbered public test keys. The external wallet's private
+key never enters the issuer process. Its signature must match the exported
+challenge, local LE holder and chain before TEL issuance starts. Revocation is
+performed by that LE issuer and needs no new Ethereum wallet signature.
+
 ## Establish the credential chain and service identity
 
 ```text
