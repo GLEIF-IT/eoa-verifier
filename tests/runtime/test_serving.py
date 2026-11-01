@@ -122,10 +122,10 @@ def test_webhook_timings_reach_sender_and_reject_invalid_config(config):
     )
     with verifier_service(configured) as service:
         assert (
-            service.sender.timeout,
-            service.sender.interval,
-            service.sender.backoff_base,
-            service.sender.backoff_cap,
+            service.sender.service.transport.timeout,
+            service.sender.service.interval,
+            service.sender.service.backoff_base,
+            service.sender.service.backoff_cap,
         ) == (7, 2, 3, 20)
     with pytest.raises(ValueError, match="positive"):
         replace(configured, webhook_interval=0)

@@ -106,6 +106,21 @@ class ApplicationReader:
             for table in (self._db.results, self._db.associations, self._db.outbox)
         )
 
+    def delivery_reference(self, phase, event_id=None):
+        """Read one scheduling reference, never discover work from outbox history."""
+        table = {
+            "active": self._db.delivery_active,
+            "ready": self._db.delivery_ready,
+            "dead": self._db.delivery_dead,
+        }[phase]
+        if phase == "active":
+            return table.get(keys=("sender",))
+        return table.get(keys=(event_id,)) if event_id else first_record(table)
+
+    def destination_schedule(self, destination):
+        """Return a detached destination pacing/backoff record."""
+        return self._db.destinations.get(keys=(destination,))
+
 
 def record_page(table, after, limit):
     """Copy bounded key/record pairs and release the cursor before returning."""

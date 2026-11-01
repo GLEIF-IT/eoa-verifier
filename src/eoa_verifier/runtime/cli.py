@@ -120,6 +120,7 @@ def main(argv=None):
         from keri.db import dbing
 
         from eoa_verifier.associations.accepting import AcceptanceService
+        from eoa_verifier.delivery.delivering import DeliveryService
         from eoa_verifier.persistence.basing import VerifierBaser
         from eoa_verifier.persistence.reading import ApplicationReader
         from eoa_verifier.persistence.writing import ApplicationWriter
@@ -135,7 +136,9 @@ def main(argv=None):
                 temp=False,
             ) as baser:
                 actions = {
-                    "retry-delivery": baser.retry_delivery,
+                    "retry-delivery": DeliveryService(
+                        ApplicationReader(baser), ApplicationWriter(baser)
+                    ).retry,
                     "retry-verification": VerificationService(
                         ApplicationReader(baser), ApplicationWriter(baser)
                     ).retry,

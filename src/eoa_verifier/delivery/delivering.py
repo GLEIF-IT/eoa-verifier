@@ -1,31 +1,19 @@
-"""One-at-a-time webhook attempts; delivery policy stays outside authentication."""
+"""One-item delivery policy over prepared atomic saves and a signed HTTP effect."""
 
 import json
 import math
 import random
 import ssl
 import time
+from dataclasses import replace
 from email.utils import parsedate_to_datetime
 
 from hio.base import doing
-from hio.core import http
 
-from .authing import AuthenticationError, ServiceAuthenticator
+from eoa_verifier.persistence.records import DeliveryReference
 
-
-class _ClientDoer(http.ClientDoer):
-    """Contain socket/framing failure in one attempt; HIO exit still owns socket cleanup."""
-
-    error = None
-
-    def recur(self, tyme):
-        """Let the sender record a failed attempt instead of stopping the service."""
-        try:
-            return super().recur(tyme)
-        except (OSError, ValueError) as error:
-            # HIO chunk-size parsing raises ValueError outside its HTTPException path.
-            self.error = error
-            return True
+from .authing import AuthenticationError
+from .httping import WebhookHttp
 
 
 class _TransientFailure(Exception):
@@ -36,30 +24,24 @@ class _TransientFailure(Exception):
         self.retry_after = retry_after
 
 
-class WebhookSender(doing.DoDoer):
-    """Own sequential attempts, destination pacing and authenticated completion.
-
-    Resume the durable active delivery across restart. Transient failures cool
-    down every event for that destination; permanent failures wait for correction and explicit
-    request(event_id). Reuse stored bytes/target but sign every attempt anew.
-    The injected UTC clock and uniform random source permit deterministic policy tests.
-    """
+class DeliveryService:
+    """Own work selection, attempts, backoff and authenticated ACK policy."""
 
     def __init__(
         self,
+        reader,
+        writer,
+        transport=None,
         *,
-        baser,
-        hab,
-        timeout=10.0,
         interval=1.0,
         backoff_base=1.0,
         backoff_cap=150.0,
         clock=time.time,
         uniform=random.uniform,
         max_attempts=3,
-        **kwa,
     ):
-        self.baser, self.hab, self.timeout = baser, hab, timeout
+        """Borrow adapters; transport is unnecessary for offline recovery operations."""
+        self.reader, self.writer, self.transport = reader, writer, transport
         self.interval, self.backoff_base, self.backoff_cap = (
             interval,
             backoff_base,
@@ -69,62 +51,122 @@ class WebhookSender(doing.DoDoer):
         if max_attempts < 1:
             raise ValueError("max_attempts must be positive")
         self.max_attempts = max_attempts
-        super().__init__(doers=[doing.doify(self.send_do)], **kwa)
 
-    def request(self, event_id):
-        """Resume an event after correcting its failure; still respect destination cooldown."""
-        self.baser.retry_delivery(event_id)
+    def next_delivery(self):
+        """Resume active work before claiming the ready head; never scan outbox history."""
+        reference = self.reader.delivery_reference("active")
+        if reference is None:
+            reference = self.reader.delivery_reference("ready")
+            if reference is None:
+                return None
+            self.writer.activate_delivery(reference)
+        delivery = self.reader.delivery(reference.eventId)
+        if delivery is None:
+            raise ValueError("scheduled delivery event is absent")
+        return delivery
 
-    def send_do(self, tymth, tock=0.0, **opts):
-        """Advance only durable delivery phases, closing each client before the next."""
-        yield tock
-        while True:
-            delivery = self.baser.next_delivery()
-            if delivery is None:
-                yield self.tock
-                continue
-            event_id = delivery.eventId
-            associationStatus = self.baser.associations.get(
-                keys=(delivery.associationSaid,)
+    def retry(self, event_id):
+        """Reset a corrected dead letter without resetting destination cooldown."""
+        reference = self.reader.delivery_reference("dead", event_id)
+        if reference is None:
+            raise ValueError("unknown dead-letter event")
+        previous = self.reader.delivery(event_id)
+        delivery = replace(previous, blocked=False, error="", attempts=0)
+        self.writer.retry_delivery(previous, delivery, reference)
+
+    def record_attempt(self, event_id, *, next_attempt_at=None):
+        """Prepare durable attempt accounting and request-start pacing before I/O."""
+        previous = self.reader.delivery(event_id)
+        if previous is None:
+            raise ValueError("unknown delivery event")
+        if previous.acknowledged:
+            return previous
+        delivery = replace(
+            previous,
+            attempts=previous.attempts + 1,
+            blocked=False,
+            error="attempt started; authenticated ACK not recorded",
+        )
+        schedule = None
+        if next_attempt_at is not None:
+            schedule = self.reader.destination_schedule(delivery.destination)
+            schedule = replace(
+                schedule, nextAttemptAt=max(schedule.nextAttemptAt, next_attempt_at)
             )
-            if (
-                associationStatus is None
-                or associationStatus.status not in ("accepted", "revoked")
-                or associationStatus.eventId != event_id
-            ):
-                self.baser.delivery_result(
-                    event_id,
-                    error="event is no longer the current association status",
-                    blocked=True,
-                )
-                continue
-            schedule = self.baser.destinations.get(keys=(delivery.destination,))
-            if schedule.nextAttemptAt > self.clock():
-                yield self.tock
-                continue
-            yield from self._attempt(delivery)
-            yield self.tock
+        self.writer.save_delivery(previous, delivery, schedule)
+        return delivery
 
-    def _attempt(self, delivery):
-        """Persist pacing before I/O, then atomically record the result and cooldown."""
-        if delivery.attempts >= self.max_attempts:
-            self.baser.delivery_result(
-                delivery.eventId, error="delivery attempt limit reached", blocked=True
+    def complete(self, event_id, *, outcome, error="", schedule=None):
+        """Persist an explicit acknowledged, retry or dead-letter outcome."""
+        if outcome not in ("acknowledged", "retry", "dead-letter"):
+            raise ValueError("unknown delivery outcome")
+        previous = self.reader.delivery(event_id)
+        if previous is None:
+            raise ValueError("unknown delivery event")
+        if previous.acknowledged:
+            return
+        acknowledged, blocked = outcome == "acknowledged", outcome == "dead-letter"
+        delivery = replace(
+            previous, error=error, blocked=blocked, acknowledged=acknowledged
+        )
+        if acknowledged:
+            schedule = replace(
+                self.reader.destination_schedule(delivery.destination), failures=0
+            )
+        self.writer.save_delivery(
+            previous,
+            delivery,
+            schedule,
+            completed=acknowledged or blocked,
+            dead=DeliveryReference(event_id) if blocked else None,
+        )
+
+    def process_one(self):
+        """Advance one ready/current event, yielding only through its HTTP effect."""
+        delivery = self.next_delivery()
+        if delivery is None:
+            return
+        status = self.reader.association(delivery.associationSaid)
+        if (
+            status is None
+            or status.status not in ("accepted", "revoked")
+            or status.eventId != delivery.eventId
+        ):
+            self.complete(
+                delivery.eventId,
+                outcome="dead-letter",
+                error="event is no longer the current association status",
             )
             return
-        delivery = self.baser.record_attempt(
+        if (
+            self.reader.destination_schedule(delivery.destination).nextAttemptAt
+            <= self.clock()
+        ):
+            yield from self.attempt(delivery)
+
+    def attempt(self, delivery):
+        """Persist pacing before HTTP; prepare the explicit result after it returns."""
+        if delivery.attempts >= self.max_attempts:
+            self.complete(
+                delivery.eventId,
+                outcome="dead-letter",
+                error="delivery attempt limit reached",
+            )
+            return
+        delivery = self.record_attempt(
             delivery.eventId, next_attempt_at=self.clock() + self.interval
         )
         try:
-            yield from self._send(delivery)
+            yield from self.send(delivery)
         except (AuthenticationError, ValueError, ssl.SSLCertVerificationError) as error:
-            self.baser.delivery_result(
-                delivery.eventId, error=str(error) or type(error).__name__, blocked=True
+            self.complete(
+                delivery.eventId,
+                outcome="dead-letter",
+                error=str(error) or type(error).__name__,
             )
         except (_TransientFailure, OSError) as error:
-            schedule = self.baser.destinations.get(keys=(delivery.destination,))
-            schedule.failures += 1
-            # Bound the exponent independently of the configured attempt budget.
+            schedule = self.reader.destination_schedule(delivery.destination)
+            schedule = replace(schedule, failures=schedule.failures + 1)
             exponent = min(
                 schedule.failures - 1,
                 math.ceil(math.log2(self.backoff_cap / self.backoff_base)),
@@ -133,55 +175,27 @@ class WebhookSender(doing.DoDoer):
             delay = max(
                 self.uniform(lower, 2 * lower), getattr(error, "retry_after", 0.0)
             )
-            schedule.nextAttemptAt = max(schedule.nextAttemptAt, self.clock() + delay)
-            self.baser.delivery_result(
+            schedule = replace(
+                schedule,
+                nextAttemptAt=max(schedule.nextAttemptAt, self.clock() + delay),
+            )
+            self.complete(
                 delivery.eventId,
+                outcome="dead-letter"
+                if delivery.attempts >= self.max_attempts
+                else "retry",
                 error=str(error) or type(error).__name__,
                 schedule=schedule,
-                blocked=delivery.attempts >= self.max_attempts,
             )
         else:
-            self.baser.delivery_result(delivery.eventId)
+            self.complete(delivery.eventId, outcome="acknowledged")
 
-    def _send(self, delivery):
-        """Yield through one signed HTTP request and validate its complete ACK contract.
+    def send(self, delivery):
+        """Authenticate and validate the response produced by the signed HTTP adapter."""
+        auth, requestAuth, response = yield from self.transport.send(delivery)
+        self.check_response(delivery, auth, requestAuth, response)
 
-        The receiver must return HTTP 200, authenticate the actual response bytes
-        and this request reference, and return exactly {eventId, stored: true}.
-        A valid signature on an error response never establishes delivery success.
-        This component, not ServiceAuthenticator, owns that decision.
-        """
-        auth = ServiceAuthenticator(
-            hab=self.hab, baser=self.baser, peer_aid=delivery.peerAid
-        )
-        body = delivery.body.encode("utf-8")
-        headers, requestAuth = auth.sign(
-            method="POST", target=delivery.destination, action="status", body=body
-        )
-        client = http.Client(
-            path=delivery.destination, reconnectable=False, redirectable=False
-        )
-        child = _ClientDoer(client=client)
-        try:
-            self.extend([child])
-            deadline = self.tyme + self.timeout
-            client.request(method="POST", headers=headers, body=body)
-            while not client.responses:
-                if child.error is not None:
-                    raise child.error
-                if self.tyme >= deadline:
-                    raise TimeoutError("webhook request timed out")
-                yield self.tock
-            response = client.responses.popleft()
-            if response["errored"] and client.connector.cutoff:
-                raise ConnectionError(
-                    "webhook connection closed before a complete response"
-                )
-            self._check_response(delivery, auth, requestAuth, response)
-        finally:
-            self.remove([child])
-
-    def _check_response(self, delivery, auth, requestAuth, response):
+    def check_response(self, delivery, auth, requestAuth, response):
         """Require HTTP success and the signed ACK for this attempt and event."""
         if response["errored"]:
             raise ValueError(f"webhook HTTP framing: {response['error']}")
@@ -216,6 +230,46 @@ class WebhookSender(doing.DoDoer):
             raise ValueError(
                 "webhook ACK does not confirm storage of the expected event"
             )
+
+
+class WebhookSender(doing.DoDoer):
+    """Schedule one delivery operation and own its temporary HTTP child tasks."""
+
+    def __init__(
+        self,
+        *,
+        reader,
+        writer,
+        keys,
+        timeout=10.0,
+        interval=1.0,
+        backoff_base=1.0,
+        backoff_cap=150.0,
+        clock=time.time,
+        uniform=random.uniform,
+        max_attempts=3,
+        **kwa,
+    ):
+        """Compose the delivery service with this scheduler's HTTP client adapter."""
+        self.service = DeliveryService(
+            reader,
+            writer,
+            WebhookHttp(self, keys, writer.claim_nonce, timeout=timeout),
+            interval=interval,
+            backoff_base=backoff_base,
+            backoff_cap=backoff_cap,
+            clock=clock,
+            uniform=uniform,
+            max_attempts=max_attempts,
+        )
+        super().__init__(doers=[doing.doify(self.send_do)], **kwa)
+
+    def send_do(self, tymth, tock=0.0, **opts):
+        """Yield after every single operation, including stale/dead-letter decisions."""
+        yield tock
+        while True:
+            yield from self.service.process_one()
+            yield self.tock
 
 
 def _retry_after(value, now):

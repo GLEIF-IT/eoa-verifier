@@ -7,7 +7,10 @@ from hio.core import http
 from keri.app import habbing
 
 from eoa_verifier.delivery.authing import ServiceAuthenticator
-from eoa_verifier.delivery.delivering import WebhookSender
+from eoa_verifier.delivery.delivering import DeliveryService, WebhookSender
+from eoa_verifier.delivery.keys import ServiceKeys
+from eoa_verifier.persistence.reading import ApplicationReader
+from eoa_verifier.persistence.writing import ApplicationWriter
 from scripts.integration.receiver import ReceiptStore, Receiver
 from tests.support.acceptance import acceptance_service
 from tests.support.network import free_port
@@ -32,7 +35,9 @@ def test_real_sender_recovers_commit_ack_gaps(
         target = f"http://127.0.0.1:{port}/hook"
         store = ReceiptStore(receiver.db)
         auth = ServiceAuthenticator(
-            hab=receiver_hab, baser=store, peer_aid=sender_hab.pre
+            keys=ServiceKeys(receiver_hab),
+            claim_nonce=store.claim_nonce,
+            peer_aid=sender_hab.pre,
         )
         app = falcon.App()
         app.add_route("/hook", Receiver(auth, store, target, False))
@@ -54,7 +59,12 @@ def test_real_sender_recovers_commit_ack_gaps(
 
         def attempt(*, expect_failure=False):
             """Own native HTTP tasks until exactly one durable sender attempt settles."""
-            sender = WebhookSender(baser=baser, hab=sender_hab, timeout=1)
+            sender = WebhookSender(
+                reader=ApplicationReader(baser),
+                writer=ApplicationWriter(baser),
+                keys=ServiceKeys(sender_hab),
+                timeout=1,
+            )
             starting = baser.outbox.get(keys=(associationStatus.eventId,)).attempts
 
             def settled(tymth, tock=0.0, **kwargs):
@@ -85,7 +95,7 @@ def test_real_sender_recovers_commit_ack_gaps(
             if gap == "before-ack":
                 patch.setattr(auth, "sign", fail)
             elif gap == "before-sender-completion":
-                patch.setattr(baser, "delivery_result", fail)
+                patch.setattr(DeliveryService, "complete", fail)
             attempt(expect_failure=(gap == "before-sender-completion"))
 
         committed = store.events.get(keys=(associationStatus.eventId,))
@@ -98,7 +108,7 @@ def test_real_sender_recovers_commit_ack_gaps(
             receiver.db.close(clear=False)
             receiver.db.reopen()
             store = ReceiptStore(receiver.db)
-            auth.baser = store
+            auth.claim_nonce = store.claim_nonce
             app = falcon.App()
             app.add_route("/hook", Receiver(auth, store, target, False))
             server = http.ServerDoer(

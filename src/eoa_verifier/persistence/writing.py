@@ -243,3 +243,71 @@ class ApplicationWriter:
             if existing is not None and existing != raw:
                 raise ValueError("verifier scope changed")
             txn.put(b"verification", raw, db=db.scope.sdb, overwrite=False)
+
+    def claim_nonce(self, peer, nonce, expires_at):
+        """Atomically reserve an authenticated transport nonce without overwriting replay history."""
+        from .records import ReplayClaim
+
+        return self._db.replay_claims.put(
+            keys=(peer, nonce), val=ReplayClaim(expires_at)
+        )
+
+    def activate_delivery(self, reference):
+        """Move the expected ready reference to the single active sender slot."""
+        db = self._db
+        key, raw = reference.eventId.encode(), db.delivery_ready.serializer(reference)
+        active_raw = db.delivery_active.serializer(reference)
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.delivery_ready.sdb) != raw:
+                raise ValueError("ready delivery changed")
+            if txn.get(b"sender", db=db.delivery_active.sdb) is not None:
+                raise ValueError("sender already has active delivery")
+            txn.put(b"sender", active_raw, db=db.delivery_active.sdb)
+            txn.delete(key, db=db.delivery_ready.sdb)
+
+    def save_delivery(
+        self, previous, delivery, schedule=None, *, completed=False, dead=None
+    ):
+        """Persist prepared progress/schedule and optional phase cleanup in one transaction.
+
+        An exact reference comparison keeps a late completion from clearing another
+        active item. No ACK, error or retry policy runs in this save operation.
+        """
+        from .records import DeliveryReference
+
+        db = self._db
+        key = delivery.eventId.encode()
+        expected, raw = db.outbox.serializer(previous), db.outbox.serializer(delivery)
+        schedule_key = delivery.destination.encode() if schedule else None
+        schedule_raw = db.destinations.serializer(schedule) if schedule else None
+        active_raw = db.delivery_active.serializer(DeliveryReference(delivery.eventId))
+        dead_raw = db.delivery_dead.serializer(dead) if dead else None
+        with db.env.begin(write=True) as txn:
+            if txn.get(key, db=db.outbox.sdb) != expected:
+                raise ValueError("delivery changed before completion")
+            txn.put(key, raw, db=db.outbox.sdb)
+            if completed:
+                txn.delete(key, db=db.delivery_ready.sdb)
+                if txn.get(b"sender", db=db.delivery_active.sdb) == active_raw:
+                    txn.delete(b"sender", db=db.delivery_active.sdb)
+            if dead_raw is not None:
+                txn.put(key, dead_raw, db=db.delivery_dead.sdb)
+            if schedule_raw is not None:
+                txn.put(schedule_key, schedule_raw, db=db.destinations.sdb)
+
+    def retry_delivery(self, previous, delivery, reference):
+        """Save a prepared reset and move its expected dead reference back to ready."""
+        db = self._db
+        key, raw = delivery.eventId.encode(), db.outbox.serializer(delivery)
+        expected = db.outbox.serializer(previous)
+        dead_raw = db.delivery_dead.serializer(reference)
+        ready_raw = db.delivery_ready.serializer(reference)
+        with db.env.begin(write=True) as txn:
+            if (
+                txn.get(key, db=db.delivery_dead.sdb) != dead_raw
+                or txn.get(key, db=db.outbox.sdb) != expected
+            ):
+                raise ValueError("dead-letter delivery changed")
+            txn.put(key, raw, db=db.outbox.sdb)
+            txn.put(key, ready_raw, db=db.delivery_ready.sdb)
+            txn.delete(key, db=db.delivery_dead.sdb)
