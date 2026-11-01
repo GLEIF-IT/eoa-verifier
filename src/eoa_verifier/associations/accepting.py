@@ -7,7 +7,7 @@ from keri import kering
 class AcceptanceDoer(doing.Doer):
     """Commit application acceptance using borrowed evidence and result stores.
 
-    A bounded result scan recovers completion-to-acceptance gaps after restart.
+    The accepting phase recovers completion-to-acceptance gaps after restart.
     Read locally stored issuance evidence; do not repeat cryptographic or account
     verification. Missing local evidence leaves the completed result available for
     recovery. Existing accepted status never expires or gets reverified here.
@@ -20,8 +20,8 @@ class AcceptanceDoer(doing.Doer):
         super().__init__(**kwa)
 
     def recur(self, tyme):
-        """Inspect one result page per turn, retaining KERIpy/application store separation."""
-        page = self.baser.result_batch(after=self.after)
+        """Inspect one unfinished acceptance per turn, retaining KERIpy/application store separation."""
+        page = self.baser.acceptance_batch(after=self.after)
         if not page:
             self.after = ""
         for result in page:

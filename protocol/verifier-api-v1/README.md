@@ -53,11 +53,16 @@ reassessments. Initial source-chain validation remains mandatory.
 
 ## Delivery and revocation
 
-The sender rediscovers pending events across restart, validates HTTP success,
+The sender resumes explicit LMDB delivery phases across restart, validates HTTP success,
 the signed request reference and event-storage acknowledgment before completion, and
 signs every retry anew. Permanent failures stay blocked until correction and
-explicit resumption; transient failures retry automatically. Acceptance events replaced by terminal retirement
+explicit resumption; transient failures retry up to a finite attempt budget. Acceptance events replaced by terminal retirement
 remain stored but are not sent after retirement.
+
+Completed verification queues acceptance atomically. Acceptance consumes that
+phase and queues its webhook obligation atomically. Delivery references move from
+ready to one active slot, then leave active work on ACK or move to dead letters.
+Completed results and outbox history are never scanned to discover delivery work.
 
 Persist acceptance and its webhook obligation together. Deliver after commit;
 the receiver durably stores the status before acknowledging. Retry unacknowledged
@@ -65,7 +70,7 @@ events across restart, preserving event identity and duplicate-safe processing.
 
 Use one HIO sender per configured destination. Configurable defaults are one
 request in flight, at least one second between starts (including successes),
-and a 10-second overall request timeout. Transient failures use jittered
+a 10-second overall request timeout, and three attempts per event before dead-lettering. Transient failures use jittered
 exponential backoff from 1–2 seconds to a 150–300-second cap; valid `Retry-After`
 can extend that delay. Persist destination-wide cooldown across restart, reset
 failures only on an authenticated ACK, and retain permanent errors for correction.

@@ -84,7 +84,8 @@ Retiring an old association does not retire its replacement.
 ## Delivery failures
 
 Transient network/HTTP failures retry automatically with persisted destination
-cooldown. Each attempt signs the same immutable event bytes anew. Only an expected
+cooldown, up to `--webhook-max-attempts` (default three). Exhaustion moves the event
+to the durable dead-letter queue. Each attempt signs the same immutable event bytes anew. Only an expected
 authenticated HTTP 200 ACK completes it. Observation age never triggers refresh.
 Malformed HTTP chunk framing closes the affected client without stopping sibling
 tasks. RPC observations remain retryable; malformed webhook responses leave their
@@ -98,27 +99,24 @@ Local operators can inspect `store.destinations.get(keys=(event.destination,))`
 for the destination's failure count and `nextAttemptAt` (UTC Unix seconds). These
 scheduling records remain durable and drive the sender; they are absent from public GET.
 
-An embedding application can call `service.sender.request(event_id)`. For a
-standalone process, stop it and use its installed Python to unblock the **current**
-event with the same store coordinates, then restart. This preserves the event and destination cooldown, recording the
-retry request as its current reason; it does not mark an ACK:
+Acceptance and delivery are distinct durable phases. `accepting.` contains only
+unfinished acceptance; `delivery-ready.` and the single `delivery-active.` slot
+contain unfinished outbound work. `delivery-dead.` retains exhausted/permanent
+failures. Completed verification/results and immutable outbox history are not
+scanned to discover delivery work. These are breaking storage changes; use fresh
+stores rather than expecting backfill or migration.
 
-```python
-from keri.db import dbing
-from eoa_verifier.persistence.basing import VerifierBaser
+After correcting the cause, stop the service and resume the current dead letter:
 
-with dbing.openLMDB(cls=VerifierBaser, name="verifier", base="",
-                   headDirPath="/var/lib/eoa-verifier", temp=False) as store:
-    event_id = "<association-said>:<status-revision>"  # From the public status response.
-    event = store.outbox.get(keys=(event_id,))
-    if event is None or event.acknowledged:
-        raise ValueError("event is unknown or already acknowledged")
-    status = store.associations.get(keys=(event.associationSaid,))
-    if status.eventId != event_id:
-        raise ValueError("only the current association event can resume")
-    store.delivery_result(event_id, error="operator requested retry after correction",
-                          blocked=False)
+```sh
+eoa-verifier retry-delivery "$EVENT_ID" --name verifier --head-dir /var/lib/eoa-verifier
 ```
+
+Use the same name/base/head directory as startup, then restart. An embedding
+application can call `service.sender.request(event_id)`. Both paths explicitly
+requeue a dead letter and reset its bounded attempt budget, retaining immutable
+event bytes and destination cooldown. They never mark an ACK. An obsolete event
+remains ineligible for delivery even if an operator retries it.
 
 Do not edit event bytes, delete replay records or clear accepted/revoked status to
 retry delivery. There is no retry REST route. Undelivered revocation can leave a

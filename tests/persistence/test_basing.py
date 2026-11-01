@@ -42,6 +42,7 @@ def test_duplicates_completion_and_restart(tmp_path):
         )
         assert baser.pending.get(keys=("b",)) is None
         assert baser.results.get(keys=("b",)) == result
+        assert baser.acceptance_batch() == [result]
     finally:
         baser.close()
 
@@ -86,6 +87,7 @@ def test_completion_rollback_after_result_write():
             baser.finish(VerificationResult("a", "verified"))
         assert baser.pending.get(keys=("a",)) == work
         assert baser.results.get(keys=("a",)) is None
+        assert baser.accepting.cntAll() == 0
         baser.finish(VerificationResult("a", "rejected", "invalid proof"))
         assert baser.pending.get(keys=("a",)) is None
         assert baser.results.get(keys=("a",)).reason == "invalid proof"
@@ -97,6 +99,8 @@ def test_acceptance_and_delivery_progress_survive_reopen(verified_store):
     baser.close()
     baser.reopen()
     accepted = accept_verified_result(baser)
+    assert baser.acceptance_batch() == []
+    assert baser.delivery_ready.get(keys=(accepted.eventId,)) is not None
     baser.record_attempt(accepted.eventId)
     baser.delivery_result(accepted.eventId, error="connection failed")
     event = baser.outbox.get(keys=(accepted.eventId,))

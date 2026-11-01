@@ -11,6 +11,7 @@ from .records import (
     AcceptedNonce,
     AssociationStatus,
     Delivery,
+    DeliveryReference,
     DestinationSchedule,
     PendingVerification,
     ReplayClaim,
@@ -46,6 +47,18 @@ class VerifierBaser(dbing.LMDBer):
             db=self, subkey="accepted_nonces.", schema=AcceptedNonce
         )
         self.outbox = koming.Komer(db=self, subkey="outbox.", schema=Delivery)
+        self.accepting = koming.Komer(
+            db=self, subkey="accepting.", schema=VerificationResult
+        )
+        self.delivery_ready = koming.Komer(
+            db=self, subkey="delivery-ready.", schema=DeliveryReference
+        )
+        self.delivery_active = koming.Komer(
+            db=self, subkey="delivery-active.", schema=DeliveryReference
+        )
+        self.delivery_dead = koming.Komer(
+            db=self, subkey="delivery-dead.", schema=DeliveryReference
+        )
         self.destinations = koming.Komer(
             db=self, subkey="destinations.", schema=DestinationSchedule
         )
@@ -108,6 +121,8 @@ class VerifierBaser(dbing.LMDBer):
             if txn.get(key, db=self.pending.sdb) is None:
                 raise ValueError("pending work is absent")
             txn.put(key, self.results.serializer(result), db=self.results.sdb)
+            if result.status == "verified":
+                txn.put(key, self.accepting.serializer(result), db=self.accepting.sdb)
             txn.delete(key, db=self.pending.sdb)
 
     def pending_batch(self, *, after="", limit=32):
@@ -123,17 +138,54 @@ class VerifierBaser(dbing.LMDBer):
         """
         return self.replay_claims.put(keys=(peer, nonce), val=ReplayClaim(expires_at))
 
-    def result_batch(self, *, after="", limit=32):
-        """Copy a bounded result page; close the read transaction before acceptance."""
-        return self._batch(self.results, after=after, limit=limit)
+    def acceptance_batch(self, *, after="", limit=1):
+        """Copy unfinished acceptance only; completed results never schedule work."""
+        return self._batch(self.accepting, after=after, limit=limit)
 
     def association_batch(self, *, after="", limit=32):
         """Copy a bounded status page for local TEL revocation reconciliation."""
         return self._batch(self.associations, after=after, limit=limit)
 
-    def delivery_batch(self, *, after="", limit=32):
-        """Copy a bounded outbox page for pending-delivery discovery, including after restart."""
-        return self._batch(self.outbox, after=after, limit=limit)
+    def next_delivery(self):
+        """Claim one ready event, or resume the single interrupted delivery."""
+        with self.env.begin(write=True) as txn:
+            reference = self.delivery_active.deserializer(
+                txn.get(b"sender", db=self.delivery_active.sdb)
+            )
+            if reference is None:
+                with txn.cursor(db=self.delivery_ready.sdb) as cursor:
+                    if not cursor.first():
+                        return None
+                    key, raw = cursor.item()
+                    reference = self.delivery_ready.deserializer(raw)
+                    txn.put(
+                        b"sender",
+                        self.delivery_active.serializer(reference),
+                        db=self.delivery_active.sdb,
+                    )
+                    txn.delete(key, db=self.delivery_ready.sdb)
+            return self.outbox.deserializer(
+                txn.get(reference.eventId.encode(), db=self.outbox.sdb)
+            )
+
+    def retry_delivery(self, event_id):
+        """Explicitly resume a corrected dead letter with a fresh bounded attempt budget."""
+        key = event_id.encode()
+        with self.env.begin(write=True) as txn:
+            reference = self.delivery_dead.deserializer(
+                txn.get(key, db=self.delivery_dead.sdb)
+            )
+            if reference is None:
+                raise ValueError("unknown dead-letter event")
+            event = self.outbox.deserializer(txn.get(key, db=self.outbox.sdb))
+            event.blocked, event.error, event.attempts = False, "", 0
+            txn.put(key, self.outbox.serializer(event), db=self.outbox.sdb)
+            txn.put(
+                key,
+                self.delivery_ready.serializer(reference),
+                db=self.delivery_ready.sdb,
+            )
+            txn.delete(key, db=self.delivery_dead.sdb)
 
     def _batch(self, table, *, after, limit):
         """Seek strictly after a key and release the LMDB cursor before returning."""
@@ -250,6 +302,7 @@ class VerifierBaser(dbing.LMDBer):
                     self.associations.serializer(rejected),
                     db=self.associations.sdb,
                 )
+                txn.delete(key, db=self.accepting.sdb)
                 return rejected
             accepted = AssociationStatus(
                 said,
@@ -274,11 +327,17 @@ class VerifierBaser(dbing.LMDBer):
                     db=self.outbox.sdb,
                 )
                 txn.put(
+                    event.eventId.encode(),
+                    self.delivery_ready.serializer(DeliveryReference(event.eventId)),
+                    db=self.delivery_ready.sdb,
+                )
+                txn.put(
                     destination.encode(),
                     self.destinations.serializer(DestinationSchedule()),
                     db=self.destinations.sdb,
                     overwrite=False,
                 )
+            txn.delete(key, db=self.accepting.sdb)
             return accepted
 
     def retire(self, said):
@@ -327,6 +386,11 @@ class VerifierBaser(dbing.LMDBer):
                     event.eventId.encode(),
                     self.outbox.serializer(event),
                     db=self.outbox.sdb,
+                )
+                txn.put(
+                    event.eventId.encode(),
+                    self.delivery_ready.serializer(DeliveryReference(event.eventId)),
+                    db=self.delivery_ready.sdb,
                 )
             return retired
 
@@ -382,6 +446,19 @@ class VerifierBaser(dbing.LMDBer):
             txn.put(
                 event_id.encode(), self.outbox.serializer(event), db=self.outbox.sdb
             )
+            if event.acknowledged or event.blocked:
+                txn.delete(event_id.encode(), db=self.delivery_ready.sdb)
+                active = self.delivery_active.deserializer(
+                    txn.get(b"sender", db=self.delivery_active.sdb)
+                )
+                if active and active.eventId == event_id:
+                    txn.delete(b"sender", db=self.delivery_active.sdb)
+                if event.blocked:
+                    txn.put(
+                        event_id.encode(),
+                        self.delivery_dead.serializer(DeliveryReference(event_id)),
+                        db=self.delivery_dead.sdb,
+                    )
             if event.acknowledged:
                 raw = txn.get(event.destination.encode(), db=self.destinations.sdb)
                 schedule = self.destinations.deserializer(raw)

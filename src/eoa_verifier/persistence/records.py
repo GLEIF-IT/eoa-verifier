@@ -92,3 +92,10 @@ class DestinationSchedule:
 
     failures: int = 0
     nextAttemptAt: float = 0.0
+
+
+@dataclass
+class DeliveryReference:
+    """One event's membership in a delivery phase; bytes remain in the outbox."""
+
+    eventId: str

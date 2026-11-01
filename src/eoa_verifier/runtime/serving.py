@@ -140,6 +140,7 @@ class VerifierService(doing.DoDoer):
                 baser=baser,
                 hab=hab,
                 timeout=config.webhook_timeout,
+                max_attempts=config.webhook_max_attempts,
                 interval=config.webhook_interval,
                 backoff_base=config.webhook_backoff_base,
                 backoff_cap=config.webhook_backoff_cap,

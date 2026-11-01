@@ -103,7 +103,33 @@ def main(argv=None):
         default=150.0,
         help="Retry lower-bound cap in seconds; upper is twice this (default: 150)",
     )
+    start.add_argument("--webhook-max-attempts", type=int, default=3)
+    retry = commands.add_parser(
+        "retry-delivery", help="Resume a corrected dead letter with service stopped"
+    )
+    retry.add_argument("event_id")
+    retry.add_argument("--name", default="eoa-verifier")
+    retry.add_argument("--base", default="")
+    retry.add_argument("--head-dir")
     args = vars(parser.parse_args(argv))
+    if args["command"] == "retry-delivery":
+        from keri.db import dbing
+
+        from eoa_verifier.persistence.basing import VerifierBaser
+
+        try:
+            with dbing.openLMDB(
+                cls=VerifierBaser,
+                name=args["name"],
+                base=args["base"],
+                headDirPath=args["head_dir"],
+                temp=False,
+            ) as baser:
+                baser.retry_delivery(args["event_id"])
+        except (ValueError, OSError) as exc:
+            print(f"eoa-verifier: {exc}", file=sys.stderr)
+            return 1
+        return 0
     args.pop("command")
     args.pop("action")
     try:
