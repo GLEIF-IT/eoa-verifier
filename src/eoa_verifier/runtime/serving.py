@@ -31,7 +31,10 @@ from ..delivery.delivering import WebhookSender
 from ..persistence.basing import VerifierBaser
 from ..persistence.registry import VerifierReger
 from ..receiving.directing import CesrEnd, Receiver
-from ..receiving.grants import GrantNotificationDoer
+from ..receiving.grants import GrantNotificationDoer, NativeGrantAdapter
+from ..receiving.replaying import GrantReplayService
+from ..persistence.reading import ApplicationReader
+from ..persistence.writing import ApplicationWriter
 from ..verification.constants import ASSOCIATION_SCHEMA
 from ..verification.coordinating import VerificationCoordinator
 from ..verification.schema_cache import pin_accepted_schemas
@@ -120,10 +123,11 @@ class VerifierService(doing.DoDoer):
             receiver,
             http.ServerDoer(server=server),
             GrantNotificationDoer(
-                baser=baser,
-                hby=hby,
-                notifier=notifier,
-                parser=parser,
+                GrantReplayService(
+                    ApplicationReader(baser),
+                    ApplicationWriter(baser),
+                    NativeGrantAdapter(hby, notifier, parser),
+                ),
             ),
             VerificationCoordinator(
                 baser=baser,

@@ -54,8 +54,13 @@ def signed_notice(runtime, grants, sender, embedded, attachments=b""):
             + pathed
         )
     exc = exchanging.Exchanger(hby=runtime.hby, handlers=[])
-    protocoling.loadHandlers(hby=runtime.hby, exc=exc, notifier=grants.notifier)
+    protocoling.loadHandlers(
+        hby=runtime.hby, exc=exc, notifier=grants.service.native.notifier
+    )
     runtime.hby.psr.parse(ims=bytearray(sender.makeOwnEvent(sn=0)))
     parsing.Parser(kvy=runtime.hby.kvy, exc=exc).parse(ims=bytearray(stream))
-    assert any(n.attrs["d"] == exn.said for n, _ in grants.notifier.noter.getNotes())
+    assert any(
+        n.attrs["d"] == exn.said
+        for n, _ in grants.service.native.notifier.noter.getNotes()
+    )
     return exn.said

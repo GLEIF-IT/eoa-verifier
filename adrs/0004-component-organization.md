@@ -21,7 +21,7 @@ Keep the src layout and six sibling leaf component packages:
 | verification | Initial credential-chain, wallet-proof and account checks, including RPC |
 | associations | Acceptance, retirement and public stored-status projection |
 | delivery | HTTP authentication, nonce claims, webhook attempts, retries and ACK policy |
-| persistence | Durable record schemas and atomic application transitions |
+| persistence | Durable schemas, detached reads and atomic saves of prepared records |
 
 Component packages contain implementation modules, with minimal initializers.
 The root groups components and contains no application implementation. Resource
@@ -39,13 +39,15 @@ responsibilities and dependency cycles when changing imports.
 
 ServiceConfig lives in runtime/config.py; service composition and store lifetime
 remain together in runtime/serving.py. Persistent dataclasses live in
-persistence/records.py; table setup and transitions stay in persistence/basing.py.
+persistence/records.py. VerifierBaser binds tables and owns their lifecycle;
+persistence/reading.py returns detached snapshots and persistence/writing.py
+commits prepared records. Feature services choose transitions and construct events.
 They are stored schemas, not a general collection of application models.
 
 Retain one VerifierBaser and one application LMDB transaction boundary. Completion
 writes results/removes pending work atomically. Acceptance and retirement each
 commit association status and its immutable outbox event together. Event creation
-stays beside these transitions; delivery sends stored bytes. KERIpy evidence
+belongs to association services; delivery sends stored bytes. KERIpy evidence
 stores remain separate. Durable phase queues bridge commit gaps; the native
 accepted-TEL index and its revocation record commit atomically in VerifierReger.
 No completed-result or association-history scans schedule work.
@@ -55,6 +57,17 @@ acceptance, and oracle ownership/chain publication outside this application.
 Preserve the coordinator's native-state recheck after RPC waits and the existing
 HIO task/store lifetime. The subsequent durable-phase refactor changes storage
 without compatibility readers; the authenticated event format remains unchanged.
+
+## Application operations
+
+Each feature service reads detached records, decides the next phase, prepares its
+records, and calls a concrete atomic save. Clock, retry, trust and outcome policy
+run outside write transactions. No transaction spans native parsing or RPC.
+The Grant replay service commits verification enqueue and active-Grant removal
+together after native replay; a rollback preserves the active Grant.
+
+See the [five-slice implementation plan](../docs/plans/application-persistence-separation.md)
+for the remaining extraction boundaries and qualification requirements.
 
 ## Import migration
 
@@ -86,7 +99,8 @@ scenarios in their own packages. Use pytest importlib mode and preserve the
 witnessed KERI/IPEX/Anvil integration topology.
 Run affected contract tests, then the full suite against a built wheel outside
 the checkout, including CLI help and packaged schemas. Record extraction must
-preserve field order/defaults and serialization, and moves must preserve methods.
+preserve field order/defaults and serialization. Replaced workflow methods are
+deleted rather than retained as compatibility APIs.
 
 Introduce meaningful persistence read operations only when a concrete caller
 needs them; do not add one wrapper or repository interface per table. Revisit a

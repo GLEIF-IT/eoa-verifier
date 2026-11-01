@@ -147,20 +147,23 @@ def test_wrong_schema_is_coordinator_rejection_without_keripy_acceptance(config)
         sender = hby.makeHab(name="sender")
         grant_said = signed_notice(runtime, grants, sender, creder.sad)
         attrs = {"d": grant_said}
-        grants.process_grant_notice(attrs)
+        grants.service.native.notifier.add({"r": "/exn/ipex/grant", **attrs})
+        grants.service.process_one()
         pending = runtime.baser.pending.get(keys=(creder.said,))
         assert pending is not None
         assert runtime.baser.results.get(keys=(creder.said,)) is None
         assert runtime.rgy.reger.creds.get(keys=(creder.said,)) is None
         assert runtime.rgy.reger.saved.get(keys=(creder.said,)) is None
-        grants.process_grant_notice(attrs)
+        grants.service.native.notifier.add({"r": "/exn/ipex/grant", **attrs})
+        grants.service.process_one()
         assert runtime.baser.pending.get(keys=(creder.said,)) == pending
         coordinator.process_ready()
         result = runtime.baser.results.get(keys=(creder.said,))
         assert result.status == "rejected"
         assert "unexpected schema" in result.reason
         assert runtime.baser.pending.get(keys=(creder.said,)) is None
-        grants.process_grant_notice(attrs)
+        grants.service.native.notifier.add({"r": "/exn/ipex/grant", **attrs})
+        grants.service.process_one()
         assert runtime.baser.results.get(keys=(creder.said,)) == result
         assert runtime.baser.pending.get(keys=(creder.said,)) is None
 
