@@ -47,9 +47,10 @@ Accepted/revoked records also expose their current event’s delivery progress a
 errors. Unknown SAIDs return 404.
 GET requires no signature and performs no RPC or refresh.
 
-The sender keeps one request in flight and spaces starts by at least one second,
-including successes. Up to three attempts handle connection failures, timeouts, HTTP 408/429 and 5xx errors
-(except 501/505) retry automatically with jittered backoff from 1–2 seconds to
+The sender keeps one request in flight. By default, request starts are at least
+five milliseconds apart, including after successes; `--webhook-interval` controls
+this minimum. Connection failures, timeouts, HTTP 408/429 and 5xx errors
+(except 501/505) retry automatically, up to three attempts, with jittered backoff from 1–2 seconds to
 150–300 seconds. A valid `Retry-After` is a minimum, even beyond that cap.
 Cooldown applies to the whole destination and survives restart. Only a complete
 HTTP success with any supplied signature verified completes delivery and resets the failure count.
