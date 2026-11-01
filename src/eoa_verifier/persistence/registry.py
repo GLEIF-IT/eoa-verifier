@@ -1,4 +1,4 @@
-"""KERIpy registry with a durable handoff for accepted credential revocations."""
+"""Persist accepted credential revocation identifiers alongside the native TEL index."""
 
 from keri.core import serdering
 from keri.db import dbing, subing
@@ -6,17 +6,17 @@ from keri.vdr import viring
 
 
 class VerifierReger(viring.Reger):
-    """Keep revocation handoffs in the same LMDB transaction as the accepted TEL index.
+    """Keep revocation records in the same LMDB transaction as the accepted TEL index.
 
     In pinned KERIpy, Tever.logEvent calls putTel only after validating the TEL
     event and its anchor. Event bytes have already been persisted in tvts. This
     narrow override preserves native validation and replaces the final index write
-    with an atomic index-plus-handoff write. Transient Tever cues are not recovery
+    with an atomic index-plus-revocation write. Transient Tever cues are not recovery
     records. Changes to this upstream boundary require requalification.
     """
 
     def reopen(self, **kwa):
-        """Bind the handoff after opening all native registry subdatabases."""
+        """Bind the revocation table after opening all native registry subdatabases."""
         super().reopen(**kwa)
         try:
             self.revocations = subing.Suber(db=self, subkey="verifier-revocations.")
@@ -32,18 +32,22 @@ class VerifierReger(viring.Reger):
             raw = txn.get(dbing.dgKey(pre, val), db=self.tvts)
             if raw is None:
                 raise ValueError("accepted TEL index requires stored event bytes")
-            event = serdering.SerderKERI(raw=bytes(raw))
+            telSerder = serdering.SerderKERI(raw=bytes(raw))
             inserted = txn.put(key, val, db=self.tels, overwrite=False)
-            if inserted and event.ilk in ("rev", "brv"):
+            if inserted and telSerder.ilk in ("rev", "brv"):
                 txn.put(
-                    event.pre.encode(), event.said.encode(), db=self.revocations.sdb
+                    telSerder.pre.encode(),
+                    telSerder.said.encode(),
+                    db=self.revocations.sdb,
                 )
             return inserted
 
-    def next_revocation(self):
-        """Return one detached (credential SAID, TEL event SAID) handoff, or None."""
+    def next_revocation(self) -> tuple[str, str] | None:
+        """Return one detached (credential SAID, TEL event SAID) revocation record, or None."""
         with self.env.begin(db=self.revocations.sdb) as txn, txn.cursor() as cursor:
             if cursor.first():
-                key, value = cursor.item()
-                return key.decode(), value.decode()
+                credSaidb, telEvtSaidb = cursor.item()
+                credSaid = credSaidb.decode()
+                telEvtSaid = telEvtSaidb.decode()
+                return credSaid, telEvtSaid
         return None

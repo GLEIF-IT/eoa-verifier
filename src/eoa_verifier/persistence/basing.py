@@ -12,9 +12,9 @@ from .records import (
     Delivery,
     DeliveryReference,
     DestinationSchedule,
-    GrantWork,
-    PendingVerification,
+    GrantReplayRecord,
     ReplayClaim,
+    VerificationRecord,
     VerificationResult,
     VerificationScope,
 )
@@ -32,26 +32,28 @@ class VerifierBaser(dbing.LMDBer):
         super().reopen(**kwa)
         self.scope = koming.Komer(db=self, subkey="scope.", schema=VerificationScope)
         self.pending = koming.Komer(
-            db=self, subkey="pending.", schema=PendingVerification
+            db=self, subkey="pending.", schema=VerificationRecord
         )
         self.verifying = koming.Komer(
-            db=self, subkey="verifying.", schema=PendingVerification
+            db=self, subkey="verifying.", schema=VerificationRecord
         )
         self.waiting = koming.Komer(
-            db=self, subkey="waiting.", schema=PendingVerification
+            db=self, subkey="waiting.", schema=VerificationRecord
         )
         self.verification_due = subing.Suber(db=self, subkey="verification-due.")
         self.grant_due = subing.Suber(db=self, subkey="grant-due.")
         self.verification_dead = koming.Komer(
-            db=self, subkey="verification-dead.", schema=PendingVerification
+            db=self, subkey="verification-dead.", schema=VerificationRecord
         )
         self.grant_active = koming.Komer(
-            db=self, subkey="grant-active.", schema=GrantWork
+            db=self, subkey="grant-active.", schema=GrantReplayRecord
         )
         self.grant_waiting = koming.Komer(
-            db=self, subkey="grant-waiting.", schema=GrantWork
+            db=self, subkey="grant-waiting.", schema=GrantReplayRecord
         )
-        self.grant_dead = koming.Komer(db=self, subkey="grant-dead.", schema=GrantWork)
+        self.grant_dead = koming.Komer(
+            db=self, subkey="grant-dead.", schema=GrantReplayRecord
+        )
         self.acceptance_dead = koming.Komer(
             db=self, subkey="acceptance-dead.", schema=VerificationResult
         )
@@ -103,9 +105,9 @@ class VerifierBaser(dbing.LMDBer):
         self.validate_nonce_history()
         self.scope.put(keys=("verification",), val=scope)
 
-    def enqueue(self, work):
+    def enqueue(self, verification):
         """Insert new unfinished work once; completed or pending duplicates return False."""
-        key = work.associationSaid.encode()
+        key = verification.associationSaid.encode()
         with self.env.begin(write=True) as txn:
             if any(
                 txn.get(key, db=table.sdb) is not None
@@ -118,7 +120,10 @@ class VerifierBaser(dbing.LMDBer):
             ):
                 return False
             return txn.put(
-                key, self.pending.serializer(work), db=self.pending.sdb, overwrite=False
+                key,
+                self.pending.serializer(verification),
+                db=self.pending.sdb,
+                overwrite=False,
             )
 
     def begin_grant(self, notice=None, *, now, max_attempts=3):
@@ -128,53 +133,66 @@ class VerifierBaser(dbing.LMDBer):
         ID remains in active work, so restart can finish that acknowledgement.
         """
         with self.env.begin(write=True) as txn:
-            work = self.grant_active.deserializer(
+            grantRecord = self.grant_active.deserializer(
                 txn.get(b"receiver", db=self.grant_active.sdb)
             )
-            if work is None:
-                work = due_record(txn, self.grant_due, self.grant_waiting, now)
-                if work is not None:
-                    txn.delete(work.noticeId.encode(), db=self.grant_waiting.sdb)
+            if grantRecord is None:
+                grantRecord = due_record(txn, self.grant_due, self.grant_waiting, now)
+                if grantRecord is not None:
+                    txn.delete(grantRecord.noticeId.encode(), db=self.grant_waiting.sdb)
                 elif notice is not None:
-                    work = GrantWork(notice.rid, notice.attrs)
+                    grantRecord = GrantReplayRecord(notice.rid, notice.attrs)
                 else:
                     return None
-            if work.attempts >= max_attempts:
-                work.reason = (
-                    work.reason or "Grant replay interrupted; attempt budget exhausted"
+            if grantRecord.attempts >= max_attempts:
+                grantRecord.reason = (
+                    grantRecord.reason
+                    or "Grant replay interrupted; attempt budget exhausted"
                 )
                 txn.put(
-                    work.noticeId.encode(),
-                    self.grant_dead.serializer(work),
+                    grantRecord.noticeId.encode(),
+                    self.grant_dead.serializer(grantRecord),
                     db=self.grant_dead.sdb,
                 )
                 txn.delete(b"receiver", db=self.grant_active.sdb)
                 return None
-            work.attempts += 1
+            grantRecord.attempts += 1
             txn.put(
                 b"receiver",
-                self.grant_active.serializer(work),
+                self.grant_active.serializer(grantRecord),
                 db=self.grant_active.sdb,
             )
-            return work
+            return grantRecord
 
     def settle_grant(
-        self, work, *, reason="", next_attempt_at=0, invalid=False, max_attempts=3
+        self,
+        grantRecord,
+        *,
+        reason="",
+        next_attempt_at=0,
+        invalid=False,
+        max_attempts=3,
     ):
         """Acknowledge replay or atomically retain failed material for waiting/manual recovery."""
         with self.env.begin(write=True) as txn:
             if reason or invalid:
                 target = (
                     self.grant_dead
-                    if invalid or work.attempts >= max_attempts
+                    if invalid or grantRecord.attempts >= max_attempts
                     else self.grant_waiting
                 )
-                work = replace(work, reason=reason, nextAttemptAt=next_attempt_at)
-                txn.put(work.noticeId.encode(), target.serializer(work), db=target.sdb)
+                grantRecord = replace(
+                    grantRecord, reason=reason, nextAttemptAt=next_attempt_at
+                )
+                txn.put(
+                    grantRecord.noticeId.encode(),
+                    target.serializer(grantRecord),
+                    db=target.sdb,
+                )
                 if target is self.grant_waiting:
                     txn.put(
-                        due_key(work.nextAttemptAt, work.noticeId),
-                        work.noticeId.encode(),
+                        due_key(grantRecord.nextAttemptAt, grantRecord.noticeId),
+                        grantRecord.noticeId.encode(),
                         db=self.grant_due.sdb,
                     )
             txn.delete(b"receiver", db=self.grant_active.sdb)
@@ -183,25 +201,35 @@ class VerifierBaser(dbing.LMDBer):
         """Resume a corrected Grant dead letter without requiring another IPEX delivery."""
         key = notice_id.encode()
         with self.env.begin(write=True) as txn:
-            work = self.grant_dead.deserializer(txn.get(key, db=self.grant_dead.sdb))
-            if work is None:
+            grantRecord = self.grant_dead.deserializer(
+                txn.get(key, db=self.grant_dead.sdb)
+            )
+            if grantRecord is None:
                 raise ValueError("unknown Grant dead letter")
-            work = replace(work, attempts=0, nextAttemptAt=0, reason="")
-            txn.put(key, self.grant_waiting.serializer(work), db=self.grant_waiting.sdb)
-            txn.put(due_key(0, work.noticeId), key, db=self.grant_due.sdb)
+            grantRecord = replace(grantRecord, attempts=0, nextAttemptAt=0, reason="")
+            txn.put(
+                key,
+                self.grant_waiting.serializer(grantRecord),
+                db=self.grant_waiting.sdb,
+            )
+            txn.put(due_key(0, grantRecord.noticeId), key, db=self.grant_due.sdb)
             txn.delete(key, db=self.grant_dead.sdb)
 
-    def retry_acceptance(self, said):
+    def retry_acceptance(self, credSaid):
         """Recheck a stopped acceptance after restoring its local evidence."""
-        key = said.encode()
+        key = credSaid.encode()
         with self.env.begin(write=True) as txn:
-            result = self.acceptance_dead.deserializer(
+            verificationResult = self.acceptance_dead.deserializer(
                 txn.get(key, db=self.acceptance_dead.sdb)
             )
-            if result is None:
+            if verificationResult is None:
                 raise ValueError("unknown acceptance dead letter")
-            result = replace(result, reason="")
-            txn.put(key, self.accepting.serializer(result), db=self.accepting.sdb)
+            verificationResult = replace(verificationResult, reason="")
+            txn.put(
+                key,
+                self.accepting.serializer(verificationResult),
+                db=self.accepting.sdb,
+            )
             txn.delete(key, db=self.acceptance_dead.sdb)
 
     def next_verification(self, *, now, max_attempts=3):
@@ -214,54 +242,66 @@ class VerifierBaser(dbing.LMDBer):
         with self.env.begin(write=True) as txn:
             for table in (self.verifying, self.waiting, self.pending):
                 if table is self.waiting:
-                    work = due_record(txn, self.verification_due, self.waiting, now)
-                    if work is None:
+                    verification = due_record(
+                        txn, self.verification_due, self.waiting, now
+                    )
+                    if verification is None:
                         continue
-                    key = work.associationSaid.encode()
+                    key = verification.associationSaid.encode()
                 else:
                     with txn.cursor(db=table.sdb) as cursor:
                         if not cursor.first():
                             continue
                         key, raw = cursor.item()
-                        work = table.deserializer(raw)
+                        verification = table.deserializer(raw)
                 txn.delete(key, db=table.sdb)
-                if work.attempts >= max_attempts:
-                    work.reason = (
-                        work.reason
+                if verification.attempts >= max_attempts:
+                    verification.reason = (
+                        verification.reason
                         or "verification interrupted; attempt budget exhausted"
                     )
                     txn.put(
                         key,
-                        self.verification_dead.serializer(work),
+                        self.verification_dead.serializer(verification),
                         db=self.verification_dead.sdb,
                     )
                     return None
-                work.attempts += 1
-                work.reason = "verification attempt started; result not committed"
-                txn.put(key, self.verifying.serializer(work), db=self.verifying.sdb)
-                return work
+                verification.attempts += 1
+                verification.reason = (
+                    "verification attempt started; result not committed"
+                )
+                txn.put(
+                    key, self.verifying.serializer(verification), db=self.verifying.sdb
+                )
+                return verification
         return None
 
-    def defer_verification(self, work, *, reason, next_attempt_at, max_attempts=3):
+    def defer_verification(
+        self, verification, *, reason, next_attempt_at, max_attempts=3
+    ):
         """Move the active attempt to durable waiting or dead letter in one commit."""
-        key = work.associationSaid.encode()
-        work = replace(work, reason=reason, nextAttemptAt=next_attempt_at)
+        key = verification.associationSaid.encode()
+        verification = replace(
+            verification, reason=reason, nextAttemptAt=next_attempt_at
+        )
         target = (
-            self.verification_dead if work.attempts >= max_attempts else self.waiting
+            self.verification_dead
+            if verification.attempts >= max_attempts
+            else self.waiting
         )
         with self.env.begin(write=True) as txn:
             if txn.get(key, db=self.verifying.sdb) is None:
                 raise ValueError("active verification is absent")
-            txn.put(key, target.serializer(work), db=target.sdb)
+            txn.put(key, target.serializer(verification), db=target.sdb)
             if target is self.waiting:
                 txn.put(
-                    due_key(work.nextAttemptAt, work.associationSaid),
+                    due_key(verification.nextAttemptAt, verification.associationSaid),
                     key,
                     db=self.verification_due.sdb,
                 )
             txn.delete(key, db=self.verifying.sdb)
 
-    def verification_progress(self, said):
+    def verification_progress(self, credSaid):
         """Read one candidate's phase without discovering work from result history."""
         for phase, table in (
             ("pending", self.pending),
@@ -269,43 +309,49 @@ class VerifierBaser(dbing.LMDBer):
             ("waiting", self.waiting),
             ("dead-letter", self.verification_dead),
         ):
-            work = table.get(keys=(said,))
-            if work is not None:
-                return phase, work
+            verification = table.get(keys=(credSaid,))
+            if verification is not None:
+                return phase, verification
         return None, None
 
-    def retry_verification(self, said):
+    def retry_verification(self, credSaid):
         """Explicitly give a dead-letter candidate a new bounded attempt budget."""
-        key = said.encode()
+        key = credSaid.encode()
         with self.env.begin(write=True) as txn:
-            work = self.verification_dead.deserializer(
+            verification = self.verification_dead.deserializer(
                 txn.get(key, db=self.verification_dead.sdb)
             )
-            if work is None:
+            if verification is None:
                 raise ValueError("unknown verification dead letter")
-            work = replace(work, attempts=0, nextAttemptAt=0, reason="")
-            txn.put(key, self.pending.serializer(work), db=self.pending.sdb)
+            verification = replace(verification, attempts=0, nextAttemptAt=0, reason="")
+            txn.put(key, self.pending.serializer(verification), db=self.pending.sdb)
             txn.delete(key, db=self.verification_dead.sdb)
 
-    def finish(self, result):
+    def finish(self, verificationResult):
         """Atomically complete active verification and enqueue successful acceptance.
 
         The workflow chooses the outcome. Identical repeat completion is harmless;
         a missing active record cannot be completed for the first time. Serialization
         or storage failure aborts the whole transaction, leaving active work recoverable.
         """
-        key = result.associationSaid.encode()
+        key = verificationResult.associationSaid.encode()
         with self.env.begin(write=True) as txn:
             existing = txn.get(key, db=self.results.sdb)
             if existing is not None:
-                if self.results.deserializer(existing) != result:
+                if self.results.deserializer(existing) != verificationResult:
                     raise ValueError("conflicting verification result")
                 return
             if txn.get(key, db=self.verifying.sdb) is None:
                 raise ValueError("active verification is absent")
-            txn.put(key, self.results.serializer(result), db=self.results.sdb)
-            if result.status == "verified":
-                txn.put(key, self.accepting.serializer(result), db=self.accepting.sdb)
+            txn.put(
+                key, self.results.serializer(verificationResult), db=self.results.sdb
+            )
+            if verificationResult.status == "verified":
+                txn.put(
+                    key,
+                    self.accepting.serializer(verificationResult),
+                    db=self.accepting.sdb,
+                )
             txn.delete(key, db=self.verifying.sdb)
 
     def claim_nonce(self, peer, nonce, expires_at):
@@ -321,17 +367,19 @@ class VerifierBaser(dbing.LMDBer):
         """Read one local acceptance obligation; its transaction consumes it on success."""
         return first_record(self.accepting)
 
-    def stop_acceptance(self, said, reason):
+    def stop_acceptance(self, credSaid, reason):
         """Dead-letter missing or revoked evidence instead of repeatedly rediscovering it."""
-        key = said.encode()
+        key = credSaid.encode()
         with self.env.begin(write=True) as txn:
-            result = self.accepting.deserializer(txn.get(key, db=self.accepting.sdb))
-            if result is None:
+            verificationResult = self.accepting.deserializer(
+                txn.get(key, db=self.accepting.sdb)
+            )
+            if verificationResult is None:
                 raise ValueError("acceptance work is absent")
-            result = replace(result, reason=reason)
+            verificationResult = replace(verificationResult, reason=reason)
             txn.put(
                 key,
-                self.acceptance_dead.serializer(result),
+                self.acceptance_dead.serializer(verificationResult),
                 db=self.acceptance_dead.sdb,
             )
             txn.delete(key, db=self.accepting.sdb)
@@ -339,40 +387,40 @@ class VerifierBaser(dbing.LMDBer):
     def next_delivery(self):
         """Claim one ready event, or resume the single interrupted delivery."""
         with self.env.begin(write=True) as txn:
-            reference = self.delivery_active.deserializer(
+            deliveryRef = self.delivery_active.deserializer(
                 txn.get(b"sender", db=self.delivery_active.sdb)
             )
-            if reference is None:
+            if deliveryRef is None:
                 with txn.cursor(db=self.delivery_ready.sdb) as cursor:
                     if not cursor.first():
                         return None
                     key, raw = cursor.item()
-                    reference = self.delivery_ready.deserializer(raw)
+                    deliveryRef = self.delivery_ready.deserializer(raw)
                     txn.put(
                         b"sender",
-                        self.delivery_active.serializer(reference),
+                        self.delivery_active.serializer(deliveryRef),
                         db=self.delivery_active.sdb,
                     )
                     txn.delete(key, db=self.delivery_ready.sdb)
             return self.outbox.deserializer(
-                txn.get(reference.eventId.encode(), db=self.outbox.sdb)
+                txn.get(deliveryRef.eventId.encode(), db=self.outbox.sdb)
             )
 
     def retry_delivery(self, event_id):
         """Explicitly resume a corrected dead letter with a fresh bounded attempt budget."""
         key = event_id.encode()
         with self.env.begin(write=True) as txn:
-            reference = self.delivery_dead.deserializer(
+            deliveryRef = self.delivery_dead.deserializer(
                 txn.get(key, db=self.delivery_dead.sdb)
             )
-            if reference is None:
+            if deliveryRef is None:
                 raise ValueError("unknown dead-letter event")
-            event = self.outbox.deserializer(txn.get(key, db=self.outbox.sdb))
-            event.blocked, event.error, event.attempts = False, "", 0
-            txn.put(key, self.outbox.serializer(event), db=self.outbox.sdb)
+            delivery = self.outbox.deserializer(txn.get(key, db=self.outbox.sdb))
+            delivery.blocked, delivery.error, delivery.attempts = False, "", 0
+            txn.put(key, self.outbox.serializer(delivery), db=self.outbox.sdb)
             txn.put(
                 key,
-                self.delivery_ready.serializer(reference),
+                self.delivery_ready.serializer(deliveryRef),
                 db=self.delivery_ready.sdb,
             )
             txn.delete(key, db=self.delivery_dead.sdb)
@@ -437,7 +485,9 @@ class VerifierBaser(dbing.LMDBer):
                             "accepted associations lack nonce history; use a fresh store"
                         )
 
-    def accept(self, said, *, association, nonce, destination=None, peer_aid=None):
+    def accept(
+        self, credSaid, *, associationFacts, nonce, destination=None, peer_aid=None
+    ):
         """Commit nonce ownership, local acceptance and optional delivery together.
 
         Facts and the exact nonce come from already verified native evidence.
@@ -446,18 +496,20 @@ class VerifierBaser(dbing.LMDBer):
         Same-SAID replay returns its original outcome, including after revocation.
         Native LMDB transactions supply all writer coordination and durability.
         """
-        key = said.encode()
+        key = credSaid.encode()
         with self.env.begin(write=True) as txn:
-            previous = txn.get(key, db=self.associations.sdb)
-            if previous is not None:
-                return self.associations.deserializer(previous)
+            previousStatusRaw = txn.get(key, db=self.associations.sdb)
+            if previousStatusRaw is not None:
+                return self.associations.deserializer(previousStatusRaw)
             raw = txn.get(key, db=self.results.sdb)
-            result = self.results.deserializer(raw) if raw is not None else None
-            if result is None or result.status != "verified":
+            verificationResult = (
+                self.results.deserializer(raw) if raw is not None else None
+            )
+            if verificationResult is None or verificationResult.status != "verified":
                 raise ValueError("acceptance requires a completed verified result")
             if bool(destination) != bool(peer_aid):
                 raise ValueError("delivery requires both destination and peer AID")
-            claim = AcceptedNonce(association["issuerAid"], nonce, said)
+            claim = AcceptedNonce(associationFacts["issuerAid"], nonce, credSaid)
             nonce_key = self.nonce_key(claim.issuerAid, nonce)
             inserted = txn.put(
                 nonce_key,
@@ -466,48 +518,55 @@ class VerifierBaser(dbing.LMDBer):
                 overwrite=False,
             )
             observation = dict(
-                result.eoaResult["accountObservation"],
-                wallet=result.eoaResult["wallet"],
+                verificationResult.eoaResult["accountObservation"],
+                wallet=verificationResult.eoaResult["wallet"],
             )
             if not inserted:
                 self._read_claim(
                     txn, nonce_key, txn.get(nonce_key, db=self.accepted_nonces.sdb)
                 )
-                rejected = AssociationStatus(
-                    said, "rejected", "", association, observation, "NONCE_REUSED"
+                rejectedStatus = AssociationStatus(
+                    credSaid,
+                    "rejected",
+                    "",
+                    associationFacts,
+                    observation,
+                    "NONCE_REUSED",
                 )
                 txn.put(
                     key,
-                    self.associations.serializer(rejected),
+                    self.associations.serializer(rejectedStatus),
                     db=self.associations.sdb,
                 )
                 txn.delete(key, db=self.accepting.sdb)
-                return rejected
-            accepted = AssociationStatus(
-                said,
+                return rejectedStatus
+            acceptedStatus = AssociationStatus(
+                credSaid,
                 "accepted",
-                f"{said}:1" if destination else "",
-                association,
+                f"{credSaid}:1" if destination else "",
+                associationFacts,
                 observation,
             )
             txn.put(
-                key, self.associations.serializer(accepted), db=self.associations.sdb
+                key,
+                self.associations.serializer(acceptedStatus),
+                db=self.associations.sdb,
             )
             if destination:
-                event = _status_delivery(
-                    accepted,
+                delivery = _status_delivery(
+                    acceptedStatus,
                     status_revision=1,
                     destination=destination,
                     peer_aid=peer_aid,
                 )
                 txn.put(
-                    event.eventId.encode(),
-                    self.outbox.serializer(event),
+                    delivery.eventId.encode(),
+                    self.outbox.serializer(delivery),
                     db=self.outbox.sdb,
                 )
                 txn.put(
-                    event.eventId.encode(),
-                    self.delivery_ready.serializer(DeliveryReference(event.eventId)),
+                    delivery.eventId.encode(),
+                    self.delivery_ready.serializer(DeliveryReference(delivery.eventId)),
                     db=self.delivery_ready.sdb,
                 )
                 txn.put(
@@ -517,9 +576,9 @@ class VerifierBaser(dbing.LMDBer):
                     overwrite=False,
                 )
             txn.delete(key, db=self.accepting.sdb)
-            return accepted
+            return acceptedStatus
 
-    def retire(self, said):
+    def retire(self, credSaid):
         """Atomically retire an accepted SAID and create its separate delivery obligation.
 
         The caller establishes verified revocation. Preserve original issuance facts,
@@ -527,51 +586,53 @@ class VerifierBaser(dbing.LMDBer):
         Repeated retirement returns the same status/event, including across restart.
         KERIpy TEL persistence is separate and recovered by the retirement worker.
         """
-        key = said.encode()
+        key = credSaid.encode()
         with self.env.begin(write=True) as txn:
-            current = self.associations.deserializer(
+            associationStatus = self.associations.deserializer(
                 txn.get(key, db=self.associations.sdb)
             )
-            if current is None:
+            if associationStatus is None:
                 raise ValueError("retirement requires an accepted association")
-            if current.status == "revoked":
-                return current
-            if current.status != "accepted":
+            if associationStatus.status == "revoked":
+                return associationStatus
+            if associationStatus.status != "accepted":
                 raise ValueError("retirement requires an accepted association")
-            original = None
-            if current.eventId:
-                original = self.outbox.deserializer(
-                    txn.get(current.eventId.encode(), db=self.outbox.sdb)
+            originalDelivery = None
+            if associationStatus.eventId:
+                originalDelivery = self.outbox.deserializer(
+                    txn.get(associationStatus.eventId.encode(), db=self.outbox.sdb)
                 )
-                if original is None:
+                if originalDelivery is None:
                     raise ValueError("accepted delivery event is absent")
-            retired = replace(
-                current,
+            revokedStatus = replace(
+                associationStatus,
                 status="revoked",
-                eventId=f"{said}:2" if original else "",
+                eventId=f"{credSaid}:2" if originalDelivery else "",
                 reason="REVOKED",
             )
             txn.put(
-                key, self.associations.serializer(retired), db=self.associations.sdb
+                key,
+                self.associations.serializer(revokedStatus),
+                db=self.associations.sdb,
             )
-            if original is not None:
-                event = _status_delivery(
-                    retired,
+            if originalDelivery is not None:
+                delivery = _status_delivery(
+                    revokedStatus,
                     status_revision=2,
-                    destination=original.destination,
-                    peer_aid=original.peerAid,
+                    destination=originalDelivery.destination,
+                    peer_aid=originalDelivery.peerAid,
                 )
                 txn.put(
-                    event.eventId.encode(),
-                    self.outbox.serializer(event),
+                    delivery.eventId.encode(),
+                    self.outbox.serializer(delivery),
                     db=self.outbox.sdb,
                 )
                 txn.put(
-                    event.eventId.encode(),
-                    self.delivery_ready.serializer(DeliveryReference(event.eventId)),
+                    delivery.eventId.encode(),
+                    self.delivery_ready.serializer(DeliveryReference(delivery.eventId)),
                     db=self.delivery_ready.sdb,
                 )
-            return retired
+            return revokedStatus
 
     def record_attempt(self, event_id, *, next_attempt_at=None):
         """Atomically record the attempt and request-start pacing before network work.
@@ -580,30 +641,30 @@ class VerifierBaser(dbing.LMDBer):
         resuming an event clears its permanent-error block, not destination cooldown.
         """
         with self.env.begin(write=True) as txn:
-            event = self.outbox.deserializer(
+            delivery = self.outbox.deserializer(
                 txn.get(event_id.encode(), db=self.outbox.sdb)
             )
-            if event is None:
+            if delivery is None:
                 raise ValueError("unknown delivery event")
-            if event.acknowledged:
-                return event
-            event.attempts += 1
-            event.blocked = False
-            event.error = "attempt started; authenticated ACK not recorded"
+            if delivery.acknowledged:
+                return delivery
+            delivery.attempts += 1
+            delivery.blocked = False
+            delivery.error = "attempt started; authenticated ACK not recorded"
             txn.put(
-                event_id.encode(), self.outbox.serializer(event), db=self.outbox.sdb
+                event_id.encode(), self.outbox.serializer(delivery), db=self.outbox.sdb
             )
             if next_attempt_at is not None:
                 schedule = self.destinations.deserializer(
-                    txn.get(event.destination.encode(), db=self.destinations.sdb)
+                    txn.get(delivery.destination.encode(), db=self.destinations.sdb)
                 )
                 schedule.nextAttemptAt = max(schedule.nextAttemptAt, next_attempt_at)
                 txn.put(
-                    event.destination.encode(),
+                    delivery.destination.encode(),
                     self.destinations.serializer(schedule),
                     db=self.destinations.sdb,
                 )
-            return event
+            return delivery
 
     def delivery_result(self, event_id, *, error="", blocked=False, schedule=None):
         """Record failure or authenticated completion; never discard an undelivered event.
@@ -616,55 +677,61 @@ class VerifierBaser(dbing.LMDBer):
             raw = txn.get(event_id.encode(), db=self.outbox.sdb)
             if raw is None:
                 raise ValueError("unknown delivery event")
-            event = self.outbox.deserializer(raw)
-            if event.acknowledged:
+            delivery = self.outbox.deserializer(raw)
+            if delivery.acknowledged:
                 return
-            event.error = error
-            event.blocked = blocked
-            event.acknowledged = not error
+            delivery.error = error
+            delivery.blocked = blocked
+            delivery.acknowledged = not error
             txn.put(
-                event_id.encode(), self.outbox.serializer(event), db=self.outbox.sdb
+                event_id.encode(), self.outbox.serializer(delivery), db=self.outbox.sdb
             )
-            if event.acknowledged or event.blocked:
+            if delivery.acknowledged or delivery.blocked:
                 txn.delete(event_id.encode(), db=self.delivery_ready.sdb)
-                active = self.delivery_active.deserializer(
+                activeDeliveryRef = self.delivery_active.deserializer(
                     txn.get(b"sender", db=self.delivery_active.sdb)
                 )
-                if active and active.eventId == event_id:
+                if activeDeliveryRef and activeDeliveryRef.eventId == event_id:
                     txn.delete(b"sender", db=self.delivery_active.sdb)
-                if event.blocked:
+                if delivery.blocked:
                     txn.put(
                         event_id.encode(),
                         self.delivery_dead.serializer(DeliveryReference(event_id)),
                         db=self.delivery_dead.sdb,
                     )
-            if event.acknowledged:
-                raw = txn.get(event.destination.encode(), db=self.destinations.sdb)
+            if delivery.acknowledged:
+                raw = txn.get(delivery.destination.encode(), db=self.destinations.sdb)
                 schedule = self.destinations.deserializer(raw)
                 schedule.failures = 0
             if schedule is not None:
                 txn.put(
-                    event.destination.encode(),
+                    delivery.destination.encode(),
                     self.destinations.serializer(schedule),
                     db=self.destinations.sdb,
                 )
 
 
-def _status_delivery(status, *, status_revision, destination, peer_aid):
+def _status_delivery(associationStatus, *, status_revision, destination, peer_aid):
     """Serialize one immutable v1 event for the existing outbox/ACK protocol."""
-    payload = {
+    statusEvent = {
         "version": "1",
-        "eventId": status.eventId,
-        "associationSaid": status.associationSaid,
+        "eventId": associationStatus.eventId,
+        "associationSaid": associationStatus.associationSaid,
         "statusRevision": status_revision,
-        "status": status.status,
-        "association": status.association,
-        "accountObservation": status.accountObservation,
+        "status": associationStatus.status,
+        "association": associationStatus.association,
+        "accountObservation": associationStatus.accountObservation,
     }
-    if status.reason:
-        payload["reasonCode"] = status.reason
-    body = json.dumps(payload, separators=(",", ":"), sort_keys=True)
-    return Delivery(status.eventId, status.associationSaid, destination, peer_aid, body)
+    if associationStatus.reason:
+        statusEvent["reasonCode"] = associationStatus.reason
+    statusEventJson = json.dumps(statusEvent, separators=(",", ":"), sort_keys=True)
+    return Delivery(
+        associationStatus.eventId,
+        associationStatus.associationSaid,
+        destination,
+        peer_aid,
+        statusEventJson,
+    )
 
 
 def first_record(table):
@@ -684,10 +751,10 @@ def due_record(txn, schedule, waiting, now):
         if not cursor.first():
             return None
         deadline, key = cursor.item()
-        work = waiting.deserializer(txn.get(key, db=waiting.sdb))
-    if work is None:
+        record = waiting.deserializer(txn.get(key, db=waiting.sdb))
+    if record is None:
         raise ValueError("retry schedule has no waiting work")
-    if work.nextAttemptAt > now:
+    if record.nextAttemptAt > now:
         return None
     txn.delete(deadline, db=schedule.sdb)
-    return work
+    return record

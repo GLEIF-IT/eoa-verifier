@@ -79,16 +79,18 @@ class WebhookSender(doing.DoDoer):
         """Advance only durable delivery phases, closing each client before the next."""
         yield tock
         while True:
-            event = self.baser.next_delivery()
-            if event is None:
+            delivery = self.baser.next_delivery()
+            if delivery is None:
                 yield self.tock
                 continue
-            event_id = event.eventId
-            status = self.baser.associations.get(keys=(event.associationSaid,))
+            event_id = delivery.eventId
+            associationStatus = self.baser.associations.get(
+                keys=(delivery.associationSaid,)
+            )
             if (
-                status is None
-                or status.status not in ("accepted", "revoked")
-                or status.eventId != event_id
+                associationStatus is None
+                or associationStatus.status not in ("accepted", "revoked")
+                or associationStatus.eventId != event_id
             ):
                 self.baser.delivery_result(
                     event_id,
@@ -96,31 +98,31 @@ class WebhookSender(doing.DoDoer):
                     blocked=True,
                 )
                 continue
-            schedule = self.baser.destinations.get(keys=(event.destination,))
+            schedule = self.baser.destinations.get(keys=(delivery.destination,))
             if schedule.nextAttemptAt > self.clock():
                 yield self.tock
                 continue
-            yield from self._attempt(event)
+            yield from self._attempt(delivery)
             yield self.tock
 
-    def _attempt(self, event):
+    def _attempt(self, delivery):
         """Persist pacing before I/O, then atomically record the result and cooldown."""
-        if event.attempts >= self.max_attempts:
+        if delivery.attempts >= self.max_attempts:
             self.baser.delivery_result(
-                event.eventId, error="delivery attempt limit reached", blocked=True
+                delivery.eventId, error="delivery attempt limit reached", blocked=True
             )
             return
-        event = self.baser.record_attempt(
-            event.eventId, next_attempt_at=self.clock() + self.interval
+        delivery = self.baser.record_attempt(
+            delivery.eventId, next_attempt_at=self.clock() + self.interval
         )
         try:
-            yield from self._send(event)
+            yield from self._send(delivery)
         except (AuthenticationError, ValueError, ssl.SSLCertVerificationError) as error:
             self.baser.delivery_result(
-                event.eventId, error=str(error) or type(error).__name__, blocked=True
+                delivery.eventId, error=str(error) or type(error).__name__, blocked=True
             )
         except (_TransientFailure, OSError) as error:
-            schedule = self.baser.destinations.get(keys=(event.destination,))
+            schedule = self.baser.destinations.get(keys=(delivery.destination,))
             schedule.failures += 1
             # Bound the exponent independently of the configured attempt budget.
             exponent = min(
@@ -133,15 +135,15 @@ class WebhookSender(doing.DoDoer):
             )
             schedule.nextAttemptAt = max(schedule.nextAttemptAt, self.clock() + delay)
             self.baser.delivery_result(
-                event.eventId,
+                delivery.eventId,
                 error=str(error) or type(error).__name__,
                 schedule=schedule,
-                blocked=event.attempts >= self.max_attempts,
+                blocked=delivery.attempts >= self.max_attempts,
             )
         else:
-            self.baser.delivery_result(event.eventId)
+            self.baser.delivery_result(delivery.eventId)
 
-    def _send(self, event):
+    def _send(self, delivery):
         """Yield through one signed HTTP request and validate its complete ACK contract.
 
         The receiver must return HTTP 200, authenticate the actual response bytes
@@ -150,14 +152,14 @@ class WebhookSender(doing.DoDoer):
         This component, not ServiceAuthenticator, owns that decision.
         """
         auth = ServiceAuthenticator(
-            hab=self.hab, baser=self.baser, peer_aid=event.peerAid
+            hab=self.hab, baser=self.baser, peer_aid=delivery.peerAid
         )
-        body = event.body.encode("utf-8")
-        headers, sent = auth.sign(
-            method="POST", target=event.destination, action="status", body=body
+        body = delivery.body.encode("utf-8")
+        headers, requestAuth = auth.sign(
+            method="POST", target=delivery.destination, action="status", body=body
         )
         client = http.Client(
-            path=event.destination, reconnectable=False, redirectable=False
+            path=delivery.destination, reconnectable=False, redirectable=False
         )
         child = _ClientDoer(client=client)
         try:
@@ -175,38 +177,40 @@ class WebhookSender(doing.DoDoer):
                 raise ConnectionError(
                     "webhook connection closed before a complete response"
                 )
-            self._check_response(event, auth, sent, response)
+            self._check_response(delivery, auth, requestAuth, response)
         finally:
             self.remove([child])
 
-    def _check_response(self, event, auth, sent, response):
+    def _check_response(self, delivery, auth, requestAuth, response):
         """Require HTTP success and the signed ACK for this attempt and event."""
         if response["errored"]:
             raise ValueError(f"webhook HTTP framing: {response['error']}")
-        status = response["status"]
-        if status in (408, 429) or (500 <= status < 600 and status not in (501, 505)):
+        statusCode = response["status"]
+        if statusCode in (408, 429) or (
+            500 <= statusCode < 600 and statusCode not in (501, 505)
+        ):
             raise _TransientFailure(
-                f"webhook HTTP {status}",
+                f"webhook HTTP {statusCode}",
                 retry_after=_retry_after(
                     response["headers"].get("retry-after"), self.clock()
                 ),
             )
-        if status != 200:
-            raise ValueError(f"webhook HTTP {status}")
+        if statusCode != 200:
+            raise ValueError(f"webhook HTTP {statusCode}")
         auth.verify(
             method="POST",
-            target=event.destination,
+            target=delivery.destination,
             action="ack",
             body=response["body"],
             headers=response["headers"],
-            request=sent.reference,
+            request=requestAuth.reference,
             status=response["status"],
         )
         ack = json.loads(response["body"])
         if (
             not isinstance(ack, dict)
             or set(ack) != {"eventId", "stored"}
-            or ack["eventId"] != event.eventId
+            or ack["eventId"] != delivery.eventId
             or ack["stored"] is not True
         ):
             raise ValueError(

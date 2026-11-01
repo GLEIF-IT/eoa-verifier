@@ -6,7 +6,7 @@ def accept_verified_result(baser):
     return baser.accept(
         "association",
         nonce="acceptance-nonce",
-        association={
+        associationFacts={
             "issuerAid": "issuer",
             "leSaid": "le",
             "extId": "eip155:31337:0x" + "12" * 20,

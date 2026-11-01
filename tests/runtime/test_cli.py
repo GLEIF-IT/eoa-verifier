@@ -22,15 +22,15 @@ def test_retry_verification_command_uses_persistent_phase(tmp_path):
     """The operator command renews only an exhausted candidate's retry budget."""
     from keri.db import dbing
     from eoa_verifier.persistence.basing import VerifierBaser
-    from eoa_verifier.persistence.records import PendingVerification
+    from eoa_verifier.persistence.records import VerificationRecord
 
     with dbing.openLMDB(
         cls=VerifierBaser, name="operator", headDirPath=str(tmp_path), temp=False
     ) as baser:
-        baser.enqueue(PendingVerification("candidate", "grant"))
-        work = baser.next_verification(now=0)
+        baser.enqueue(VerificationRecord("candidate", "grant"))
+        verification = baser.next_verification(now=0)
         baser.defer_verification(
-            work, reason="RPC unavailable", next_attempt_at=5, max_attempts=1
+            verification, reason="RPC unavailable", next_attempt_at=5, max_attempts=1
         )
     arguments = [
         "retry-verification",

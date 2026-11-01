@@ -12,7 +12,7 @@ from eoa_verifier.associations.statusing import StatusEnd
 from eoa_verifier.persistence.basing import VerifierBaser
 from eoa_verifier.persistence.records import (
     AcceptedNonce,
-    PendingVerification,
+    VerificationRecord,
     VerificationResult,
 )
 from tests.support.issuers import candidate
@@ -28,7 +28,7 @@ with dbing.openLMDB(cls=VerifierBaser, name="process", headDirPath=root, temp=Fa
         sys.stdin.readline()
     elif mode == "abort":
         baser.associations.serializer = lambda value: os._exit(23)
-    status = baser.accept(said, association={"issuerAid":"issuer"}, nonce="process-nonce",
+    status = baser.accept(said, associationFacts={"issuerAid":"issuer"}, nonce="process-nonce",
                           destination="https://receiver.example/hook", peer_aid="peer")
     if mode == "commit":
         os._exit(24)
@@ -38,7 +38,7 @@ with dbing.openLMDB(cls=VerifierBaser, name="process", headDirPath=root, temp=Fa
 
 def verify(baser, said):
     """Seed only initial verification for storage-boundary tests, not intake qualification."""
-    baser.enqueue(PendingVerification(said, "grant"))
+    baser.enqueue(VerificationRecord(said, "grant"))
     baser.next_verification(now=0)
     baser.finish(
         VerificationResult(
@@ -50,7 +50,7 @@ def verify(baser, said):
 def accept(baser, said, *, issuer="issuer", nonce="nonce", delivery=True):
     return baser.accept(
         said,
-        association={"issuerAid": issuer},
+        associationFacts={"issuerAid": issuer},
         nonce=nonce,
         destination="https://receiver.example/hook" if delivery else None,
         peer_aid="peer" if delivery else None,
@@ -78,8 +78,12 @@ def test_exact_pair_scope_terminal_rejection_and_revocation(tmp_path, delivery):
             # Later delivery configuration does not fabricate an old obligation.
             assert accept(baser, "first", delivery=True) == original
             assert original.eventId == "" and baser.outbox.cntAll() == 0
-        rejected = accept(baser, "second", delivery=delivery)
-        assert (rejected.status, rejected.reason, rejected.eventId) == (
+        rejectedStatus = accept(baser, "second", delivery=delivery)
+        assert (
+            rejectedStatus.status,
+            rejectedStatus.reason,
+            rejectedStatus.eventId,
+        ) == (
             "rejected",
             "NONCE_REUSED",
             "",
@@ -124,7 +128,10 @@ def test_exact_pair_scope_terminal_rejection_and_revocation(tmp_path, delivery):
             accept(baser, "after-revocation", delivery=delivery).reason
             == "NONCE_REUSED"
         )
-        assert accept(baser, "second", nonce="different", delivery=delivery) == rejected
+        assert (
+            accept(baser, "second", nonce="different", delivery=delivery)
+            == rejectedStatus
+        )
         assert baser.outbox.cntAll() == (6 if delivery else 0)
 
 
@@ -305,7 +312,7 @@ def test_ascii_boundaries_are_preserved_in_lmdb(nonce):
 def test_invalid_nonce_is_rejected_without_consumption(nonce):
     credential = candidate()
     with dbing.openLMDB(cls=VerifierBaser) as baser:
-        baser.enqueue(PendingVerification("candidate", "grant"))
+        baser.enqueue(VerificationRecord("candidate", "grant"))
         baser.next_verification(now=0)
         baser.finish(
             VerificationResult(
@@ -316,7 +323,9 @@ def test_invalid_nonce_is_rejected_without_consumption(nonce):
         )
         with pytest.raises(ValueError, match="nonce"):
             baser.accept(
-                "candidate", association={"issuerAid": credential["i"]}, nonce=nonce
+                "candidate",
+                associationFacts={"issuerAid": credential["i"]},
+                nonce=nonce,
             )
         assert (
             baser.accepted_nonces.cntAll()

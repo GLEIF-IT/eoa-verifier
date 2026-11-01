@@ -19,7 +19,7 @@ from eoa_verifier.delivery.delivering import (
     _TransientFailure,
 )
 from eoa_verifier.persistence.basing import VerifierBaser
-from eoa_verifier.persistence.records import PendingVerification, VerificationResult
+from eoa_verifier.persistence.records import VerificationRecord, VerificationResult
 from tests.support.network import free_port
 
 
@@ -72,14 +72,14 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
                 """Read signed bytes and reply with the case-selected HTTP status/body/signature."""
                 body = req.bounded_stream.read()
                 received_bodies.append(body)
-                received = receiver.verify(
+                verifiedAuth = receiver.verify(
                     method=req.method,
                     target=f"http://127.0.0.1:{port}" + req.relative_uri,
                     action="status",
                     body=body,
                     headers=req.headers,
                 )
-                references.append(received.reference)
+                references.append(verifiedAuth.reference)
                 event_id = json.loads(body)["eventId"]
                 if reply == "lost-ack":
                     effects.add(
@@ -115,7 +115,9 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
                     method=req.method,
                     target=target,
                     action="ack",
-                    request="wrong" if reply == "wrong-attempt" else received.reference,
+                    request="wrong"
+                    if reply == "wrong-attempt"
+                    else verifiedAuth.reference,
                     status=status,
                     body=ack,
                 )
@@ -132,7 +134,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
         else:
             server = http.Server(host="127.0.0.1", port=port, app=app)
             server_doer = http.ServerDoer(server=server)
-        baser.enqueue(PendingVerification("association", "grant"))
+        baser.enqueue(VerificationRecord("association", "grant"))
         baser.next_verification(now=0)
         baser.finish(
             VerificationResult(
@@ -144,9 +146,9 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
                 },
             )
         )
-        accepted = baser.accept(
+        associationStatus = baser.accept(
             "association",
-            association={"issuerAid": "issuer"},
+            associationFacts={"issuerAid": "issuer"},
             nonce="other",
             destination=target,
             peer_aid=receiver_hab.pre,
@@ -154,8 +156,8 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
         if reply.startswith("retirement"):
             # Initial delivery is already acknowledged; retirement needs its own
             # event ACK, even if the target signs another acceptance of event 1.
-            baser.delivery_result(accepted.eventId)
-            accepted = baser.retire("association")
+            baser.delivery_result(associationStatus.eventId)
+            associationStatus = baser.retire("association")
         sender = WebhookSender(
             baser=baser,
             hab=sender_hab,
@@ -181,11 +183,12 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
                             truncated = True
                         elif truncated and not connection.txbs:
                             server.removeIx(address)
-                event = baser.outbox.get(keys=(accepted.eventId,))
-                if event.acknowledged or (
+                delivery = baser.outbox.get(keys=(associationStatus.eventId,))
+                if delivery.acknowledged or (
                     reply != "lost-ack"
-                    and event.error
-                    and event.error != "attempt started; authenticated ACK not recorded"
+                    and delivery.error
+                    and delivery.error
+                    != "attempt started; authenticated ACK not recorded"
                 ):
                     parent.remove([sender, server_doer])
                     return
@@ -194,30 +197,30 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
         network = [] if reply == "refused" else [server_doer]
         parent = doing.DoDoer(doers=[sender, *network, doing.doify(wait_for_attempt)])
         doing.Doist(real=True, tock=0.01, limit=3).do(doers=[parent])
-        event = baser.outbox.get(keys=(accepted.eventId,))
+        delivery = baser.outbox.get(keys=(associationStatus.eventId,))
         assert parent.done
-        assert event.acknowledged == (
+        assert delivery.acknowledged == (
             reply in ("stored", "stored-query", "retirement", "lost-ack")
         )
-        assert event.attempts == (2 if reply == "lost-ack" else 1)
+        assert delivery.attempts == (2 if reply == "lost-ack" else 1)
         assert received_bodies == (
             []
             if reply in ("timeout", "refused", "disconnect")
-            else [event.body.encode()] * event.attempts
+            else [delivery.body.encode()] * delivery.attempts
         )
-        assert bool(event.error) == (
+        assert bool(delivery.error) == (
             reply not in ("stored", "stored-query", "retirement", "lost-ack")
         )
 
         if reply == "disconnect":
-            assert "closed" in event.error
+            assert "closed" in delivery.error
         if reply == "lost-ack":
-            assert effects == {event.eventId}
+            assert effects == {delivery.eventId}
             assert (
                 len(set(references)) == 2
             )  # Immutable body, fresh signed attempt references.
-        elif not event.acknowledged:
-            assert event.blocked == (
+        elif not delivery.acknowledged:
+            assert delivery.blocked == (
                 reply not in ("signed-error", "timeout", "refused", "disconnect")
             )
 
@@ -247,7 +250,7 @@ def test_malformed_chunk_response_preserves_pending_delivery(tmp_path):
         hab = hby.makeHab(name="sender")
         server = tcp.Server(host="127.0.0.1", port=free_port())
         peer = BadResponsePeer(server=server)
-        baser.enqueue(PendingVerification("association", "grant"))
+        baser.enqueue(VerificationRecord("association", "grant"))
         baser.next_verification(now=0)
         baser.finish(
             VerificationResult(
@@ -258,7 +261,7 @@ def test_malformed_chunk_response_preserves_pending_delivery(tmp_path):
         )
         status = baser.accept(
             "association",
-            association={"issuerAid": "issuer"},
+            associationFacts={"issuerAid": "issuer"},
             nonce="other",
             destination=f"http://127.0.0.1:{server.ha[1]}/hook",
             peer_aid=hab.pre,
@@ -274,8 +277,8 @@ def test_malformed_chunk_response_preserves_pending_delivery(tmp_path):
                 clients.extend(
                     d.client for d in sender.doers if isinstance(d, http.ClientDoer)
                 )
-                event = baser.outbox.get(keys=(status.eventId,))
-                if event.blocked:
+                delivery = baser.outbox.get(keys=(status.eventId,))
+                if delivery.blocked:
                     assert not any(isinstance(d, http.ClientDoer) for d in sender.doers)
                     parent.remove([sender, peer])
                     return
@@ -285,19 +288,19 @@ def test_malformed_chunk_response_preserves_pending_delivery(tmp_path):
         doing.Doist(real=True, tock=0.01, limit=3).do(doers=[parent])
         assert parent.done and clients
         assert all(not client.connector.opened for client in clients)
-        event = baser.outbox.get(keys=(status.eventId,))
-        assert not event.acknowledged and event.blocked and event.attempts == 1
-        assert "invalid literal" in event.error
-        assert event.body == original.body
+        delivery = baser.outbox.get(keys=(status.eventId,))
+        assert not delivery.acknowledged and delivery.blocked and delivery.attempts == 1
+        assert "invalid literal" in delivery.error
+        assert delivery.body == original.body
         # Framing errors use the existing blocked-delivery correction/resume path.
         baser.close()
         baser.reopen()
-        assert baser.outbox.get(keys=(status.eventId,)) == event
+        assert baser.outbox.get(keys=(status.eventId,)) == delivery
 
 
 def accept(baser, said):
     """Create a completed result and its event at one shared destination."""
-    baser.enqueue(PendingVerification(said, "grant"))
+    baser.enqueue(VerificationRecord(said, "grant"))
     baser.next_verification(now=0)
     baser.finish(
         VerificationResult(
@@ -306,7 +309,7 @@ def accept(baser, said):
     )
     return baser.accept(
         said,
-        association={"issuerAid": "issuer"},
+        associationFacts={"issuerAid": "issuer"},
         nonce=said,
         destination="https://receiver.example/hook",
         peer_aid="peer",
@@ -330,7 +333,7 @@ def test_retry_backoff_caps_and_paces_successes(outbox):
         baser=outbox, hab=None, clock=clock, uniform=lower_bound, max_attempts=12
     )
 
-    def attempt(event):
+    def attempt(delivery):
         """Hold each attempt open over scheduler turns, then fail ten times before succeeding."""
         starts.append(clock())
         yield 1.5 if len(ranges) < 10 else 0.2
@@ -346,7 +349,7 @@ def test_retry_backoff_caps_and_paces_successes(outbox):
     assert len(starts) == 13
     assert all(b - a >= 1.5 - 1e-6 for a, b in zip(starts[:10], starts[1:11]))
     assert all(b - a >= 1 - 1e-6 for a, b in zip(starts, starts[1:]))
-    assert all(event.acknowledged for _, event in outbox.outbox.getItemIter())
+    assert all(delivery.acknowledged for _, delivery in outbox.outbox.getItemIter())
     assert (
         outbox.destinations.get(keys=("https://receiver.example/hook",)).failures == 0
     )
@@ -361,25 +364,25 @@ def test_cooldown_survives_restart_and_gates_new_events(outbox):
         baser=outbox, hab=None, clock=clock, uniform=lambda low, high: high
     )
 
-    def unavailable(event):
+    def unavailable(delivery):
         """Return the same transient classification as a rate-limited HTTP endpoint."""
         yield 0.01
         raise _TransientFailure("webhook HTTP 429", retry_after=600)
 
     with patch.object(sender, "_send", unavailable):
         scheduler.do(doers=[sender])
-    event = outbox.outbox.get(keys=(original.eventId,))
-    schedule = outbox.destinations.get(keys=(event.destination,))
+    delivery = outbox.outbox.get(keys=(original.eventId,))
+    schedule = outbox.destinations.get(keys=(delivery.destination,))
     assert schedule.failures == 1 and schedule.nextAttemptAt >= 1600
     outbox.close()
     outbox.reopen()
     accept(outbox, "b")  # Acceptance must not replace the destination's cooldown.
-    assert outbox.destinations.get(keys=(event.destination,)) == schedule
+    assert outbox.destinations.get(keys=(delivery.destination,)) == schedule
 
     resumed = WebhookSender(baser=outbox, hab=None, clock=clock)
     starts = []
 
-    def acknowledge(event):
+    def acknowledge(delivery):
         """Record the dispatch time; network ACK validation is covered by signed HTTP tests."""
         starts.append(clock())
         yield 0.01
@@ -390,25 +393,25 @@ def test_cooldown_survives_restart_and_gates_new_events(outbox):
         scheduler.do(doers=[resumed], tyme=599)
     assert len(starts) == 2 and min(starts) >= schedule.nextAttemptAt
     assert starts[1] - starts[0] >= 1 - 1e-6
-    assert outbox.destinations.get(keys=(event.destination,)).failures == 0
+    assert outbox.destinations.get(keys=(delivery.destination,)).failures == 0
     assert outbox.outbox.get(keys=(original.eventId,)).attempts == 2
 
 
 def test_permanent_failure_waits_for_explicit_resumption(outbox):
     """Permanent failures remain visible and blocked across restart until the caller corrects/resumes them."""
-    accepted = accept(outbox, "a")
+    associationStatus = accept(outbox, "a")
     scheduler = doing.Doist(tock=0.01, limit=2)
     clock = lambda: 1000 + scheduler.tyme
     sender = WebhookSender(baser=outbox, hab=None, clock=clock)
 
-    def misconfigured(event):
+    def misconfigured(delivery):
         """Model a permanent endpoint failure without replacing any signature test."""
         yield 0.01
         raise ValueError("webhook HTTP 401")
 
     with patch.object(sender, "_send", misconfigured):
         scheduler.do(doers=[sender])
-    failed = outbox.outbox.get(keys=(accepted.eventId,))
+    failed = outbox.outbox.get(keys=(associationStatus.eventId,))
     assert failed.blocked and not failed.acknowledged and failed.attempts == 1
     outbox.close()
     outbox.reopen()
@@ -416,16 +419,16 @@ def test_permanent_failure_waits_for_explicit_resumption(outbox):
     with patch.object(resumed, "_send") as network:
         scheduler.do(doers=[resumed], tyme=2)
         network.assert_not_called()
-    assert outbox.outbox.get(keys=(accepted.eventId,)) == failed
+    assert outbox.outbox.get(keys=(associationStatus.eventId,)) == failed
 
-    def corrected(event):
+    def corrected(delivery):
         """Finish the explicit attempt after the operator has corrected configuration."""
         yield 0.01
 
-    resumed.request(accepted.eventId)
+    resumed.request(associationStatus.eventId)
     with patch.object(resumed, "_send", corrected):
         scheduler.do(doers=[resumed], tyme=4)
-    delivered = outbox.outbox.get(keys=(accepted.eventId,))
+    delivered = outbox.outbox.get(keys=(associationStatus.eventId,))
     assert delivered.acknowledged and not delivered.blocked and delivered.attempts == 1
 
 
@@ -453,7 +456,7 @@ def test_retry_after_supports_seconds_and_http_date():
 
 def test_transient_attempt_budget_moves_to_dead_letter_without_history_scan(outbox):
     """A finite sender stops after three failures and restart never discovers it again."""
-    accepted = accept(outbox, "bounded")
+    associationStatus = accept(outbox, "bounded")
     sender = WebhookSender(
         baser=outbox,
         hab=None,
@@ -464,35 +467,35 @@ def test_transient_attempt_budget_moves_to_dead_letter_without_history_scan(outb
         uniform=lambda low, high: low,
     )
 
-    def unavailable(event):
+    def unavailable(delivery):
         yield 0.0
         raise TimeoutError("unavailable")
 
     for attempt in range(3):
-        event = outbox.next_delivery()
-        assert event.eventId == accepted.eventId
+        delivery = outbox.next_delivery()
+        assert delivery.eventId == associationStatus.eventId
         with patch.object(sender, "_send", unavailable):
-            list(sender._attempt(event))
-    event = outbox.outbox.get(keys=(accepted.eventId,))
-    assert event.blocked and not event.acknowledged and event.attempts == 3
-    assert outbox.delivery_dead.get(keys=(accepted.eventId,)) is not None
+            list(sender._attempt(delivery))
+    delivery = outbox.outbox.get(keys=(associationStatus.eventId,))
+    assert delivery.blocked and not delivery.acknowledged and delivery.attempts == 3
+    assert outbox.delivery_dead.get(keys=(associationStatus.eventId,)) is not None
     outbox.close()
     outbox.reopen()
     assert outbox.next_delivery() is None
-    outbox.retry_delivery(accepted.eventId)
+    outbox.retry_delivery(associationStatus.eventId)
     assert outbox.next_delivery().attempts == 0
 
 
 def test_delivery_phase_resumes_active_and_releases_completed(outbox):
     """A crash retains the active event; ACK atomically removes its scheduling reference."""
-    accepted = accept(outbox, "phase")
-    event = outbox.next_delivery()
-    assert event.eventId == accepted.eventId
+    associationStatus = accept(outbox, "phase")
+    delivery = outbox.next_delivery()
+    assert delivery.eventId == associationStatus.eventId
     assert outbox.delivery_ready.cntAll() == 0
     outbox.close()
     outbox.reopen()
-    assert outbox.next_delivery() == event
-    outbox.delivery_result(event.eventId)
+    assert outbox.next_delivery() == delivery
+    outbox.delivery_result(delivery.eventId)
     assert outbox.delivery_active.cntAll() == 0
     assert outbox.next_delivery() is None
-    assert outbox.outbox.get(keys=(event.eventId,)).acknowledged
+    assert outbox.outbox.get(keys=(delivery.eventId,)).acknowledged

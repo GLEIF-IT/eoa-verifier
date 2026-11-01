@@ -11,7 +11,7 @@ from keri.core import serdering
 from keri.peer import exchanging
 
 from eoa_verifier.persistence.basing import VerifierBaser
-from eoa_verifier.persistence.records import PendingVerification
+from eoa_verifier.persistence.records import VerificationRecord
 
 
 class GrantNotReadyError(Exception):
@@ -79,32 +79,32 @@ class GrantNotificationDoer(doing.Doer):
             notice = (
                 noter.notes.klas(raw=bytes(cursor.value())) if cursor.first() else None
             )
-        work = self.baser.begin_grant(
+        grantRecord = self.baser.begin_grant(
             notice, now=self.clock(), max_attempts=self.max_attempts
         )
-        if work is None:
+        if grantRecord is None:
             # Recover interruption before acknowledging a notice whose final
             # replay attempt was already charged and subsequently dead-lettered.
             if notice is not None and self.baser.grant_dead.get(keys=(notice.rid,)):
                 noter.rem(notice.rid)
             return
-        noter.rem(work.noticeId)
+        noter.rem(grantRecord.noticeId)
         try:
-            if work.attrs.get("r") == "/exn/ipex/grant":
-                self.process_grant_notice(work.attrs)
+            if grantRecord.attrs.get("r") == "/exn/ipex/grant":
+                self.process_grant_notice(grantRecord.attrs)
         except GrantNotReadyError as exc:
             self.baser.settle_grant(
-                work,
+                grantRecord,
                 reason=str(exc) or type(exc).__name__,
                 next_attempt_at=self.clock() + self.retry_delay,
                 max_attempts=self.max_attempts,
             )
         except InvalidGrantError as exc:
             self.baser.settle_grant(
-                work, reason=str(exc) or type(exc).__name__, invalid=True
+                grantRecord, reason=str(exc) or type(exc).__name__, invalid=True
             )
         else:
-            self.baser.settle_grant(work)
+            self.baser.settle_grant(grantRecord)
 
     def _replay_embed(self, ims):
         """Advance KERIpy parsing once for a complete, fixed embed frame.
@@ -144,7 +144,7 @@ class GrantNotificationDoer(doing.Doer):
             except kering.ValidationError as exc:
                 raise InvalidGrantError(str(exc)) from exc
 
-        self.baser.enqueue(PendingVerification(creder.said, grant_said))
+        self.baser.enqueue(VerificationRecord(creder.said, grant_said))
 
     def _read_grant(self, attrs):
         """Return (Grant SAID, KERIpy ACDC, replay bytearrays) from notification attributes.

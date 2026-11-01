@@ -219,10 +219,10 @@ def restart_verifier(root: Path, configuration: dict) -> None:
 
 def present_credential(root: Path, configuration: dict, said: str) -> None:
     """Send exported source/evidence bytes to the public CESR-stream endpoint."""
-    evidence = (root / "chain.cesr").read_bytes() + (
+    presentationCesr = (root / "chain.cesr").read_bytes() + (
         root / "credentials" / f"{said}.cesr"
     ).read_bytes()
-    request_json(configuration["verifierUrl"] + "/", evidence, method="PUT")
+    request_json(configuration["verifierUrl"] + "/", presentationCesr, method="PUT")
 
 
 def wait_for_status(

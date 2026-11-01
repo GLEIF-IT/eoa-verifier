@@ -5,7 +5,7 @@ from keri import core
 from keri.db import dbing
 
 from eoa_verifier.persistence.basing import VerifierBaser
-from eoa_verifier.persistence.records import PendingVerification, VerificationResult
+from eoa_verifier.persistence.records import VerificationRecord, VerificationResult
 from eoa_verifier.runtime.config import ServiceConfig
 
 
@@ -27,7 +27,7 @@ def verified_store(tmp_path):
     with dbing.openLMDB(
         cls=VerifierBaser, name="acceptance", headDirPath=str(tmp_path), temp=False
     ) as baser:
-        baser.enqueue(PendingVerification("association", "grant"))
+        baser.enqueue(VerificationRecord("association", "grant"))
         baser.next_verification(now=0)
         baser.finish(
             VerificationResult(

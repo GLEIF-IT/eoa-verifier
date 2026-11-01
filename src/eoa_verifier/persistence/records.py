@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 
 
 @dataclass
-class PendingVerification:
-    """One verification attempt; table membership identifies its durable phase."""
+class VerificationRecord:
+    """Verification retry metadata; table membership identifies its durable phase."""
 
     associationSaid: str
     grantSaid: str
@@ -15,7 +15,7 @@ class PendingVerification:
 
 
 @dataclass
-class GrantWork:
+class GrantReplayRecord:
     """Authenticated notice retained until replay succeeds or an operator intervenes."""
 
     noticeId: str

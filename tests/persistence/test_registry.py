@@ -1,4 +1,4 @@
-"""Atomic native TEL handoffs and idempotent application retirement."""
+"""Atomic native TEL revocation records and idempotent application retirement."""
 
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -13,41 +13,46 @@ from eoa_verifier.persistence.registry import VerifierReger
 from tests.support.acceptance import accept_verified_result
 
 
-def revocation(*, backers=False):
+def revocation_serder(*, backers=False):
     """Make a syntactic TEL event; integration tests separately establish native validation."""
-    said = core.Diger(ser=b"credential").qb64
-    registry = core.Diger(ser=b"registry").qb64
-    digest = core.Diger(ser=b"issuance").qb64
+    credSaid = core.Diger(ser=b"credential").qb64
+    registryId = core.Diger(ser=b"registry").qb64
+    issuanceTelSaid = core.Diger(ser=b"issuance").qb64
     if backers:
-        return eventing.backerRevoke(said, registry, 0, registry, digest)
-    return eventing.revoke(said, registry, digest)
+        return eventing.backerRevoke(
+            credSaid, registryId, 0, registryId, issuanceTelSaid
+        )
+    return eventing.revoke(credSaid, registryId, issuanceTelSaid)
 
 
 @pytest.mark.parametrize("backers", [False, True])
-def test_accepted_tel_and_handoff_survive_reopen(tmp_path, backers):
-    """Both native revocation variants commit one handoff; native replay cannot recreate it."""
+def test_accepted_tel_and_revocation_record_survive_reopen(tmp_path, backers):
+    """Both native revocation variants commit one revocation record; native replay cannot recreate it."""
     with dbing.openLMDB(
-        cls=VerifierReger, name="handoff", headDirPath=str(tmp_path), temp=False
+        cls=VerifierReger,
+        name="revocation_record",
+        headDirPath=str(tmp_path),
+        temp=False,
     ) as reger:
-        event = revocation(backers=backers)
-        key = dbing.snKey(event.pre, event.sn)
-        reger.putTvt(dbing.dgKey(event.pre, event.said), event.raw)
-        assert reger.putTel(key, event.saidb)
+        telSerder = revocation_serder(backers=backers)
+        key = dbing.snKey(telSerder.pre, telSerder.sn)
+        reger.putTvt(dbing.dgKey(telSerder.pre, telSerder.said), telSerder.raw)
+        assert reger.putTel(key, telSerder.saidb)
         reger.close()
         reger.reopen()
-        assert bytes(reger.getTel(key)) == event.saidb
-        assert reger.next_revocation() == (event.pre, event.said)
-        reger.revocations.rem(keys=(event.pre,))
-        assert not reger.putTel(key, event.saidb)
+        assert bytes(reger.getTel(key)) == telSerder.saidb
+        assert reger.next_revocation() == (telSerder.pre, telSerder.said)
+        reger.revocations.rem(keys=(telSerder.pre,))
+        assert not reger.putTel(key, telSerder.saidb)
         assert reger.next_revocation() is None
 
 
-def test_failed_handoff_write_rolls_back_native_acceptance():
-    """A fault after the TEL index write commits neither index nor handoff."""
+def test_failed_revocation_record_write_rolls_back_native_acceptance():
+    """A fault after the TEL index write commits neither index nor revocation record."""
     with dbing.openLMDB(cls=VerifierReger) as reger:
-        event = revocation()
-        key = dbing.snKey(event.pre, event.sn)
-        reger.putTvt(dbing.dgKey(event.pre, event.said), event.raw)
+        telSerder = revocation_serder()
+        key = dbing.snKey(telSerder.pre, telSerder.sn)
+        reger.putTvt(dbing.dgKey(telSerder.pre, telSerder.said), telSerder.raw)
         real = reger.env
 
         class Transaction:
@@ -63,25 +68,25 @@ def test_failed_handoff_write_rolls_back_native_acceptance():
 
             def put(self, *args, **kwargs):
                 if kwargs["db"] == reger.revocations.sdb:
-                    raise RuntimeError("handoff unavailable")
+                    raise RuntimeError("revocation record unavailable")
                 return self.txn.put(*args, **kwargs)
 
         with (
             patch.object(
                 reger, "env", SimpleNamespace(begin=lambda **kwargs: Transaction())
             ),
-            pytest.raises(RuntimeError, match="handoff unavailable"),
+            pytest.raises(RuntimeError, match="revocation record unavailable"),
         ):
-            reger.putTel(key, event.saidb)
+            reger.putTel(key, telSerder.saidb)
         assert reger.getTel(key) is None
         assert reger.next_revocation() is None
-        assert reger.putTel(key, event.saidb)
+        assert reger.putTel(key, telSerder.saidb)
 
 
 def test_retirement_ack_gap_repeats_only_the_same_event(verified_store, tmp_path):
-    """Reopening after application commit repeats its exact event before clearing the handoff."""
+    """Reopening after application commit repeats its exact event before clearing the revocation record."""
     baser = verified_store
-    accepted = accept_verified_result(baser)
+    associationStatus = accept_verified_result(baser)
     with dbing.openLMDB(
         cls=VerifierReger, name="retirement", headDirPath=str(tmp_path), temp=False
     ) as reger:
@@ -96,16 +101,17 @@ def test_retirement_ack_gap_repeats_only_the_same_event(verified_store, tmp_path
             pytest.raises(RuntimeError, match="interrupted acknowledgement"),
         ):
             worker.recur(0)
-        retired = baser.associations.get(keys=("association",))
+        revokedStatus = baser.associations.get(keys=("association",))
         assert (
-            retired.status == "revoked" and retired.association == accepted.association
+            revokedStatus.status == "revoked"
+            and revokedStatus.association == associationStatus.association
         )
-        body = baser.outbox.get(keys=(retired.eventId,)).body
+        body = baser.outbox.get(keys=(revokedStatus.eventId,)).body
         baser.close()
         baser.reopen()
         reger.close()
         reger.reopen()
         worker.recur(0)
         assert reger.next_revocation() is None
-        assert baser.outbox.get(keys=(retired.eventId,)).body == body
+        assert baser.outbox.get(keys=(revokedStatus.eventId,)).body == body
         assert baser.outbox.cntAll() == 2

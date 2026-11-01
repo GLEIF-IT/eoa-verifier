@@ -16,9 +16,11 @@ def test_retirement_commits_its_own_event_once_and_preserves_facts(verified_stor
     """A failed retirement rolls back; a committed one survives replay with its own pending ACK."""
 
     baser = verified_store
-    accepted = accept_verified_result(baser)
-    baser.delivery_result(accepted.eventId)  # Initial-success ACK is already durable.
-    initial = baser.outbox.get(keys=(accepted.eventId,))
+    associationStatus = accept_verified_result(baser)
+    baser.delivery_result(
+        associationStatus.eventId
+    )  # Initial-success ACK is already durable.
+    initial = baser.outbox.get(keys=(associationStatus.eventId,))
     schedule = DestinationSchedule(failures=3, nextAttemptAt=4000000000)
     baser.destinations.pin(keys=(initial.destination,), val=schedule)
 
@@ -29,33 +31,38 @@ def test_retirement_commits_its_own_event_once_and_preserves_facts(verified_stor
         pytest.raises(RuntimeError, match="write failed"),
     ):
         baser.retire("association")
-    assert baser.associations.get(keys=("association",)) == accepted
+    assert baser.associations.get(keys=("association",)) == associationStatus
     assert baser.outbox.get(keys=("association:2",)) is None
 
-    retired = baser.retire("association")
+    revokedStatus = baser.retire("association")
     baser.close()
     baser.reopen()
-    assert baser.retire("association") == retired
-    assert accept_verified_result(baser) == retired  # No reacceptance after revocation.
+    assert baser.retire("association") == revokedStatus
+    assert (
+        accept_verified_result(baser) == revokedStatus
+    )  # No reacceptance after revocation.
     assert baser.outbox.get(keys=(initial.eventId,)) == initial
-    event = baser.outbox.get(keys=(retired.eventId,))
-    assert not event.acknowledged and event.attempts == 0
-    assert (event.destination, event.peerAid) == (initial.destination, initial.peerAid)
-    assert baser.destinations.get(keys=(event.destination,)) == schedule
-    payload = json.loads(event.body)
+    delivery = baser.outbox.get(keys=(revokedStatus.eventId,))
+    assert not delivery.acknowledged and delivery.attempts == 0
+    assert (delivery.destination, delivery.peerAid) == (
+        initial.destination,
+        initial.peerAid,
+    )
+    assert baser.destinations.get(keys=(delivery.destination,)) == schedule
+    payload = json.loads(delivery.body)
     assert (payload["statusRevision"], payload["status"], payload["reasonCode"]) == (
         2,
         "revoked",
         "REVOKED",
     )
-    assert payload["association"] == accepted.association
-    assert payload["accountObservation"] == accepted.accountObservation
+    assert payload["association"] == associationStatus.association
+    assert payload["accountObservation"] == associationStatus.accountObservation
 
     app = falcon.App()
     app.add_route("/v1/associations/{said}/status", StatusEnd(baser))
     response = TestClient(app).simulate_get("/v1/associations/association/status")
     assert response.json["status"] == "revoked"
     assert response.json["reason"] == "REVOKED"
-    assert response.json["accountObservation"] == accepted.accountObservation
-    assert response.json["delivery"]["eventId"] == event.eventId
+    assert response.json["accountObservation"] == associationStatus.accountObservation
+    assert response.json["delivery"]["eventId"] == delivery.eventId
     assert not response.json["delivery"]["acknowledged"]

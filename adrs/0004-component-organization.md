@@ -47,7 +47,7 @@ writes results/removes pending work atomically. Acceptance and retirement each
 commit association status and its immutable outbox event together. Event creation
 stays beside these transitions; delivery sends stored bytes. KERIpy evidence
 stores remain separate. Durable phase queues bridge commit gaps; the native
-accepted-TEL index and its revocation handoff commit atomically in VerifierReger.
+accepted-TEL index and its revocation record commit atomically in VerifierReger.
 No completed-result or association-history scans schedule work.
 
 Keep authentication separate from ACK policy, verification separate from
