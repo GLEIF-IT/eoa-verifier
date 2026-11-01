@@ -8,14 +8,21 @@ import pytest
 from falcon.testing import TestClient
 from keri.db import dbing
 
-from eoa_verifier.associations.statusing import StatusEnd
+from eoa_verifier.associations.statusing import StatusEnd, StatusQuery
 from eoa_verifier.persistence.basing import VerifierBaser
+from eoa_verifier.persistence.keys import nonce_key
+from eoa_verifier.persistence.reading import ApplicationReader
 from eoa_verifier.persistence.records import (
     AcceptedNonce,
     VerificationRecord,
     VerificationResult,
 )
 from eoa_verifier.persistence.writing import ApplicationWriter
+from tests.support.acceptance import (
+    acceptance_service,
+    association_integrity,
+    retirement_service,
+)
 from tests.support.issuers import candidate
 from tests.support.services import verification_service
 
@@ -23,14 +30,33 @@ WORKER = """
 import os, sys
 from keri.db import dbing
 from eoa_verifier.persistence.basing import VerifierBaser
+from eoa_verifier.associations.accepting import AcceptanceService
+from eoa_verifier.persistence.reading import ApplicationReader
+from eoa_verifier.persistence.writing import ApplicationWriter
 root, said, mode = sys.argv[1:]
 with dbing.openLMDB(cls=VerifierBaser, name="process", headDirPath=root, temp=False) as baser:
     if mode == "race":
         print("ready", flush=True)
         sys.stdin.readline()
     elif mode == "abort":
-        baser.associations.serializer = lambda value: os._exit(23)
-    status = baser.accept(said, associationFacts={"issuerAid":"issuer"}, nonce="process-nonce",
+        from types import SimpleNamespace
+        env = baser.env
+        class InterruptedTransaction:
+            def __enter__(self):
+                self.txn = env.begin(write=True)
+                return self
+            def __exit__(self, kind, value, traceback):
+                self.txn.abort() if kind else self.txn.commit()
+            def __getattr__(self, name):
+                return getattr(self.txn, name)
+            def put(self, *args, **kwargs):
+                result = self.txn.put(*args, **kwargs)
+                if kwargs.get("db") == baser.accepted_nonces.sdb:
+                    os._exit(23)
+                return result
+        baser.env = SimpleNamespace(begin=lambda **kwargs: InterruptedTransaction()
+                                    if kwargs.get("write") else env.begin(**kwargs))
+    status = AcceptanceService(ApplicationReader(baser), ApplicationWriter(baser)).accept(said, associationFacts={"issuerAid":"issuer"}, nonce="process-nonce",
                           destination="https://receiver.example/hook", peer_aid="peer")
     if mode == "commit":
         os._exit(24)
@@ -50,7 +76,7 @@ def verify(baser, said):
 
 
 def accept(baser, said, *, issuer="issuer", nonce="nonce", delivery=True):
-    return baser.accept(
+    return acceptance_service(baser).accept(
         said,
         associationFacts={"issuerAid": issuer},
         nonce=nonce,
@@ -93,7 +119,10 @@ def test_exact_pair_scope_terminal_rejection_and_revocation(tmp_path, delivery):
         assert baser.results.get(keys=("second",)).status == "verified"
         assert baser.outbox.get(keys=("second:1",)) is None
         app = falcon.App()
-        app.add_route("/v1/associations/{said}/status", StatusEnd(baser))
+        app.add_route(
+            "/v1/associations/{said}/status",
+            StatusEnd(StatusQuery(ApplicationReader(baser))),
+        )
         client = TestClient(app)
         response = client.simulate_get("/v1/associations/second/status")
         assert response.status_code == 200
@@ -121,10 +150,10 @@ def test_exact_pair_scope_terminal_rejection_and_revocation(tmp_path, delivery):
         )
         with baser.env.begin() as txn:
             assert txn.get(b"issuer.nonce", db=baser.accepted_nonces.sdb) is not None
-        baser.retire("first")
+        retirement_service(baser).retire("first")
         baser.close()
         baser.reopen()
-        baser.validate_nonce_history()
+        association_integrity(baser).validate_nonce_history()
         assert accept(baser, "first", delivery=delivery).status == "revoked"
         assert (
             accept(baser, "after-revocation", delivery=delivery).reason
@@ -145,7 +174,7 @@ def test_inconsistent_claims_abort_acceptance(corruption):
         verify(baser, "first")
         verify(baser, "candidate")
         accept(baser, "first")
-        key = baser.nonce_key("issuer", "nonce")
+        key = nonce_key("issuer", "nonce")
         raw = {
             "json": b"{bad",
             "wrong-pair": baser.accepted_nonces.serializer(
@@ -165,17 +194,21 @@ def test_inconsistent_claims_abort_acceptance(corruption):
         assert baser.associations.get(keys=("candidate",)) is None
         assert baser.outbox.get(keys=("candidate:1",)) is None
         with pytest.raises(ValueError, match="inconsistent"):
-            baser.validate_nonce_history()
+            association_integrity(baser).validate_nonce_history()
 
 
 def test_populated_store_without_nonce_history_is_rejected():
     with dbing.openLMDB(cls=VerifierBaser) as baser:
-        baser.bind_verification_scope(trusted_geda_aid="geda", chain_id=1)
+        association_integrity(baser).bind_verification_scope(
+            trusted_geda_aid="geda", chain_id=1
+        )
         verify(baser, "first")
         accept(baser, "first")
         baser.accepted_nonces.trim()
         with pytest.raises(ValueError, match="lack nonce history"):
-            baser.bind_verification_scope(trusted_geda_aid="geda", chain_id=1)
+            association_integrity(baser).bind_verification_scope(
+                trusted_geda_aid="geda", chain_id=1
+            )
         assert baser.associations.get(keys=("first",)).status == "accepted"
 
 
@@ -188,7 +221,9 @@ def test_old_scope_is_rejected_without_reading_or_migrating_acceptance():
                 db=baser.scope.sdb,
             )
         with pytest.raises(ValueError, match="fresh store"):
-            baser.bind_verification_scope(trusted_geda_aid="geda", chain_id=1)
+            association_integrity(baser).bind_verification_scope(
+                trusted_geda_aid="geda", chain_id=1
+            )
 
 
 @pytest.mark.parametrize("same_said", [False, True])
@@ -239,7 +274,7 @@ def test_independent_process_race_has_one_owner(tmp_path, same_said):
                 p.kill()
             p.wait(timeout=5)
     with dbing.openLMDB(**options) as baser:
-        baser.validate_nonce_history()
+        association_integrity(baser).validate_nonce_history()
         assert baser.accepted_nonces.cntAll() == baser.outbox.cntAll() == 1
         assert (
             sum(row.status == "accepted" for _, row in baser.associations.getItemIter())
@@ -262,7 +297,7 @@ def test_process_death_before_and_after_commit(tmp_path):
         )
         assert result.returncode == exitcode, result.stderr
         with dbing.openLMDB(**options) as baser:
-            baser.validate_nonce_history()
+            association_integrity(baser).validate_nonce_history()
             expected = int(mode == "commit")
             assert (
                 baser.accepted_nonces.cntAll()
@@ -285,7 +320,7 @@ def test_ascii_boundaries_are_preserved_in_lmdb(nonce):
     credential = candidate()
     with dbing.openLMDB(cls=VerifierBaser) as baser:
         issuer = credential["i"]
-        key = baser.nonce_key(issuer, nonce)
+        key = nonce_key(issuer, nonce)
         assert key == f"{issuer}.{nonce}".encode("ascii")
         assert len(key) <= 173 < baser.env.max_key_size()
 
@@ -326,7 +361,7 @@ def test_invalid_nonce_is_rejected_without_consumption(nonce):
             )
         )
         with pytest.raises(ValueError, match="nonce"):
-            baser.accept(
+            acceptance_service(baser).accept(
                 "candidate",
                 associationFacts={"issuerAid": credential["i"]},
                 nonce=nonce,

@@ -130,7 +130,7 @@ def test_rpc_retry_and_success_move_only_on_completion():
             coordinator.process_results()
         assert ApplicationReader(baser).verification_progress("a") == (None, None)
         assert baser.results.get(keys=("a",)).eoaResult == observation
-        assert baser.next_acceptance().associationSaid == "a"
+        assert ApplicationReader(baser).acceptance().associationSaid == "a"
 
 
 def test_wrong_schema_is_coordinator_rejection_without_keripy_acceptance(config):

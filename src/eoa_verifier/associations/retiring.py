@@ -1,29 +1,73 @@
-"""Consume accepted TEL revocation identifiers, one credential per scheduler turn."""
+"""Idempotent application retirement after accepted native TEL revocation."""
+
+from dataclasses import replace
 
 from hio.base import doing
 
+from eoa_verifier.persistence.records import DeliveryReference
+
+from .events import status_delivery
+
+
+class RetirementService:
+    """Commit application retirement before acknowledging its separate native record."""
+
+    def __init__(self, reader, writer, evidence=None):
+        self.reader, self.writer, self.evidence = reader, writer, evidence
+
+    def process_one(self):
+        """Apply at most one credential revocation without scanning association history."""
+        revocationIds = self.evidence.next_revocation()
+        if revocationIds is None:
+            return
+        credSaid, _telEvtSaid = revocationIds
+        status = self.reader.association(credSaid)
+        if status is not None and status.status == "accepted":
+            self.retire(credSaid)
+        self.evidence.remove_revocation(credSaid)
+
+    def retire(self, credSaid):
+        """Prepare revoked status and its second immutable event from accepted facts."""
+        previous = self.reader.association(credSaid)
+        if previous is None or previous.status not in ("accepted", "revoked"):
+            raise ValueError("retirement requires an accepted association")
+        if previous.status == "revoked":
+            return previous
+        original = self.reader.delivery(previous.eventId) if previous.eventId else None
+        if previous.eventId and original is None:
+            raise ValueError("accepted delivery event is absent")
+        status = replace(
+            previous,
+            status="revoked",
+            eventId=f"{credSaid}:2" if original else "",
+            reason="REVOKED",
+        )
+        delivery = (
+            status_delivery(
+                status,
+                status_revision=2,
+                destination=original.destination,
+                peer_aid=original.peerAid,
+            )
+            if original
+            else None
+        )
+        self.writer.save_retirement(
+            previous,
+            status,
+            delivery,
+            DeliveryReference(delivery.eventId) if delivery else None,
+        )
+        return status
+
 
 class RetirementDoer(doing.Doer):
-    """Borrow both stores; retire locally before removing the native revocation record.
+    """Schedule one native-to-application retirement operation per turn."""
 
-    A crash between commits repeats an idempotent retirement. Revocation before
-    initial acceptance is handled by verification and the acceptance TEL guard;
-    unrelated credentials do not create application status or delivery events.
-    """
-
-    def __init__(self, *, baser, rgy, tock=0.25, **kwa):
-        """Borrow the application store and service-owned VerifierReger."""
-        self.baser, self.rgy = baser, rgy
+    def __init__(self, service, tock=0.25, **kwa):
+        self.service = service
         super().__init__(tock=tock, **kwa)
 
     def recur(self, tyme):
-        """Apply one credential revocation; completed association history is never a work source."""
-        revocationIds = self.rgy.reger.next_revocation()
-        if revocationIds is not None:
-            credSaid, _telEvtSaid = revocationIds
-            # The TEL event SAID records provenance; retirement selects by credential.
-            associationStatus = self.baser.associations.get(keys=(credSaid,))
-            if associationStatus is not None and associationStatus.status == "accepted":
-                self.baser.retire(credSaid)
-            self.rgy.reger.revocations.rem(keys=(credSaid,))
+        self.service.process_one()
         return False

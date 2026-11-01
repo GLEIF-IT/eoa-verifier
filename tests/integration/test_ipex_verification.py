@@ -18,6 +18,7 @@ from keri.db import basing, dbing
 from keri.help import helping
 
 from eoa_verifier.associations.retiring import RetirementDoer
+from eoa_verifier.persistence.keys import nonce_key
 from eoa_verifier.persistence.reading import ApplicationReader
 from eoa_verifier.receiving.grants import GrantNotificationDoer
 from eoa_verifier.runtime.config import ServiceConfig
@@ -486,7 +487,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             )
             assert (
                 runtime.baser.accepted_nonces.get(
-                    keys=(runtime.baser.nonce_key(raced.issuer, raced.sad["u"]),)
+                    keys=(nonce_key(raced.issuer, raced.sad["u"]),)
                 )
                 is None
             )
@@ -502,11 +503,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
                 assert reason in verification.reason, (label, verification)
                 assert (
                     runtime.baser.accepted_nonces.get(
-                        keys=(
-                            runtime.baser.nonce_key(
-                                candidate.issuer, candidate.sad["u"]
-                            ),
-                        )
+                        keys=(nonce_key(candidate.issuer, candidate.sad["u"]),)
                     )
                     is None
                 )

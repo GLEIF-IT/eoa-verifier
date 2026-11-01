@@ -7,9 +7,10 @@ import falcon
 import pytest
 from falcon.testing import TestClient
 
-from eoa_verifier.associations.statusing import StatusEnd
+from eoa_verifier.associations.statusing import StatusEnd, StatusQuery
+from eoa_verifier.persistence.reading import ApplicationReader
 from eoa_verifier.persistence.records import DestinationSchedule
-from tests.support.acceptance import accept_verified_result
+from tests.support.acceptance import accept_verified_result, retirement_service
 
 
 def test_retirement_commits_its_own_event_once_and_preserves_facts(verified_store):
@@ -30,14 +31,14 @@ def test_retirement_commits_its_own_event_once_and_preserves_facts(verified_stor
         ),
         pytest.raises(RuntimeError, match="write failed"),
     ):
-        baser.retire("association")
+        retirement_service(baser).retire("association")
     assert baser.associations.get(keys=("association",)) == associationStatus
     assert baser.outbox.get(keys=("association:2",)) is None
 
-    revokedStatus = baser.retire("association")
+    revokedStatus = retirement_service(baser).retire("association")
     baser.close()
     baser.reopen()
-    assert baser.retire("association") == revokedStatus
+    assert retirement_service(baser).retire("association") == revokedStatus
     assert (
         accept_verified_result(baser) == revokedStatus
     )  # No reacceptance after revocation.
@@ -59,7 +60,10 @@ def test_retirement_commits_its_own_event_once_and_preserves_facts(verified_stor
     assert payload["accountObservation"] == associationStatus.accountObservation
 
     app = falcon.App()
-    app.add_route("/v1/associations/{said}/status", StatusEnd(baser))
+    app.add_route(
+        "/v1/associations/{said}/status",
+        StatusEnd(StatusQuery(ApplicationReader(baser))),
+    )
     response = TestClient(app).simulate_get("/v1/associations/association/status")
     assert response.json["status"] == "revoked"
     assert response.json["reason"] == "REVOKED"

@@ -270,7 +270,9 @@ qualification and the qualified contract revision.
 ## Implementation evidence
 
 - Slice 1: [PR #28](https://github.com/GLEIF-IT/eoa-verifier/pull/28), Grant service/native adapter and atomic replay completion. Focused checks: 25 passed.
-- Slice 2: verification service, native credential evidence and account observation adapters. Focused checks: 119 passed; installed-wheel CI gates merge.
+- Slice 2: [PR #29](https://github.com/GLEIF-IT/eoa-verifier/pull/29), verification service, native credential evidence and account observation adapters. Focused checks: 119 passed; installed-wheel CI gates merge.
+
+- Slice 3: acceptance/retirement services, status query, detached nonce integrity audit and atomic conflict handling. Focused checks: 65 passed; 33 nonce/rollback checks passed; bounded-page reader check passed.
 
 ## Validation and completion criteria
 
