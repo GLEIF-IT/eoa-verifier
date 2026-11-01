@@ -8,6 +8,8 @@ from keri.app import habbing
 from keri.help import helping
 
 from eoa_verifier.delivery.authing import AuthenticationError, ServiceAuthenticator
+from eoa_verifier.delivery.keys import ServiceKeys
+from eoa_verifier.persistence.writing import ApplicationWriter
 
 
 def message():
@@ -22,7 +24,7 @@ def message():
 
 def test_signed_request_and_correlated_response(peers):
     """Authenticate a KERI AID-signed request and a response bound to its attempt/body."""
-    sender, receiver = peers
+    sender, receiver = peers[:2]
     context = message()
     headers, requestAuth = sender.sign(**context)
     verifiedAuth = receiver.verify(**context, headers=headers)
@@ -39,7 +41,7 @@ def test_signed_request_and_correlated_response(peers):
         sender.verify(**dict(ack, request="another attempt"), headers=headers)
     with pytest.raises(AuthenticationError):
         sender.verify(**dict(ack, status=500), headers=headers)
-    assert sender.verify(**ack, headers=headers).peer == receiver.hab.pre
+    assert sender.verify(**ack, headers=headers).peer == receiver.keys.hab.pre
 
 
 @pytest.mark.parametrize(
@@ -55,7 +57,7 @@ def test_signed_request_and_correlated_response(peers):
 )
 def test_tampering_does_not_consume_nonce(peers, field, value):
     """Changed HTTP/body context fails, leaving the authentic attempt usable."""
-    sender, receiver = peers
+    sender, receiver = peers[:2]
     context = message()
     headers, _ = sender.sign(**context)
     with pytest.raises(AuthenticationError):
@@ -65,12 +67,12 @@ def test_tampering_does_not_consume_nonce(peers, field, value):
 
 def test_restart_rejects_replay_but_allows_new_attempt(peers):
     """A stored nonce survives KERIpy store reopen; a freshly signed retry is distinct."""
-    sender, receiver = peers
+    sender, receiver = peers[:2]
     context = message()
     headers, _ = sender.sign(**context)
     receiver.verify(**context, headers=headers)
-    receiver.baser.close()
-    receiver.baser.reopen()
+    peers[3].close()
+    peers[3].reopen()
     with pytest.raises(AuthenticationError, match="replay"):
         receiver.verify(**context, headers=headers)
     headers, _ = sender.sign(**context)
@@ -79,14 +81,14 @@ def test_restart_rejects_replay_but_allows_new_attempt(peers):
 
 def test_rotation_uses_keripy_accepted_key_state(peers):
     """Same-AID rotation works after KERIpy event acceptance; old-key attempts fail."""
-    sender, receiver = peers
+    sender, receiver = peers[:2]
     context = message()
     old, _ = sender.sign(**context)
-    rotation = sender.hab.rotate()
+    rotation = sender.keys.hab.rotate()
     headers, _ = sender.sign(**context)
     with pytest.raises(AuthenticationError, match="signature"):
         receiver.verify(**context, headers=headers)
-    receiver.hab.psr.parse(ims=bytearray(rotation))
+    receiver.keys.hab.psr.parse(ims=bytearray(rotation))
     with pytest.raises(AuthenticationError, match="signature"):
         receiver.verify(**context, headers=old)
     receiver.verify(**context, headers=headers)
@@ -94,7 +96,7 @@ def test_rotation_uses_keripy_accepted_key_state(peers):
 
 def test_expiry_and_unknown_peer(peers):
     """Expired attempts and peers outside configuration are rejected before nonce claims."""
-    sender, receiver = peers
+    sender, receiver = peers[:2]
     context = message()
     headers, _ = sender.sign(**context)
     now = helping.nowUTC()
@@ -103,14 +105,14 @@ def test_expiry_and_unknown_peer(peers):
     with patch("keri.help.helping.nowUTC", return_value=now + timedelta(seconds=61)):
         with pytest.raises(AuthenticationError, match="lifetime"):
             receiver.verify(**context, headers=headers)
-    receiver.peer_aid = receiver.hab.pre
+    receiver.peer_aid = receiver.keys.hab.pre
     with pytest.raises(AuthenticationError, match="peer"):
         receiver.verify(**context, headers=headers)
 
 
 def test_signed_error_response_authenticates_without_implying_delivery(peers):
     """Authentication covers the actual status; delivery policy decides success."""
-    sender, receiver = peers
+    sender, receiver = peers[:2]
     context = message()
     headers, requestAuth = sender.sign(**context)
     verifiedAuth = receiver.verify(**context, headers=headers)
@@ -126,7 +128,7 @@ def test_signed_error_response_authenticates_without_implying_delivery(peers):
     with pytest.raises(AuthenticationError, match="mismatch"):
         sender.verify(**dict(response, status=200), headers=headers)
     assert verifiedAuth.reference == requestAuth.reference
-    assert sender.verify(**response, headers=headers).peer == receiver.hab.pre
+    assert sender.verify(**response, headers=headers).peer == receiver.keys.hab.pre
 
 
 @pytest.mark.parametrize(
@@ -140,7 +142,7 @@ def test_signed_error_response_authenticates_without_implying_delivery(peers):
 )
 def test_malformed_or_changed_headers_fail_closed(peers, header, value):
     """Reject malformed KERI AID signatures and covered-field changes before claiming replay state."""
-    sender, receiver = peers
+    sender, receiver = peers[:2]
     context = message()
     headers, _ = sender.sign(**context)
     with pytest.raises(AuthenticationError):
@@ -170,7 +172,9 @@ def test_rotated_peer_state_survives_service_restart(tmp_path):
             runtime.hby.psr.parse(ims=bytearray(remote.makeOwnEvent(sn=0)))
             runtime.hby.psr.parse(ims=bytearray(remote.rotate()))
             sender = ServiceAuthenticator(
-                hab=remote, baser=runtime.baser, peer_aid=runtime.hab.pre
+                keys=ServiceKeys(remote),
+                claim_nonce=ApplicationWriter(runtime.baser).claim_nonce,
+                peer_aid=runtime.hab.pre,
             )
             headers, _ = sender.sign(**message())
             aid = runtime.hab.pre
@@ -179,7 +183,9 @@ def test_rotated_peer_state_survives_service_restart(tmp_path):
             runtime = lifetime.enter_context(entered_service(config))
             assert runtime.hab.pre == aid
             receiver = ServiceAuthenticator(
-                hab=runtime.hab, baser=runtime.baser, peer_aid=remote.pre
+                keys=ServiceKeys(runtime.hab),
+                claim_nonce=ApplicationWriter(runtime.baser).claim_nonce,
+                peer_aid=remote.pre,
             )
             receiver.verify(**message(), headers=headers)
     finally:
@@ -191,7 +197,7 @@ def test_signed_http_request_and_ack(peers):
     import falcon
     from falcon.testing import TestClient
 
-    sender, receiver = peers
+    sender, receiver = peers[:2]
     context = message()
 
     class Endpoint:

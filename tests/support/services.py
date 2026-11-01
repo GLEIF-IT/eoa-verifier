@@ -77,3 +77,12 @@ def verification_service(baser, rgy=None, **options):
         CredentialEvidence(rgy),
         **options,
     )
+
+
+def delivery_service(baser):
+    """Compose offline delivery operations without native keys or HTTP tasks."""
+    from eoa_verifier.delivery.delivering import DeliveryService
+    from eoa_verifier.persistence.reading import ApplicationReader
+    from eoa_verifier.persistence.writing import ApplicationWriter
+
+    return DeliveryService(ApplicationReader(baser), ApplicationWriter(baser))

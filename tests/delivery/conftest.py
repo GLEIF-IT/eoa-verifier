@@ -7,7 +7,9 @@ from keri.app import habbing
 from keri.db import dbing
 
 from eoa_verifier.delivery.authing import ServiceAuthenticator
+from eoa_verifier.delivery.keys import ServiceKeys
 from eoa_verifier.persistence.basing import VerifierBaser
+from eoa_verifier.persistence.writing import ApplicationWriter
 
 
 @pytest.fixture
@@ -24,8 +26,18 @@ def peers(tmp_path):
         bb = VerifierBaser(name="b", headDirPath=str(tmp_path), temp=False)
         stack.callback(bb.close)
         yield (
-            ServiceAuthenticator(hab=ah, baser=ab, peer_aid=bh.pre),
-            ServiceAuthenticator(hab=bh, baser=bb, peer_aid=ah.pre),
+            ServiceAuthenticator(
+                keys=ServiceKeys(ah),
+                claim_nonce=ApplicationWriter(ab).claim_nonce,
+                peer_aid=bh.pre,
+            ),
+            ServiceAuthenticator(
+                keys=ServiceKeys(bh),
+                claim_nonce=ApplicationWriter(bb).claim_nonce,
+                peer_aid=ah.pre,
+            ),
+            ab,
+            bb,
         )
 
 

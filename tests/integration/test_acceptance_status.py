@@ -11,6 +11,7 @@ from eoa_verifier.associations.statusing import StatusEnd, StatusQuery
 from eoa_verifier.persistence.reading import ApplicationReader
 from eoa_verifier.persistence.records import DestinationSchedule
 from tests.support.acceptance import accept_verified_result, retirement_service
+from tests.support.services import delivery_service
 
 
 def test_retirement_commits_its_own_event_once_and_preserves_facts(verified_store):
@@ -18,8 +19,8 @@ def test_retirement_commits_its_own_event_once_and_preserves_facts(verified_stor
 
     baser = verified_store
     associationStatus = accept_verified_result(baser)
-    baser.delivery_result(
-        associationStatus.eventId
+    delivery_service(baser).complete(
+        associationStatus.eventId, outcome="acknowledged"
     )  # Initial-success ACK is already durable.
     initial = baser.outbox.get(keys=(associationStatus.eventId,))
     schedule = DestinationSchedule(failures=3, nextAttemptAt=4000000000)

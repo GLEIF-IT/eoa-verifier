@@ -18,12 +18,14 @@ from eoa_verifier.delivery.delivering import (
     _retry_after,
     _TransientFailure,
 )
+from eoa_verifier.delivery.keys import ServiceKeys
 from eoa_verifier.persistence.basing import VerifierBaser
+from eoa_verifier.persistence.reading import ApplicationReader
 from eoa_verifier.persistence.records import VerificationRecord, VerificationResult
 from eoa_verifier.persistence.writing import ApplicationWriter
 from tests.support.acceptance import acceptance_service, retirement_service
 from tests.support.network import free_port
-from tests.support.services import verification_service
+from tests.support.services import delivery_service, verification_service
 
 
 @pytest.mark.parametrize(
@@ -64,7 +66,9 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
         query = "memo=a+b&path=%2F" if reply == "stored-query" else "chain=1"
         target = f"http://127.0.0.1:{port}/hook?{query}"
         receiver = ServiceAuthenticator(
-            hab=receiver_hab, baser=receiver_db, peer_aid=sender_hab.pre
+            keys=ServiceKeys(receiver_hab),
+            claim_nonce=ApplicationWriter(receiver_db).claim_nonce,
+            peer_aid=sender_hab.pre,
         )
         received_bodies, references, effects = [], [], set()
 
@@ -161,11 +165,14 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
         if reply.startswith("retirement"):
             # Initial delivery is already acknowledged; retirement needs its own
             # event ACK, even if the target signs another acceptance of event 1.
-            baser.delivery_result(associationStatus.eventId)
+            delivery_service(baser).complete(
+                associationStatus.eventId, outcome="acknowledged"
+            )
             associationStatus = retirement_service(baser).retire("association")
         sender = WebhookSender(
-            baser=baser,
-            hab=sender_hab,
+            reader=ApplicationReader(baser),
+            writer=ApplicationWriter(baser),
+            keys=ServiceKeys(sender_hab),
             timeout=1,
             interval=0.05,
             backoff_base=0.05,
@@ -274,7 +281,11 @@ def test_malformed_chunk_response_preserves_pending_delivery(tmp_path):
             peer_aid=hab.pre,
         )
         original = baser.outbox.get(keys=(status.eventId,))
-        sender = WebhookSender(baser=baser, hab=hab)
+        sender = WebhookSender(
+            reader=ApplicationReader(baser),
+            writer=ApplicationWriter(baser),
+            keys=ServiceKeys(hab),
+        )
         clients = []
 
         def watch(tymth, tock=0.0, **kwa):
@@ -337,7 +348,12 @@ def test_retry_backoff_caps_and_paces_successes(outbox):
         return lower
 
     sender = WebhookSender(
-        baser=outbox, hab=None, clock=clock, uniform=lower_bound, max_attempts=12
+        reader=ApplicationReader(outbox),
+        writer=ApplicationWriter(outbox),
+        keys=ServiceKeys(None),
+        clock=clock,
+        uniform=lower_bound,
+        max_attempts=12,
     )
 
     def attempt(delivery):
@@ -350,7 +366,7 @@ def test_retry_backoff_caps_and_paces_successes(outbox):
             # Queue another event as this attempt succeeds; retain request-start pacing.
             accept(outbox, "c")
 
-    with patch.object(sender, "_send", attempt):
+    with patch.object(sender.service, "send", attempt):
         scheduler.do(doers=[sender])
     assert ranges == [(n, 2 * n) for n in (1, 2, 4, 8, 16, 32, 64, 128, 150, 150)]
     assert len(starts) == 13
@@ -368,7 +384,11 @@ def test_cooldown_survives_restart_and_gates_new_events(outbox):
     scheduler = doing.Doist(tock=0.01, limit=1)
     clock = lambda: 1000 + scheduler.tyme
     sender = WebhookSender(
-        baser=outbox, hab=None, clock=clock, uniform=lambda low, high: high
+        reader=ApplicationReader(outbox),
+        writer=ApplicationWriter(outbox),
+        keys=ServiceKeys(None),
+        clock=clock,
+        uniform=lambda low, high: high,
     )
 
     def unavailable(delivery):
@@ -376,7 +396,7 @@ def test_cooldown_survives_restart_and_gates_new_events(outbox):
         yield 0.01
         raise _TransientFailure("webhook HTTP 429", retry_after=600)
 
-    with patch.object(sender, "_send", unavailable):
+    with patch.object(sender.service, "send", unavailable):
         scheduler.do(doers=[sender])
     delivery = outbox.outbox.get(keys=(original.eventId,))
     schedule = outbox.destinations.get(keys=(delivery.destination,))
@@ -386,7 +406,12 @@ def test_cooldown_survives_restart_and_gates_new_events(outbox):
     accept(outbox, "b")  # Acceptance must not replace the destination's cooldown.
     assert outbox.destinations.get(keys=(delivery.destination,)) == schedule
 
-    resumed = WebhookSender(baser=outbox, hab=None, clock=clock)
+    resumed = WebhookSender(
+        reader=ApplicationReader(outbox),
+        writer=ApplicationWriter(outbox),
+        keys=ServiceKeys(None),
+        clock=clock,
+    )
     starts = []
 
     def acknowledge(delivery):
@@ -396,7 +421,7 @@ def test_cooldown_survives_restart_and_gates_new_events(outbox):
 
     scheduler.tyme = 599
     scheduler.limit = 5
-    with patch.object(resumed, "_send", acknowledge):
+    with patch.object(resumed.service, "send", acknowledge):
         scheduler.do(doers=[resumed], tyme=599)
     assert len(starts) == 2 and min(starts) >= schedule.nextAttemptAt
     assert starts[1] - starts[0] >= 1 - 1e-6
@@ -409,21 +434,31 @@ def test_permanent_failure_waits_for_explicit_resumption(outbox):
     associationStatus = accept(outbox, "a")
     scheduler = doing.Doist(tock=0.01, limit=2)
     clock = lambda: 1000 + scheduler.tyme
-    sender = WebhookSender(baser=outbox, hab=None, clock=clock)
+    sender = WebhookSender(
+        reader=ApplicationReader(outbox),
+        writer=ApplicationWriter(outbox),
+        keys=ServiceKeys(None),
+        clock=clock,
+    )
 
     def misconfigured(delivery):
         """Model a permanent endpoint failure without replacing any signature test."""
         yield 0.01
         raise ValueError("webhook HTTP 401")
 
-    with patch.object(sender, "_send", misconfigured):
+    with patch.object(sender.service, "send", misconfigured):
         scheduler.do(doers=[sender])
     failed = outbox.outbox.get(keys=(associationStatus.eventId,))
     assert failed.blocked and not failed.acknowledged and failed.attempts == 1
     outbox.close()
     outbox.reopen()
-    resumed = WebhookSender(baser=outbox, hab=None, clock=clock)
-    with patch.object(resumed, "_send") as network:
+    resumed = WebhookSender(
+        reader=ApplicationReader(outbox),
+        writer=ApplicationWriter(outbox),
+        keys=ServiceKeys(None),
+        clock=clock,
+    )
+    with patch.object(resumed.service, "send") as network:
         scheduler.do(doers=[resumed], tyme=2)
         network.assert_not_called()
     assert outbox.outbox.get(keys=(associationStatus.eventId,)) == failed
@@ -432,8 +467,8 @@ def test_permanent_failure_waits_for_explicit_resumption(outbox):
         """Finish the explicit attempt after the operator has corrected configuration."""
         yield 0.01
 
-    resumed.request(associationStatus.eventId)
-    with patch.object(resumed, "_send", corrected):
+    resumed.service.retry(associationStatus.eventId)
+    with patch.object(resumed.service, "send", corrected):
         scheduler.do(doers=[resumed], tyme=4)
     delivered = outbox.outbox.get(keys=(associationStatus.eventId,))
     assert delivered.acknowledged and not delivered.blocked and delivered.attempts == 1
@@ -443,10 +478,15 @@ def test_retry_after_supports_seconds_and_http_date():
     """Use server delay or future HTTP date; malformed/past values add no delay."""
     now = 1000
     future = format_datetime(datetime.fromtimestamp(1600, timezone.utc), usegmt=True)
-    sender = WebhookSender(baser=None, hab=None, clock=lambda: now)
+    sender = WebhookSender(
+        reader=ApplicationReader(None),
+        writer=ApplicationWriter(None),
+        keys=ServiceKeys(None),
+        clock=lambda: now,
+    )
     for value in ("600", future):
         with pytest.raises(_TransientFailure) as caught:
-            sender._check_response(
+            sender.service.check_response(
                 None,
                 None,
                 None,
@@ -465,8 +505,9 @@ def test_transient_attempt_budget_moves_to_dead_letter_without_history_scan(outb
     """A finite sender stops after three failures and restart never discovers it again."""
     associationStatus = accept(outbox, "bounded")
     sender = WebhookSender(
-        baser=outbox,
-        hab=None,
+        reader=ApplicationReader(outbox),
+        writer=ApplicationWriter(outbox),
+        keys=ServiceKeys(None),
         interval=0.01,
         backoff_base=0.01,
         backoff_cap=0.01,
@@ -479,30 +520,44 @@ def test_transient_attempt_budget_moves_to_dead_letter_without_history_scan(outb
         raise TimeoutError("unavailable")
 
     for attempt in range(3):
-        delivery = outbox.next_delivery()
+        delivery = delivery_service(outbox).next_delivery()
         assert delivery.eventId == associationStatus.eventId
-        with patch.object(sender, "_send", unavailable):
-            list(sender._attempt(delivery))
+        with patch.object(sender.service, "send", unavailable):
+            list(sender.service.attempt(delivery))
     delivery = outbox.outbox.get(keys=(associationStatus.eventId,))
     assert delivery.blocked and not delivery.acknowledged and delivery.attempts == 3
     assert outbox.delivery_dead.get(keys=(associationStatus.eventId,)) is not None
     outbox.close()
     outbox.reopen()
-    assert outbox.next_delivery() is None
-    outbox.retry_delivery(associationStatus.eventId)
-    assert outbox.next_delivery().attempts == 0
+    assert delivery_service(outbox).next_delivery() is None
+    delivery_service(outbox).retry(associationStatus.eventId)
+    assert delivery_service(outbox).next_delivery().attempts == 0
 
 
 def test_delivery_phase_resumes_active_and_releases_completed(outbox):
     """A crash retains the active event; ACK atomically removes its scheduling reference."""
     associationStatus = accept(outbox, "phase")
-    delivery = outbox.next_delivery()
+    delivery = delivery_service(outbox).next_delivery()
     assert delivery.eventId == associationStatus.eventId
     assert outbox.delivery_ready.cntAll() == 0
     outbox.close()
     outbox.reopen()
-    assert outbox.next_delivery() == delivery
-    outbox.delivery_result(delivery.eventId)
+    assert delivery_service(outbox).next_delivery() == delivery
+    delivery_service(outbox).complete(delivery.eventId, outcome="acknowledged")
     assert outbox.delivery_active.cntAll() == 0
-    assert outbox.next_delivery() is None
+    assert delivery_service(outbox).next_delivery() is None
     assert outbox.outbox.get(keys=(delivery.eventId,)).acknowledged
+
+
+def test_late_completion_keeps_another_active_reference(outbox):
+    """Completing an earlier event cannot remove the sender's different current item."""
+    from eoa_verifier.persistence.records import DeliveryReference
+
+    earlier = accept(outbox, "earlier")
+    current = accept(outbox, "current")
+    outbox.delivery_ready.rem(keys=(current.eventId,))
+    outbox.delivery_active.pin(keys=("sender",), val=DeliveryReference(current.eventId))
+    delivery_service(outbox).complete(earlier.eventId, outcome="acknowledged")
+    assert outbox.delivery_active.get(keys=("sender",)).eventId == current.eventId
+    assert outbox.associations.get(keys=("current",)) == current
+    assert not outbox.outbox.get(keys=(current.eventId,)).acknowledged

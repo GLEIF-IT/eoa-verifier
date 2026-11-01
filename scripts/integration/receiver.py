@@ -3,14 +3,17 @@
 import argparse
 import json
 import signal
-from urllib.parse import urlsplit
 from pathlib import Path
+from urllib.parse import urlsplit
+
 import falcon
 from hio.base import doing
 from hio.core import http
 from keri.app import habbing
 from keri.db import subing
-from eoa_verifier.delivery.authing import ServiceAuthenticator, AuthenticationError
+
+from eoa_verifier.delivery.authing import AuthenticationError, ServiceAuthenticator
+from eoa_verifier.delivery.keys import ServiceKeys
 
 
 class ReceiptStore:
@@ -110,7 +113,9 @@ def main():
         hby.psr.parse(ims=bytearray((root / "verifier.cesr").read_bytes()))
         store = ReceiptStore(hby.db)
         auth = ServiceAuthenticator(
-            hab=hab, baser=store, peer_aid=config["verifierAid"]
+            keys=ServiceKeys(hab),
+            claim_nonce=store.claim_nonce,
+            peer_aid=config["verifierAid"],
         )
         app = falcon.App()
         app.add_route(

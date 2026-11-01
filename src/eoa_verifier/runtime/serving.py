@@ -30,6 +30,7 @@ from ..associations.integrity import AssociationIntegrity
 from ..associations.retiring import RetirementDoer, RetirementService
 from ..associations.statusing import StatusEnd, StatusQuery
 from ..delivery.delivering import WebhookSender
+from ..delivery.keys import ServiceKeys
 from ..persistence.basing import VerifierBaser
 from ..persistence.reading import ApplicationReader
 from ..persistence.registry import VerifierReger
@@ -163,8 +164,9 @@ class VerifierService(doing.DoDoer):
         self.sender = None
         if config.webhook_url:
             self.sender = WebhookSender(
-                baser=baser,
-                hab=hab,
+                reader=ApplicationReader(baser),
+                writer=ApplicationWriter(baser),
+                keys=ServiceKeys(hab),
                 timeout=config.webhook_timeout,
                 max_attempts=config.webhook_max_attempts,
                 interval=config.webhook_interval,

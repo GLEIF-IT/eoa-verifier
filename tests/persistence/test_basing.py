@@ -20,7 +20,7 @@ from tests.support.acceptance import (
     acceptance_service,
     retirement_service,
 )
-from tests.support.services import verification_service
+from tests.support.services import delivery_service, verification_service
 
 
 def test_duplicates_completion_and_restart(tmp_path):
@@ -121,8 +121,10 @@ def test_acceptance_and_delivery_progress_survive_reopen(verified_store):
     associationStatus = accept_verified_result(baser)
     assert ApplicationReader(baser).acceptance() is None
     assert baser.delivery_ready.get(keys=(associationStatus.eventId,)) is not None
-    baser.record_attempt(associationStatus.eventId)
-    baser.delivery_result(associationStatus.eventId, error="connection failed")
+    delivery_service(baser).record_attempt(associationStatus.eventId)
+    delivery_service(baser).complete(
+        associationStatus.eventId, outcome="retry", error="connection failed"
+    )
     delivery = baser.outbox.get(keys=(associationStatus.eventId,))
     # The durable bytes are the public status event, not the internal result row.
     assert json.loads(delivery.body) == {
@@ -143,7 +145,7 @@ def test_acceptance_and_delivery_progress_survive_reopen(verified_store):
     assert baser.destinations.get(keys=(delivery.destination,)) == schedule
 
     # The delivery component calls completion only after validating an ACK.
-    baser.delivery_result(associationStatus.eventId)
+    delivery_service(baser).complete(associationStatus.eventId, outcome="acknowledged")
     assert baser.outbox.get(keys=(associationStatus.eventId,)).acknowledged
     assert baser.destinations.get(keys=(delivery.destination,)).failures == 0
 

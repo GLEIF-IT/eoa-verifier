@@ -12,7 +12,7 @@ from eoa_verifier.persistence.records import (
 )
 from eoa_verifier.persistence.writing import ApplicationWriter
 from tests.support.acceptance import accept_verified_result, acceptance_service
-from tests.support.services import verification_service
+from tests.support.services import delivery_service, verification_service
 
 
 def test_public_get_returns_stored_status_and_old_observation(verified_store):
@@ -54,8 +54,8 @@ def test_public_status_does_not_disclose_other_delivery_activity(verified_store)
     """Another event's shared cooldown cannot change an acknowledged association's public view."""
     baser = verified_store
     associationStatus = accept_verified_result(baser)
-    baser.record_attempt(associationStatus.eventId)
-    baser.delivery_result(associationStatus.eventId)
+    delivery_service(baser).record_attempt(associationStatus.eventId)
+    delivery_service(baser).complete(associationStatus.eventId, outcome="acknowledged")
     delivery = baser.outbox.get(keys=(associationStatus.eventId,))
     app = falcon.App()
     app.add_route(
@@ -80,9 +80,11 @@ def test_public_status_does_not_disclose_other_delivery_activity(verified_store)
         destination=delivery.destination,
         peer_aid=delivery.peerAid,
     )
-    baser.record_attempt(other.eventId, next_attempt_at=3000000000)
+    delivery_service(baser).record_attempt(other.eventId, next_attempt_at=3000000000)
     schedule = DestinationSchedule(failures=3, nextAttemptAt=4000000000)
-    baser.delivery_result(other.eventId, error="target unavailable", schedule=schedule)
+    delivery_service(baser).complete(
+        other.eventId, outcome="retry", error="target unavailable", schedule=schedule
+    )
 
     assert client.simulate_get(path).json == before
     assert "nextAttemptAt" not in before["delivery"]
