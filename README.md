@@ -176,3 +176,5 @@ its sole packaged schema, proof vectors, generator and conformance tests, plus
 [verifier-api-v1](protocol/verifier-api-v1/README.md) and the shared signed
 webhook/ACK profile. Oracle owns its selection/publication API; Comply owns the
 registry ABI and calldata fixtures.
+
+For an independent witnessed local environment, see [the integration commands](scripts/integration/README.md).
