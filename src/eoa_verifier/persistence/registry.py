@@ -1,4 +1,4 @@
-"""Persist accepted credential revocation identifiers alongside the native TEL index."""
+"""Persist accepted credential revocation identifiers alongside the KERIpy TEL index."""
 
 from keri.core import serdering
 from keri.db import dbing, subing
@@ -10,13 +10,13 @@ class VerifierReger(viring.Reger):
 
     In pinned KERIpy, Tever.logEvent calls putTel only after validating the TEL
     event and its anchor. Event bytes have already been persisted in tvts. This
-    narrow override preserves native validation and replaces the final index write
+    narrow override preserves KERIpy validation and replaces the final index write
     with an atomic index-plus-revocation write. Transient Tever cues are not recovery
     records. Changes to this upstream boundary require requalification.
     """
 
     def reopen(self, **kwa):
-        """Bind the revocation table after opening all native registry subdatabases."""
+        """Bind the revocation table after opening all KERIpy registry subdatabases."""
         super().reopen(**kwa)
         try:
             self.revocations = subing.Suber(db=self, subkey="verifier-revocations.")

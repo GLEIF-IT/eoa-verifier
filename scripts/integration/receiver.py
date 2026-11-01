@@ -17,7 +17,7 @@ from eoa_verifier.delivery.keys import ServiceKeys
 
 
 class ReceiptStore:
-    """Borrow a native database for durable fixture receipts and replay claims."""
+    """Borrow a KERIpy database for durable fixture receipts and replay claims."""
 
     def __init__(self, db):
         """Bind disjoint non-duplicate receipt, attempt and control subdatabases."""
@@ -27,16 +27,95 @@ class ReceiptStore:
         self.control = subing.Suber(db=db, subkey="fixture.control.")
 
     def claim_nonce(self, peer, nonce, expires_at):
-        """Use native no-overwrite insertion for one authentication replay claim."""
+        """Use LMDB no-overwrite insertion for one authentication replay claim."""
         return self.replays.put(keys=(peer, nonce), val=str(expires_at))
+
+    def receipt(self, event_id):
+        """Return exact retained bytes as text for one event ID."""
+        return self.events.get(keys=(event_id,))
+
+    def attempt_count(self, event_id):
+        """Read the number of authenticated receipt attempts already committed."""
+        return int(self.attempts.get(keys=(event_id,)) or "0")
+
+    def save_receipt(self, event_id, text, count, previous):
+        """Commit prepared immutable event bytes and the attempt count together."""
+        key, raw, count_raw = event_id.encode(), text.encode(), str(count).encode()
+        expected = previous.encode() if previous is not None else None
+        with self.events.db.env.begin(write=True) as txn:
+            if txn.get(key, db=self.events.sdb) != expected:
+                raise ReceiptConflict("receipt changed before save")
+            txn.put(key, raw, db=self.events.sdb, overwrite=False)
+            txn.put(key, count_raw, db=self.attempts.sdb)
+
+    def receipts(self):
+        """Detach fixture diagnostics before HTTP response construction."""
+        rows = []
+        with (
+            self.events.db.env.begin() as txn,
+            txn.cursor(db=self.events.sdb) as cursor,
+        ):
+            for key, raw in cursor:
+                rows.append(
+                    {
+                        "eventId": bytes(key).decode(),
+                        "body": bytes(raw).decode(),
+                        "attempts": int(
+                            txn.get(bytes(key), db=self.attempts.sdb) or b"0"
+                        ),
+                    }
+                )
+        return rows
+
+    def drop_ack_once(self):
+        """Persist the fixture's deliberate first-ACK loss, separately from receipt commit."""
+        return self.control.put(keys=("dropped",), val="true")
+
+
+class ReceiptConflict(ValueError):
+    """An event ID was reused with different bytes or changed during receipt."""
+
+
+class ReceiptService:
+    """Apply the fixture's narrow immutable-event receipt operation."""
+
+    def __init__(self, store):
+        """Borrow receipt storage; authentication and ACK fault injection stay outside."""
+        self.store = store
+
+    def receive(self, body):
+        """Validate one event ID, persist identical bytes/count, and return its ID."""
+        try:
+            payload = json.loads(body)
+            event_id = payload["eventId"]
+            if not isinstance(event_id, str) or not event_id:
+                raise ValueError("missing event ID")
+            text = body.decode()
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ValueError("invalid fixture event") from exc
+        previous = self.store.receipt(event_id)
+        if previous is not None and previous != text:
+            raise ReceiptConflict("conflicting event bytes")
+        count = self.store.attempt_count(event_id) + 1
+        self.store.save_receipt(event_id, text, count, previous)
+        return event_id
+
+    def receipts(self):
+        """Return detached diagnostics without changing receipt state."""
+        return self.store.receipts()
 
 
 class Receiver:
     """Authenticate exact producer bytes and acknowledge only a durable receipt."""
 
-    def __init__(self, auth, store, target, drop):
-        """Borrow auth/store; target is the signed URL, drop loses the first ACK."""
-        self.auth, self.store, self.target, self.drop = auth, store, target, drop
+    def __init__(self, auth, receipts, target, *, drop_ack=None):
+        """Borrow authentication/receipt operations and an optional post-commit fault."""
+        self.auth, self.receipts, self.target, self.drop_ack = (
+            auth,
+            receipts,
+            target,
+            drop_ack,
+        )
 
     def on_post(self, req, rep):
         """Commit immutable event bytes before signing an attempt-bound ACK."""
@@ -56,22 +135,12 @@ class Receiver:
         except AuthenticationError as exc:
             raise falcon.HTTPUnauthorized(description=str(exc)) from exc
         try:
-            payload = json.loads(body)
-            key = payload["eventId"]
-            if not isinstance(key, str) or not key:
-                raise ValueError("missing event ID")
-        except (ValueError, KeyError, TypeError) as exc:
-            raise falcon.HTTPBadRequest(description="invalid fixture event") from exc
-        text = body.decode()
-        previous = self.store.events.get(keys=(key,))
-        if previous is not None and previous != text:
-            raise falcon.HTTPConflict(description="conflicting event bytes")
-        self.store.events.put(
-            keys=(key,), val=text
-        )  # Native synchronous commit precedes ACK.
-        count = int(self.store.attempts.get(keys=(key,)) or "0") + 1
-        self.store.attempts.pin(keys=(key,), val=str(count))
-        if self.drop and self.store.control.put(keys=("dropped",), val="true"):
+            key = self.receipts.receive(body)
+        except ReceiptConflict as exc:
+            raise falcon.HTTPConflict(description=str(exc)) from exc
+        except ValueError as exc:
+            raise falcon.HTTPBadRequest(description=str(exc)) from exc
+        if self.drop_ack is not None and self.drop_ack():
             raise falcon.HTTPServiceUnavailable(
                 description="fixture dropped post-commit ACK"
             )
@@ -89,14 +158,7 @@ class Receiver:
 
     def on_get(self, req, rep):
         """Expose retained receipt bytes and attempt counts for qualification."""
-        rep.media = [
-            {
-                "eventId": keys[0],
-                "body": value,
-                "attempts": int(self.store.attempts.get(keys=keys)),
-            }
-            for keys, value in self.store.events.getItemIter()
-        ]
+        rep.media = self.receipts.receipts()
 
 
 def main():
@@ -119,7 +181,13 @@ def main():
         )
         app = falcon.App()
         app.add_route(
-            "/hook", Receiver(auth, store, config["webhookUrl"], config["dropAck"])
+            "/hook",
+            Receiver(
+                auth,
+                ReceiptService(store),
+                config["webhookUrl"],
+                drop_ack=store.drop_ack_once if config["dropAck"] else None,
+            ),
         )
         server = http.Server(host="127.0.0.1", port=config["receiverPort"], app=app)
         doing.Doist(real=True, tock=0.01).do(doers=[http.ServerDoer(server=server)])

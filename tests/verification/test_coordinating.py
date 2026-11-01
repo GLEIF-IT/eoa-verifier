@@ -9,7 +9,6 @@ from eoa_verifier.persistence.basing import VerifierBaser
 from eoa_verifier.persistence.reading import ApplicationReader
 from eoa_verifier.persistence.records import VerificationRecord, VerificationResult
 from eoa_verifier.persistence.writing import ApplicationWriter
-from eoa_verifier.receiving.grants import GrantNotificationDoer
 from eoa_verifier.verification.constants import ASSOCIATION_SCHEMA
 from eoa_verifier.verification.coordinating import VerificationCoordinator
 from eoa_verifier.verification.errors import MissingCredentialArtifactsError
@@ -145,7 +144,6 @@ def test_wrong_schema_is_coordinator_rejection_without_keripy_acceptance(config)
         entered_service(config) as runtime,
         habbing.openHby(name="sender", temp=True) as hby,
     ):
-        grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
         coordinator = next(
             d for d in runtime.doers if isinstance(d, VerificationCoordinator)
         )
@@ -153,25 +151,25 @@ def test_wrong_schema_is_coordinator_rejection_without_keripy_acceptance(config)
         sad["s"] = LE_SCHEMA
         creder = serdering.SerderACDC(sad=sad, makify=True)
         sender = hby.makeHab(name="sender")
-        grant_said = signed_notice(runtime, grants, sender, creder.sad)
+        grant_said = signed_notice(runtime, sender, creder.sad)
         attrs = {"d": grant_said}
-        grants.service.native.notifier.add({"r": "/exn/ipex/grant", **attrs})
-        grants.service.process_one()
+        runtime.notifier.add({"r": "/exn/ipex/grant", **attrs})
+        runtime.grant_replay.process_one()
         pending = runtime.baser.pending.get(keys=(creder.said,))
         assert pending is not None
         assert runtime.baser.results.get(keys=(creder.said,)) is None
         assert runtime.rgy.reger.creds.get(keys=(creder.said,)) is None
         assert runtime.rgy.reger.saved.get(keys=(creder.said,)) is None
-        grants.service.native.notifier.add({"r": "/exn/ipex/grant", **attrs})
-        grants.service.process_one()
+        runtime.notifier.add({"r": "/exn/ipex/grant", **attrs})
+        runtime.grant_replay.process_one()
         assert runtime.baser.pending.get(keys=(creder.said,)) == pending
         coordinator.process_ready()
         result = runtime.baser.results.get(keys=(creder.said,))
         assert result.status == "rejected"
         assert "unexpected schema" in result.reason
         assert runtime.baser.pending.get(keys=(creder.said,)) is None
-        grants.service.native.notifier.add({"r": "/exn/ipex/grant", **attrs})
-        grants.service.process_one()
+        runtime.notifier.add({"r": "/exn/ipex/grant", **attrs})
+        runtime.grant_replay.process_one()
         assert runtime.baser.results.get(keys=(creder.said,)) == result
         assert runtime.baser.pending.get(keys=(creder.said,)) is None
 

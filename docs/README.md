@@ -3,6 +3,7 @@
 - [External association v1](../protocol/external-association-v1/README.md): credential/schema, challenge and reference vectors.
 - [Verifier API v1](../protocol/verifier-api-v1/README.md): evidence intake, acceptance/public status and shared signed delivery.
 - [Operations](operations.md): install, trust introduction, persistence, delivery recovery and limitations.
+- [Application/persistence separation](plans/application-persistence-separation.md): service boundaries, explicit transition saves and review sequence.
 - [Testing](testing.md): component/function and installed-wheel procedures.
 - [Deployment](diagrams/deployment/deployment-models.md), [creation](diagrams/sequence/association-creation-sequence.md) and [verification](diagrams/sequence/association-verification-sequence.md): editable Mermaid with rendered SVG.
 

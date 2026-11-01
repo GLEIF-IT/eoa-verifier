@@ -122,9 +122,7 @@ def test_acceptance_and_delivery_progress_survive_reopen(verified_store):
     assert ApplicationReader(baser).acceptance() is None
     assert baser.delivery_ready.get(keys=(associationStatus.eventId,)) is not None
     delivery_service(baser).record_attempt(associationStatus.eventId)
-    delivery_service(baser).complete(
-        associationStatus.eventId, outcome="retry", error="connection failed"
-    )
+    delivery_service(baser).defer(associationStatus.eventId, error="connection failed")
     delivery = baser.outbox.get(keys=(associationStatus.eventId,))
     # The durable bytes are the public status event, not the internal result row.
     assert json.loads(delivery.body) == {
@@ -145,7 +143,7 @@ def test_acceptance_and_delivery_progress_survive_reopen(verified_store):
     assert baser.destinations.get(keys=(delivery.destination,)) == schedule
 
     # The delivery component calls completion only after validating an ACK.
-    delivery_service(baser).complete(associationStatus.eventId, outcome="acknowledged")
+    delivery_service(baser).acknowledge(associationStatus.eventId)
     assert baser.outbox.get(keys=(associationStatus.eventId,)).acknowledged
     assert baser.destinations.get(keys=(delivery.destination,)).failures == 0
 

@@ -55,7 +55,7 @@ def test_public_status_does_not_disclose_other_delivery_activity(verified_store)
     baser = verified_store
     associationStatus = accept_verified_result(baser)
     delivery_service(baser).record_attempt(associationStatus.eventId)
-    delivery_service(baser).complete(associationStatus.eventId, outcome="acknowledged")
+    delivery_service(baser).acknowledge(associationStatus.eventId)
     delivery = baser.outbox.get(keys=(associationStatus.eventId,))
     app = falcon.App()
     app.add_route(
@@ -82,8 +82,8 @@ def test_public_status_does_not_disclose_other_delivery_activity(verified_store)
     )
     delivery_service(baser).record_attempt(other.eventId, next_attempt_at=3000000000)
     schedule = DestinationSchedule(failures=3, nextAttemptAt=4000000000)
-    delivery_service(baser).complete(
-        other.eventId, outcome="retry", error="target unavailable", schedule=schedule
+    delivery_service(baser).defer(
+        other.eventId, error="target unavailable", schedule=schedule
     )
 
     assert client.simulate_get(path).json == before

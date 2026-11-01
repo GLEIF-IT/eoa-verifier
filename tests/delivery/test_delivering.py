@@ -165,9 +165,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
         if reply.startswith("retirement"):
             # Initial delivery is already acknowledged; retirement needs its own
             # event ACK, even if the target signs another acceptance of event 1.
-            delivery_service(baser).complete(
-                associationStatus.eventId, outcome="acknowledged"
-            )
+            delivery_service(baser).acknowledge(associationStatus.eventId)
             associationStatus = retirement_service(baser).retire("association")
         sender = WebhookSender(
             reader=ApplicationReader(baser),
@@ -543,7 +541,7 @@ def test_delivery_phase_resumes_active_and_releases_completed(outbox):
     outbox.close()
     outbox.reopen()
     assert delivery_service(outbox).next_delivery() == delivery
-    delivery_service(outbox).complete(delivery.eventId, outcome="acknowledged")
+    delivery_service(outbox).acknowledge(delivery.eventId)
     assert outbox.delivery_active.cntAll() == 0
     assert delivery_service(outbox).next_delivery() is None
     assert outbox.outbox.get(keys=(delivery.eventId,)).acknowledged
@@ -557,7 +555,7 @@ def test_late_completion_keeps_another_active_reference(outbox):
     current = accept(outbox, "current")
     outbox.delivery_ready.rem(keys=(current.eventId,))
     outbox.delivery_active.pin(keys=("sender",), val=DeliveryReference(current.eventId))
-    delivery_service(outbox).complete(earlier.eventId, outcome="acknowledged")
+    delivery_service(outbox).acknowledge(earlier.eventId)
     assert outbox.delivery_active.get(keys=("sender",)).eventId == current.eventId
     assert outbox.associations.get(keys=("current",)) == current
     assert not outbox.outbox.get(keys=(current.eventId,)).acknowledged

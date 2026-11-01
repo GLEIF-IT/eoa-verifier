@@ -13,10 +13,14 @@ policy. [Verifier API v1](../protocol/verifier-api-v1/README.md) owns these visi
 semantics; [external-association-v1](../protocol/external-association-v1/README.md)
 owns nonce syntax and signed commitments.
 
-`VerifierBaser.accept()` commits the claim, accepted status and optional outbox
-obligation in one native synchronous LMDB write transaction. Insert without
-overwrite and inspect existing data in the same transaction. Inconsistent or
-orphaned claims abort acceptance. Native LMDB supplies process coordination; no
+`AcceptanceService` prepares status and event records before persistence.
+`ApplicationWriter.accept_association()` commits local-only acceptance;
+`accept_and_queue_delivery()` commits the claim, status and delivery obligation
+in one synchronous LMDB write transaction. Nonce insertion never overwrites.
+A conflict aborts the entire attempted acceptance. The service then reads and
+validates committed ownership before `reject_reused_nonce()` saves rejection and
+removes acceptance work. Inconsistent or orphaned claims fail closed. A crash
+between conflict and rejection leaves the acceptance obligation recoverable. LMDB supplies process coordination; no
 application locks, threads or additional environment are needed for nonce claims.
 
 The typed `AcceptedNonce` record stores issuer, exact nonce and accepted SAID.
@@ -34,8 +38,8 @@ without an event. Later enabling delivery does not backfill those acceptances.
 
 The `durable-phases-v1` scope requires complete claim history. Startup rejects
 pre-policy or inconsistent acceptance stores; it does not migrate, backfill or
-recreate missing claims. The history audit currently holds accepted SAIDs in
-memory. Uniqueness applies within one preserved verifier store, not globally
+recreate missing claims. The history audit detaches bounded pages before checking them and holds accepted
+SAIDs in memory. Uniqueness applies within one preserved verifier store, not globally
 across independent deployments. Do not erase history to evade reuse rejection.
 
 See [operations](../docs/operations.md) for store layout and maintenance, and

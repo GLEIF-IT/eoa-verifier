@@ -1,8 +1,6 @@
 """Compose KERIpy intake, initial verification, retirement and status delivery."""
 
-import json
 from collections import deque
-from pathlib import Path
 
 import falcon
 from hio.base import doing
@@ -26,7 +24,6 @@ from keri.vdr import eventing as veventing
 
 from ..associations.accepting import AcceptanceDoer, AcceptanceService
 from ..associations.evidence import AssociationEvidence
-from ..associations.integrity import AssociationIntegrity
 from ..associations.retiring import RetirementDoer, RetirementService
 from ..associations.statusing import StatusEnd, StatusQuery
 from ..delivery.delivering import WebhookSender
@@ -36,14 +33,14 @@ from ..persistence.reading import ApplicationReader
 from ..persistence.registry import VerifierReger
 from ..persistence.writing import ApplicationWriter
 from ..receiving.directing import CesrEnd, Receiver
-from ..receiving.grants import GrantNotificationDoer, NativeGrantAdapter
+from ..receiving.grants import GrantNotificationDoer, IpexGrantAdapter
 from ..receiving.replaying import GrantReplayService
 from ..verification.constants import ASSOCIATION_SCHEMA
 from ..verification.coordinating import VerificationCoordinator
 from ..verification.evidence import CredentialEvidence
-from ..verification.schema_cache import pin_accepted_schemas
 from ..verification.verifying import VerificationService
 from ..verification.worker import EoaVerifierDoer
+from .bootstrap import bootstrap_service
 from .config import ServiceConfig
 
 
@@ -60,29 +57,9 @@ class VerifierService(doing.DoDoer):
         inception options apply only to that creation. HIO network Doers own
         their sockets. kwa is passed to HIO DoDoer.
         """
-        AssociationIntegrity(
-            ApplicationReader(baser), ApplicationWriter(baser)
-        ).bind_verification_scope(
-            trusted_geda_aid=config.trusted_geda_aid, chain_id=config.chain_id
-        )
         self.config = config
-        inits = {
-            "transferable": True,
-            "icount": 1,
-            "isith": "1",
-            "ncount": 1,
-            "nsith": "1",
-            "wits": [],
-            "toad": 0,
-        }
-        if config.incept_file:
-            extra = json.loads(Path(config.incept_file).read_text())
-            if not isinstance(extra, dict):
-                raise ValueError("incept file must contain a JSON object")
-            inits.update(extra)
-
-        pin_accepted_schemas(hby)
-        hab = hby.habByName(config.alias) or hby.makeHab(name=config.alias, **inits)
+        reader, writer = ApplicationReader(baser), ApplicationWriter(baser)
+        hab = bootstrap_service(config, hby, reader, writer)
         notifier = notifying.Notifier(hby=hby, noter=noter)
         exc = exchanging.Exchanger(hby=hby, handlers=[])
         protocoling.loadHandlers(hby=hby, exc=exc, notifier=notifier)
@@ -114,7 +91,7 @@ class VerifierService(doing.DoDoer):
         app.add_route("/health", HealthEnd())
         app.add_route(
             "/v1/associations/{said}/status",
-            StatusEnd(StatusQuery(ApplicationReader(baser))),
+            StatusEnd(StatusQuery(reader)),
         )
         server = http.Server(
             host=config.host,
@@ -128,21 +105,19 @@ class VerifierService(doing.DoDoer):
             ),
         )
         oobiery = oobiing.Oobiery(hby=hby, clienter=httping.Clienter())
+        self.notifier, self.parser = notifier, parser
+        self.grant_replay = GrantReplayService(
+            reader, writer, IpexGrantAdapter(hby, notifier, parser)
+        )
         doers = [
             *oobiery.doers,
             receiver,
             http.ServerDoer(server=server),
-            GrantNotificationDoer(
-                GrantReplayService(
-                    ApplicationReader(baser),
-                    ApplicationWriter(baser),
-                    NativeGrantAdapter(hby, notifier, parser),
-                ),
-            ),
+            GrantNotificationDoer(self.grant_replay),
             VerificationCoordinator(
                 service=VerificationService(
-                    ApplicationReader(baser),
-                    ApplicationWriter(baser),
+                    reader,
+                    writer,
                     CredentialEvidence(rgy),
                     trusted_geda_aid=config.trusted_geda_aid,
                     association_schema=ASSOCIATION_SCHEMA,
@@ -155,8 +130,8 @@ class VerifierService(doing.DoDoer):
         doers.append(
             RetirementDoer(
                 RetirementService(
-                    ApplicationReader(baser),
-                    ApplicationWriter(baser),
+                    reader,
+                    writer,
                     AssociationEvidence(rgy),
                 )
             )
@@ -164,8 +139,8 @@ class VerifierService(doing.DoDoer):
         self.sender = None
         if config.webhook_url:
             self.sender = WebhookSender(
-                reader=ApplicationReader(baser),
-                writer=ApplicationWriter(baser),
+                reader=reader,
+                writer=writer,
                 keys=ServiceKeys(hab),
                 timeout=config.webhook_timeout,
                 max_attempts=config.webhook_max_attempts,
@@ -177,8 +152,8 @@ class VerifierService(doing.DoDoer):
         doers.append(
             AcceptanceDoer(
                 AcceptanceService(
-                    ApplicationReader(baser),
-                    ApplicationWriter(baser),
+                    reader,
+                    writer,
                     AssociationEvidence(rgy),
                     destination=config.webhook_url,
                     peer_aid=config.webhook_aid,

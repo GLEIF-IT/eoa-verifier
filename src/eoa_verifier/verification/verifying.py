@@ -26,7 +26,7 @@ class VerificationService:
         max_attempts=3,
         clock=time.time,
     ):
-        """Borrow adapters; native evidence is unnecessary for offline phase operations."""
+        """Borrow adapters; KERIpy evidence is unnecessary for offline phase operations."""
         self.reader, self.writer, self.evidence = reader, writer, evidence
         self.trusted_geda_aid, self.association_schema = (
             trusted_geda_aid,
@@ -40,46 +40,81 @@ class VerificationService:
 
     def next_verification(self, *, now, max_attempts=3):
         """Choose one active/due/new candidate and durably charge its attempt."""
-        for source in ("verifying", "waiting", "pending"):
-            record = self.reader.verification(source)
-            if record is None or (source == "waiting" and record.nextAttemptAt > now):
-                continue
+        record = self.reader.active_verification()
+        if record is not None:
             if record.attempts >= max_attempts:
                 dead = replace(
                     record,
                     reason=record.reason
                     or "verification interrupted; attempt budget exhausted",
                 )
-                self.writer.move_verification(record, source, dead, "dead-letter")
+                self.writer.dead_letter_verification(record, dead)
                 return None
             active = replace(
                 record,
                 attempts=record.attempts + 1,
                 reason="verification attempt started; result not committed",
             )
-            self.writer.move_verification(record, source, active, "verifying")
+            self.writer.resume_verification(record, active)
+            return active
+        record = self.reader.waiting_verification()
+        if record is not None and record.nextAttemptAt <= now:
+            if record.attempts >= max_attempts:
+                dead = replace(
+                    record,
+                    reason=record.reason
+                    or "verification interrupted; attempt budget exhausted",
+                )
+                self.writer.dead_letter_waiting_verification(record, dead)
+                return None
+            active = replace(
+                record,
+                attempts=record.attempts + 1,
+                reason="verification attempt started; result not committed",
+            )
+            self.writer.activate_waiting_verification(record, active)
+            return active
+        record = self.reader.pending_verification()
+        if record is not None:
+            if record.attempts >= max_attempts:
+                dead = replace(
+                    record,
+                    reason=record.reason
+                    or "verification interrupted; attempt budget exhausted",
+                )
+                self.writer.dead_letter_pending_verification(record, dead)
+                return None
+            active = replace(
+                record,
+                attempts=record.attempts + 1,
+                reason="verification attempt started; result not committed",
+            )
+            self.writer.start_verification(record, active)
             return active
         return None
 
     def defer_verification(self, record, *, reason, next_attempt_at, max_attempts=3):
         """Choose waiting or dead letter without holding a transaction during policy."""
-        target = "dead-letter" if record.attempts >= max_attempts else "waiting"
         updated = replace(record, reason=reason, nextAttemptAt=next_attempt_at)
-        self.writer.move_verification(record, "verifying", updated, target)
+        if record.attempts >= max_attempts:
+            self.writer.dead_letter_verification(record, updated)
+        else:
+            self.writer.defer_verification(record, updated)
 
     def retry(self, cred_said):
         """Reset one corrected dead letter with the service stopped."""
-        record = self.reader.verification("dead-letter", cred_said)
+        record = self.reader.dead_verification(cred_said)
         if record is None:
             raise ValueError("unknown verification dead letter")
         updated = replace(record, attempts=0, nextAttemptAt=0, reason="")
-        self.writer.move_verification(record, "dead-letter", updated, "pending")
+        self.writer.retry_dead_verification(record, updated)
 
     def finish(self, result):
         """Prepare an acceptance obligation only for a verified result."""
-        self.writer.complete_verification(
-            result, result if result.status == "verified" else None
-        )
+        if result.status == "verified":
+            self.writer.complete_verified_candidate(result)
+        else:
+            self.writer.complete_rejected_candidate(result)
 
     def prepare(self):
         """Claim and validate one candidate; return its detached ACDC for RPC dispatch."""
@@ -98,7 +133,7 @@ class VerificationService:
 
     def apply_cue(self, cue):
         """Recheck local evidence after RPC and commit one correlated outcome."""
-        verification = self.reader.verification("verifying", cue["said"])
+        verification = self.reader.active_verification(cue["said"])
         if verification is None:
             raise ValueError("dispatched verification has no active work")
         if cue["kin"] == "retry":
@@ -118,7 +153,7 @@ class VerificationService:
             raise ValueError("unknown EOA result")
 
     def _verify(self, verification):
-        """Require native acceptance; Grant bytes can justify rejection, never acceptance."""
+        """Require KERIpy acceptance; Grant bytes can justify rejection, never acceptance."""
         return verify_association(
             evidence=self.evidence,
             said=verification.associationSaid,

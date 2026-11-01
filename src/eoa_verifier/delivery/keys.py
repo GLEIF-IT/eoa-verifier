@@ -1,4 +1,4 @@
-"""Native KERI key-state and signing adapter for service authentication."""
+"""KERIpy key-state and signing adapter for service authentication."""
 
 from keri.core import coring
 from keri.end import ending
@@ -19,7 +19,7 @@ class ServiceKeys:
         return self.hab.pre
 
     def sign(self, *args, **kwargs):
-        """Use the habitat's native signer for the pinned HTTP signature input."""
+        """Use the habitat's KERIpy signer for the pinned HTTP signature input."""
         return ending.siginput(*args, hab=self.hab, **kwargs)
 
     def key(self, aid):

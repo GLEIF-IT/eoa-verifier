@@ -7,7 +7,6 @@ import pytest
 from keri.app import indirecting, storing
 
 from eoa_verifier.receiving.directing import Receiver
-from eoa_verifier.receiving.grants import GrantNotificationDoer
 from eoa_verifier.runtime.serving import run_service
 from tests.support.services import entered_service, verifier_service
 
@@ -210,7 +209,4 @@ def test_runtime_has_one_receiver_and_no_mailbox(config):
                 )
                 for d in service.doers
             )
-            grants = next(
-                d for d in service.doers if isinstance(d, GrantNotificationDoer)
-            )
-            assert grants.service.native.parser is receivers[0].parser
+            assert service.parser is receivers[0].parser

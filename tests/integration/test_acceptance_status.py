@@ -19,8 +19,8 @@ def test_retirement_commits_its_own_event_once_and_preserves_facts(verified_stor
 
     baser = verified_store
     associationStatus = accept_verified_result(baser)
-    delivery_service(baser).complete(
-        associationStatus.eventId, outcome="acknowledged"
+    delivery_service(baser).acknowledge(
+        associationStatus.eventId
     )  # Initial-success ACK is already durable.
     initial = baser.outbox.get(keys=(associationStatus.eventId,))
     schedule = DestinationSchedule(failures=3, nextAttemptAt=4000000000)

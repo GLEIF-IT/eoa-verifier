@@ -27,7 +27,7 @@ def acceptance_service(baser):
 
 
 def retirement_service(baser, rgy=None):
-    """Compose idempotent retirement; native evidence is optional for direct operations."""
+    """Compose idempotent retirement; KERIpy evidence is optional for direct operations."""
     from eoa_verifier.associations.evidence import AssociationEvidence
     from eoa_verifier.associations.retiring import RetirementService
     from eoa_verifier.persistence.reading import ApplicationReader

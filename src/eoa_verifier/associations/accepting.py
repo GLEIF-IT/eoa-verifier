@@ -22,7 +22,7 @@ class AcceptanceService:
     def __init__(
         self, reader, writer, evidence=None, *, destination=None, peer_aid=None
     ):
-        """Borrow adapters; native evidence is required only for scheduled acceptance."""
+        """Borrow adapters; KERIpy evidence is required only for scheduled acceptance."""
         self.reader, self.writer, self.evidence = reader, writer, evidence
         self.destination, self.peer_aid = destination, peer_aid
 
@@ -80,9 +80,12 @@ class AcceptanceService:
         reference = DeliveryReference(delivery.eventId) if delivery else None
         schedule = DestinationSchedule() if delivery else None
         try:
-            saved = self.writer.save_acceptance(
-                status, claim, delivery, reference, schedule
-            )
+            if delivery is None:
+                saved = self.writer.accept_association(status, claim)
+            else:
+                saved = self.writer.accept_and_queue_delivery(
+                    status, claim, delivery, reference, schedule
+                )
         except NonceConflict:
             # The entire attempted acceptance aborted. Inspect committed ownership
             # without a writer, then prepare a separate terminal rejection.
@@ -95,7 +98,7 @@ class AcceptanceService:
             status = replace(
                 status, status="rejected", eventId="", reason="NONCE_REUSED"
             )
-            saved = self.writer.save_acceptance(status, None)
+            saved = self.writer.reject_reused_nonce(status)
         return status if saved else self.reader.association(credSaid)
 
     def stop(self, cred_said, reason):
@@ -103,27 +106,25 @@ class AcceptanceService:
         previous = self.reader.acceptance(cred_said)
         if previous is None:
             raise ValueError("acceptance work is absent")
-        self.writer.move_acceptance(
-            previous, replace(previous, reason=reason), to_dead=True
-        )
+        self.writer.dead_letter_acceptance(previous, replace(previous, reason=reason))
 
     def retry(self, cred_said):
         """Recheck a corrected acceptance with the service stopped."""
-        previous = self.reader.acceptance(cred_said, dead=True)
+        previous = self.reader.dead_acceptance(cred_said)
         if previous is None:
             raise ValueError("unknown acceptance dead letter")
-        self.writer.move_acceptance(
-            previous, replace(previous, reason=""), to_dead=False
-        )
+        self.writer.retry_dead_acceptance(previous, replace(previous, reason=""))
 
 
 class AcceptanceDoer(doing.Doer):
     """Schedule one initial acceptance operation per turn."""
 
     def __init__(self, service, **kwa):
+        """Borrow the application operation; the runtime owns its resources."""
         self.service = service
         super().__init__(**kwa)
 
     def recur(self, tyme):
+        """Advance one acceptance and remain scheduled."""
         self.service.process_one()
         return False
