@@ -67,7 +67,7 @@ uses KERIpy escrows.
 Initial checks must finish before acceptance. Without webhook configuration, the
 service accepts locally and consumes the exact issuer/nonce, but creates no delivery
 obligation. Public `delivery` is null. Another SAID reusing an accepted pair becomes
-locally rejected with `NONCE_REUSED`, even after revocation or supersession. Initial
+locally rejected with `NONCE_REUSED`, even after revocation or downstream supersession. Initial
 verification remains visible separately in the application store. See
 [ADR 0005](../adrs/0005-accepted-association-nonces.md) for transaction boundaries and
 the per-store scope of this policy.
@@ -124,16 +124,13 @@ Do not edit event bytes, delete replay records or clear accepted/revoked status 
 retry delivery. There is no retry REST route. Undelivered revocation can leave a
 downstream mapping active until delivery and withdrawal finish. Source-chain
 monitoring, periodic account rechecks and advanced Ethereum recovery are outside
-this build. The [paired launcher](https://github.com/GLEIF-IT/vlei-comply/blob/f61846512bbc75255b82c25b1c4ac71bc2127c57/docs/gl1-vlei-local-infra-setup.md)
+this build. The [paired launcher](https://github.com/GLEIF-IT/vlei-comply/blob/main/docs/gl1-vlei-local-infra-setup.md)
 provides the local verifier/oracle/Anvil setup and qualification.
 
-## Coordinated PoC naming update
+## Protocol and store baseline
 
-This revision changes status-event, ACK and application-store field names in place.
-Use fresh application stores and the matching oracle revision; old event bodies and
-records are not migrated or accepted through compatibility aliases. Keep existing
-stores untouched. Qualify the coordinated deployment with fresh local contracts.
-The webhook now carries `status: "accepted"` or `"revoked"`, `statusRevision`,
-`association.issuanceAnchor` and `accountObservation`. The authenticated ACK is
-exactly `{eventId, stored: true}`. Public delivery state uses `acknowledged`.
-The oracle update is a separate rollout prerequisite; an older oracle is incompatible.
+Use the current [Verifier API](../protocol/verifier-api-v1/README.md) with a compatible
+consumer. Application stores require the current acceptance policy and have no
+old-format readers, migrations or backfill. Preserve operator data and select
+fresh demonstration stores deliberately. Oracle selection/supersession does not
+retire Verifier acceptance; verified association revocation does.

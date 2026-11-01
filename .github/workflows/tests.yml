@@ -22,11 +22,11 @@ jobs:
         run: |
           python -m pip wheel --no-deps --wheel-dir dist .
           python -m venv "$RUNNER_TEMP/verifier-tests"
-          "$RUNNER_TEMP/verifier-tests/bin/python" -m pip install dist/*.whl pytest
+          "$RUNNER_TEMP/verifier-tests/bin/python" -m pip install dist/*.whl pytest jsonschema==4.26.0
       - name: Test installed package outside checkout
         run: |
           mkdir "$RUNNER_TEMP/qualification"
-          cp -R tests "$RUNNER_TEMP/qualification/tests"
+          cp -R tests protocol "$RUNNER_TEMP/qualification/"
           cp pytest.ini "$RUNNER_TEMP/qualification/"
           cd "$RUNNER_TEMP/qualification"
           anvil --version

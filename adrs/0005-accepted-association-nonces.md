@@ -3,77 +3,42 @@
 Status: Accepted
 Date: 2026-10-31
 
-## Decision
+## Decision and rationale
 
-EOA Verifier permanently binds each exact `(issuerAid, nonce)` pair to one
-application-accepted association SAID. Read both values from the native credential
-after initial credential, relationship, wallet and account verification. Require
-1–128 ASCII characters from `[A-Za-z0-9_-]`; preserve their exact case and bytes.
-Reject whitespace, dots, other punctuation and non-ASCII text. Issuers may issue
-candidates, but neither
-credential creation nor oracle status receipt consumes an association nonce.
+Nonce consumption belongs to the application accepting an association, not the
+issuer constructing it or Oracle receiving downstream status. Bind each exact
+issuer/nonce pair permanently to one accepted SAID. Keep initial verification
+separate from application rejection so a valid proof can still fail local reuse
+policy. [Verifier API v1](../protocol/verifier-api-v1/README.md) owns these visible
+semantics; [external-association-v1](../protocol/external-association-v1/README.md)
+owns nonce syntax and signed commitments.
 
-Another issuer may use the same nonce. Another SAID from the same issuer may not,
-even for another wallet or LE credential. Same-SAID redelivery returns the original
-application status/event. Revocation and downstream supersession never release
-ownership. A conflict stores terminal local `rejected` / `NONCE_REUSED` with no
-event or outbox entry. Its initial verification result remains `verified`, keeping
-acceptance policy distinct from failed proof validation. Public status exposes
-that local rejection; the verifier-to-oracle wire contract remains unchanged.
+`VerifierBaser.accept()` commits the claim, accepted status and optional outbox
+obligation in one native synchronous LMDB write transaction. Insert without
+overwrite and inspect existing data in the same transaction. Inconsistent or
+orphaned claims abort acceptance. Native LMDB supplies process coordination; no
+application locks, threads, queues or additional environment are needed.
 
-## Transaction and lifecycle
+The typed `AcceptedNonce` record stores issuer, exact nonce and accepted SAID.
+Komer's ordinary issuer.nonce key is unambiguous under the credential profile and
+at most 173 bytes, within the pinned environment's 511-byte key limit. Hashing
+or custom key encodings add no value. Standard name/base/head-dir selects the
+existing application store. Persistent closure retains all claims.
 
-`VerifierBaser.accept()` uses one native LMDB write transaction for the permanent
-claim, accepted status and optional outbox obligation. Insert the claim without
-overwrite; inspect an existing claim in that same transaction. A minimal typed
-`AcceptedNonce` contains issuer, exact nonce and accepted SAID. Its `accepted_nonces.`
-Komer key is the ordinary dot-joined `(issuerAid, nonce)` tuple, encoded as ASCII.
-Neither a canonical issuer AID nor an allowed nonce contains a dot. With the
-schema's 44-byte issuer and a 128-byte nonce, the maximum key is 173 bytes,
-comfortably below the pinned LMDB environment's 511-byte limit. No hashing or
-JSON key encoding is needed. Compare stored fields with the key; inconsistent
-or orphaned claims abort acceptance. No application locks, worker threads, queues,
-retry loops or additional LMDB environments are introduced.
+KERIpy evidence and application state use separate transactions. A bounded
+acceptance scan recovers completed verified results; invalid, pending or revoked
+evidence cannot burn a nonce. Target-free acceptance still claims the nonce,
+without an event. Later enabling delivery does not backfill those acceptances.
 
-Claims share the existing synchronous VerifierBaser environment, under
-`<head>/eoa-verifier/db/<base>/<name>/data.mdb` with native `lock.mdb`. The service's
-existing name/base/head-dir options select the store. Persistent closure retains
-claims; standard temporary stores remain test-owned. KERIpy evidence and application
-state use separate transactions: a bounded AcceptanceDoer scan recovers verified
-results whose native evidence is available but application acceptance is absent.
-Missing, revoked, invalid or still-pending evidence does not consume a nonce.
+## Store and operational limits
 
-Acceptance runs whether webhook delivery is enabled or disabled. Without a target,
-status and claim commit without an outbox entry or event ID; public `delivery` is null. Enabling
-delivery later does not retrospectively publish those acceptances. Existing outbox
-obligations retain their original target, including retirement while sending is
-disabled. Retirement of explicitly local-only acceptance records local status only. A missing
-referenced outbox event is an error, not a fallback to local-only retirement.
+The `issuer-nonce-ascii-v1` scope requires complete claim history. Startup rejects
+pre-policy or inconsistent acceptance stores; it does not migrate, backfill or
+recreate missing claims. The history audit currently holds accepted SAIDs in
+memory. Uniqueness applies within one preserved verifier store, not globally
+across independent deployments. Do not erase history to evade reuse rejection.
 
-## Baseline and limits
-
-The verification scope now requires the acceptance-policy identifier
-`issuer-nonce-ascii-v1`. Pre-policy scopes are refused; use a deliberate fresh complete
-store set and preserve historical stores separately. Startup validates that every
-accepted/revoked SAID has exactly one consistent claim and every claim has an
-accepted/revoked owner. It does not backfill, migrate, release or silently recreate
-history. Startup validation scans application acceptance history and retains its
-SAIDs in memory; operational scaling of that audit is future work.
-
-Uniqueness applies within one verifier store, not across independent stores or a
-reset deployment. Do not erase claim history or run differently configured verifier
-stores as though they share one acceptance authority. The oracle still owns webhook
-transport replay protection and Ethereum transaction nonce recovery; those are
-separate concerns. Old oracle issuer stores are no longer read or migrated.
-
-## Qualification
-
-Storage tests cover exact ASCII pairs and case, 1/128-character boundaries,
-rejected non-ASCII/whitespace/punctuation/overlength inputs, issuer scoping, idempotence,
-revocation, restart, malformed history, native independent-process races and abrupt
-death before/after commit. Fault injection verifies rollback of the claim/status
-when outbox serialization fails. Real witnessed IPEX intake exercises a differently
-signed second wallet credential sharing the accepted pair, with delivery enabled
-and disabled; invalid and pending candidates cannot burn a nonce. The maintained
-paired qualification preserves both actors, witnesses, real transfers, replacement,
-retirement, lost ACK and restart while additionally rejecting valid nonce reuse.
+See [operations](../docs/operations.md) for store layout and maintenance, and
+[testing](../docs/testing.md) for process-race, crash/rollback, exact-key and
+witnessed-intake coverage. Transport replay claims and Ethereum transaction
+nonces are separate concerns.

@@ -147,9 +147,9 @@ Ed25519 service AIDs at threshold one are supported. See the
 
 `WebhookSender` uses these common primitives and owns ACK policy: actual HTTP 200,
 expected peer, exact attempt reference and a `stored: true` acknowledgment for the event.
-The receiver must commit its effects before signing an ACK and acknowledge
-redelivery without repeating effects. See [ADR 0002](adrs/0002-verifier-result-object.md)
-for the implemented event and ACK shapes. Authentication alone is not delivery
+The receiver commits durable event receipt before signing an ACK and acknowledges
+redelivery without repeating effects. This does not confirm contract publication. See [Verifier API v1](protocol/verifier-api-v1/README.md)
+for event and ACK definitions. Authentication alone is not delivery
 completion or Ethereum confirmation.
 
 ## Test
@@ -168,5 +168,11 @@ See the [service design](protocol/verifier-api-v1/README.md) and
 Terminology: this service exchanges JSON messages with CESR attachments.
 “KERIpy” identifies the implementation used for parsing, verification and storage;
 “CESR-native” is reserved for CESR serialization of message structures.
-See the [coordinated PoC upgrade](docs/operations.md#coordinated-poc-naming-update)
+See the [store baseline](docs/operations.md#protocol-and-store-baseline)
 before using this revision with existing stores or an oracle deployment.
+
+This repository owns [external-association-v1](protocol/external-association-v1/README.md),
+its sole packaged schema, proof vectors, generator and conformance tests, plus
+[verifier-api-v1](protocol/verifier-api-v1/README.md) and the shared signed
+webhook/ACK profile. Oracle owns its selection/publication API; Comply owns the
+registry ABI and calldata fixtures.
