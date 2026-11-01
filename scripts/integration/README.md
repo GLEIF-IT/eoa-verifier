@@ -76,3 +76,12 @@ change. Operators own compatibility with retained state; see the
 [configuration guidance](../../docs/operations.md#configuration-changes-and-stored-state). Fixture manifests still select reproducible
 inputs: prepare a fresh run when changing its deployment or source inputs, and
 keep existing run directories for restart and diagnosis.
+
+## Tooling modules
+
+`environment.py` sequences preparation and owned service lifetimes. `builds.py`
+installs the selected wheel; `services.py` owns concrete service command lines and
+bounded HTTP readiness/status exchanges. `infrastructure.py` owns witnesses and
+schema serving, while `ceremony.py` and `issuers.py` own issuance operations.
+`processes.py` owns child-process identity/cleanup and `artifacts.py` records exact
+inputs. The complete standalone workflow remains in `scenario.py`.

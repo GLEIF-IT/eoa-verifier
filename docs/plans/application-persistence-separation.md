@@ -446,3 +446,13 @@ This is a source/API naming change: immutable-body checks, replay protection,
 restart and post-commit ACK-loss behavior, wire values and subdatabase names stay
 unchanged. The coordinated PRs record focused, installed-wheel and paired
 qualification results against exact dependency revisions.
+
+## Follow-up: test and tooling organization
+
+Preserve the component and explicit phase-transition design. Reclassify policy
+tests under their feature, name atomic persistence tests by their record family,
+and keep real cross-component scenarios under integration. Separate concrete
+tooling preparation and service-launch responsibilities while keeping lifecycle
+sequencing explicit. Update the test guide with current paths. This follow-up
+changes neither application source nor protocol/storage behavior; qualification
+results and exact dependency pins are recorded in the organization PRs.

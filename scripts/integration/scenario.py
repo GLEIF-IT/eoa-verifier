@@ -10,11 +10,11 @@ from .artifacts import save_json
 from .ceremony import complete_ceremony, open_ceremony
 from .environment import (
     present_credential,
-    request_json,
     restart_verifier,
     wait_for_status,
 )
 from .processes import stop
+from .services import request_json
 
 TEST_KEYS = {1: "0x" + "0" * 63 + "1", 2: "0x" + "0" * 63 + "2"}
 
