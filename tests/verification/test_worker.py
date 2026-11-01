@@ -9,7 +9,7 @@ import pytest
 from hio.base import doing
 from hio.core import http, tcp
 
-from eoa_verifier.verification.worker import EoaVerifierDoer
+from eoa_verifier.verification.worker import WalletCheckDoer
 from tests.support.issuers import candidate
 from tests.support.network import free_port
 
@@ -75,7 +75,7 @@ def test_account_policy_uses_configured_chain_and_canonical_block(
     endpoint, app = Rpc(chain, code), falcon.App()
     app.add_route("/", endpoint)
     server = http.Server(host="127.0.0.1", port=free_port(), app=app)
-    worker = EoaVerifierDoer(
+    worker = WalletCheckDoer(
         rpc_url=f"http://127.0.0.1:{server.servant.ha[1]}", chain_id=31337
     )
     worker.msgs.append(candidate())
@@ -91,7 +91,7 @@ def test_account_policy_uses_configured_chain_and_canonical_block(
 
 def test_invalid_wallet_proof_is_rejected():
     """Tamper with the signed nonce and require a failed verification result."""
-    worker = EoaVerifierDoer(rpc_url="http://127.0.0.1:1", chain_id=31337)
+    worker = WalletCheckDoer(rpc_url="http://127.0.0.1:1", chain_id=31337)
     bad = candidate()
     bad["u"] = "changed"
     worker.msgs.append(bad)
@@ -102,7 +102,7 @@ def test_invalid_wallet_proof_is_rejected():
 def test_rpc_timeout_yields_and_closes_connection():
     """A real TCP peer that never replies must yield a retry cue and close the client."""
     server = tcp.Server(host="127.0.0.1", port=free_port())
-    worker = EoaVerifierDoer(
+    worker = WalletCheckDoer(
         rpc_url=f"http://127.0.0.1:{server.ha[1]}", chain_id=31337, timeout=0.1
     )
     worker.msgs.append(candidate())
@@ -127,7 +127,7 @@ def test_malformed_rpc_envelope_remains_retryable(payload):
     app = falcon.App()
     app.add_route("/", Endpoint())
     server = http.Server(host="127.0.0.1", port=free_port(), app=app)
-    worker = EoaVerifierDoer(
+    worker = WalletCheckDoer(
         rpc_url=f"http://127.0.0.1:{server.servant.ha[1]}", chain_id=31337
     )
     worker.msgs.append(candidate())
@@ -151,7 +151,7 @@ def test_malformed_block_remains_retryable():
     endpoint = Endpoint()
     app.add_route("/", endpoint)
     server = http.Server(host="127.0.0.1", port=free_port(), app=app)
-    worker = EoaVerifierDoer(
+    worker = WalletCheckDoer(
         rpc_url=f"http://127.0.0.1:{server.servant.ha[1]}", chain_id=31337
     )
     worker.msgs.append(candidate())
@@ -173,9 +173,9 @@ def test_programming_error_surfaces_and_closes_client(monkeypatch):
         raise AttributeError("programming defect")
 
     monkeypatch.setattr(
-        "eoa_verifier.verification.observing.request_rpc", broken_request
+        "eoa_verifier.verification.accounts.request_rpc", broken_request
     )
-    worker = EoaVerifierDoer(rpc_url="http://127.0.0.1:1", chain_id=31337)
+    worker = WalletCheckDoer(rpc_url="http://127.0.0.1:1", chain_id=31337)
     worker.msgs.append(candidate())
     with pytest.raises(AttributeError, match="programming defect"):
         doing.Doist(limit=0.05).do(doers=[worker])
@@ -188,7 +188,7 @@ def test_cancellation_closes_in_flight_client_without_result():
     """Cancel after a real TCP connection and prove cleanup emits no verification result."""
     server = tcp.Server(host="127.0.0.1", port=free_port())
     server_doer = tcp.ServerDoer(server=server)
-    worker = EoaVerifierDoer(rpc_url=f"http://127.0.0.1:{server.ha[1]}", chain_id=31337)
+    worker = WalletCheckDoer(rpc_url=f"http://127.0.0.1:{server.ha[1]}", chain_id=31337)
     worker.msgs.append(candidate())
     clients = []
 
@@ -233,7 +233,7 @@ def test_bad_rpc_response_fails_only_this_observation(failure):
                     )
 
     server = tcp.Server(host="127.0.0.1", port=free_port())
-    worker = EoaVerifierDoer(
+    worker = WalletCheckDoer(
         rpc_url=f"{'https' if failure == 'tls' else 'http'}://127.0.0.1:{server.ha[1]}",
         chain_id=31337,
     )

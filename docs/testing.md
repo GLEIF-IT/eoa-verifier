@@ -13,7 +13,7 @@ external-association profile conformance suite and reference vectors.
 | runtime/serving.py | python -m pytest tests/runtime/test_serving.py -k cleanup |
 | receiving/directing.py and grants.py | tests/receiving/test_directing.py and test_grants.py |
 | verification/eoa.py | python -m pytest tests/verification/test_eoa.py |
-| EoaVerifierDoer / timeout | python -m pytest tests/verification/test_worker.py -k timeout |
+| WalletCheckDoer / timeout | python -m pytest tests/verification/test_worker.py -k timeout |
 | VerificationService policy/results | tests/verification/test_verifying.py |
 | VerificationCoordinator scheduling/cues | tests/verification/test_coordinating.py |
 | StatusQuery / StatusEnd | python -m pytest tests/associations/test_statusing.py |
@@ -120,3 +120,15 @@ once for startup and recovery. Test the public command-to-runtime boundary and
 actual persistent recovery in tests/runtime/test_cli.py, without launching network
 resources in parser/configuration tests. Keep domain decisions in feature services
 and resource ownership in the runtime or the command's standard KERIpy context.
+
+## Wallet proof and Ethereum reads
+
+`checking.WalletVerifier` applies wallet proof and initial account policy. Its
+borrowed `account_reader` is an `accounts.EthAccountReader`; the finite
+`read(wallet)` generator obtains chain ID, an identified block and code at that
+block. `worker.WalletCheckDoer.verifier` composes this policy with HIO scheduling.
+These names distinguish the Ethereum RPC adapter from KERI observer roles and
+from `VerificationService`, which owns durable credential-verification phases.
+The existing `accountObservation` payload and `observedAt` timestamp retain their
+wire/storage meaning. Worker tests cover proof-before-RPC, network/account policy,
+transport failure, timeout and cancellation cleanup through the real adapter.
