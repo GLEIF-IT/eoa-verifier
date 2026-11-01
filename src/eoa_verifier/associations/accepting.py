@@ -62,7 +62,7 @@ class AcceptanceService:
         previous = self.reader.association(credSaid)
         if previous is not None:
             return previous
-        result = self.verification_reader.verification_result(credSaid)
+        result = self.verification_reader.result(credSaid)
         if result is None or result.status != "verified":
             raise ValueError("acceptance requires a completed verified result")
         if bool(destination) != bool(peer_aid):
@@ -88,9 +88,9 @@ class AcceptanceService:
         schedule = DestinationSchedule() if delivery else None
         try:
             if delivery is None:
-                saved = self.writer.accept_association(status, nonce)
+                saved = self.writer.accept(status, nonce)
             else:
-                saved = self.writer.accept_and_queue_delivery(
+                saved = self.writer.accept_and_queue(
                     status, nonce, delivery, reference, schedule
                 )
         except NonceConflict:
@@ -102,7 +102,7 @@ class AcceptanceService:
             status = replace(
                 status, status="rejected", eventId="", reason="NONCE_REUSED"
             )
-            saved = self.writer.reject_reused_nonce(status)
+            saved = self.writer.reject_nonce(status)
         return status if saved else self.reader.association(credSaid)
 
     def stop(self, cred_said, reason):
@@ -110,14 +110,14 @@ class AcceptanceService:
         previous = self.reader.acceptance(cred_said)
         if previous is None:
             raise ValueError("acceptance work is absent")
-        self.writer.dead_letter_acceptance(previous, replace(previous, reason=reason))
+        self.writer.acceptance_to_dead(previous, replace(previous, reason=reason))
 
     def retry(self, cred_said):
         """Recheck a corrected acceptance with the service stopped."""
         previous = self.reader.dead_acceptance(cred_said)
         if previous is None:
             raise ValueError("unknown acceptance dead letter")
-        self.writer.retry_dead_acceptance(previous, replace(previous, reason=""))
+        self.writer.dead_to_acceptance(previous, replace(previous, reason=""))
 
 
 class AcceptanceDoer(doing.Doer):

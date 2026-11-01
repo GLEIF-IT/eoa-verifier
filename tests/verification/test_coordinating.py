@@ -52,7 +52,7 @@ def test_active_waiting_budget_and_manual_retry_survive_restart(tmp_path):
         verification_service(baser).defer_verification(
             verification, reason="RPC unavailable", next_attempt_at=110
         )
-        assert VerificationReader(baser).verification_progress("a")[0] == "dead-letter"
+        assert VerificationReader(baser).progress("a")[0] == "dead-letter"
         assert verificationService.next_verifying() is None
         assert verificationService.next_waiting() is None
         assert verificationService.next_pending() is None
@@ -141,7 +141,7 @@ def test_rpc_retry_and_success_move_only_on_completion():
             patch("eoa_verifier.verification.verifying.verify_association"),
         ):
             coordinator.process_results()
-        assert VerificationReader(baser).verification_progress("a") == (None, None)
+        assert VerificationReader(baser).progress("a") == (None, None)
         assert baser.results.get(keys=("a",)).eoaResult == observation
         assert AssociationReader(baser).acceptance().associationSaid == "a"
 

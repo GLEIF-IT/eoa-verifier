@@ -19,8 +19,8 @@ class StatusQuery:
     def get(self, said):
         """Return a detached public view, or None for an unknown candidate."""
         associationStatus = self.associations.association(said)
-        verificationResult = self.verification.verification_result(said)
-        phase, verification = self.verification.verification_progress(said)
+        verificationResult = self.verification.result(said)
+        phase, verification = self.verification.progress(said)
         deadLetterResult = self.associations.dead_acceptance(said)
         if associationStatus is not None:
             statusBody = asdict(associationStatus)

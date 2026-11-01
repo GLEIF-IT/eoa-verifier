@@ -63,9 +63,9 @@ class RevocationService:
             else None
         )
         if delivery is None:
-            self.writer.record_revocation(previous, status)
+            self.writer.rev(previous, status)
         else:
-            self.writer.record_revocation_and_queue_delivery(
+            self.writer.rev_and_queue(
                 previous, status, delivery, DeliveryReference(delivery.eventId)
             )
         return status

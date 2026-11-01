@@ -115,7 +115,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             service = service_stores.enter_context(verifier_service(config))
             for doer in service.doers:
                 if isinstance(doer, (GrantNotificationDoer, VerificationCoordinator)):
-                    doer.clock = lambda: epoch + workflow.tyme
+                    doer.service.clock = lambda: epoch + workflow.tyme
             return service
 
         runtime = open_service()
@@ -173,7 +173,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             deadline = workflow.tyme + 10
             while True:
                 verification = (
-                    VerificationReader(runtime.baser).verification_progress(said)[1]
+                    VerificationReader(runtime.baser).progress(said)[1]
                     if expected == "pending"
                     else runtime.baser.results.get(keys=(said,))
                 )
@@ -184,7 +184,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
                 assert workflow.tyme < deadline, (
                     expected,
                     verification,
-                    VerificationReader(runtime.baser).verification_progress(said),
+                    VerificationReader(runtime.baser).progress(said),
                 )
                 yield 0.01
 
@@ -312,7 +312,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             workflow.extend([runtime, client_doer])
             assert runtime.hab.pre == aid
             assert (
-                VerificationReader(runtime.baser).verification_progress(creder.said)[1]
+                VerificationReader(runtime.baser).progress(creder.said)[1]
                 is not None
             )
             # Supporting evidence alone resumes persisted work; no new Grant required.

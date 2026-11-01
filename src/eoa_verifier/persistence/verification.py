@@ -10,7 +10,7 @@ class VerificationReader:
         """Borrow the application's already-open store."""
         self._db = baser
 
-    def active_verification(self, cred_said=None):
+    def verifying(self, cred_said=None):
         """Return one identified verifying record or the interrupted phase head."""
         return (
             self._db.verifying.get(keys=(cred_said,))
@@ -18,7 +18,7 @@ class VerificationReader:
             else first_record(self._db.verifying)
         )
 
-    def waiting_verification(self, cred_said=None):
+    def waiting(self, cred_said=None):
         """Return one waiting record or the earliest indexed retry, even if future."""
         return (
             self._db.waiting.get(keys=(cred_said,))
@@ -26,7 +26,7 @@ class VerificationReader:
             else due_record(self._db.verification_due, self._db.waiting)
         )
 
-    def pending_verification(self, cred_said=None):
+    def pending(self, cred_said=None):
         """Return one pending record or the queue head."""
         return (
             self._db.pending.get(keys=(cred_said,))
@@ -34,21 +34,21 @@ class VerificationReader:
             else first_record(self._db.pending)
         )
 
-    def dead_verification(self, cred_said):
+    def dead(self, cred_said):
         """Return an identified verification dead letter."""
         return self._db.verification_dead.get(keys=(cred_said,))
 
-    def verification_result(self, cred_said):
+    def result(self, cred_said):
         """Return the immutable result for one candidate."""
         return self._db.results.get(keys=(cred_said,))
 
-    def verification_progress(self, cred_said):
+    def progress(self, cred_said):
         """Read the stored phase of one candidate without scheduling work."""
         for phase, record in (
-            ("pending", self.pending_verification(cred_said)),
-            ("verifying", self.active_verification(cred_said)),
-            ("waiting", self.waiting_verification(cred_said)),
-            ("dead-letter", self.dead_verification(cred_said)),
+            ("pending", self.pending(cred_said)),
+            ("verifying", self.verifying(cred_said)),
+            ("waiting", self.waiting(cred_said)),
+            ("dead-letter", self.dead(cred_said)),
         ):
             if record is not None:
                 return phase, record
@@ -113,7 +113,7 @@ class VerificationWriter:
             txn.put(key, raw, db=db.waiting.sdb)
             txn.put(new_due, key, db=db.verification_due.sdb)
 
-    def verifying_to_dead_letter(self, previous, record):
+    def verifying_to_dead(self, previous, record):
         """Move failed or interrupted verifying work to verification_dead."""
         db = self._db
         key = record.associationSaid.encode()
@@ -125,7 +125,7 @@ class VerificationWriter:
             txn.delete(key, db=db.verifying.sdb)
             txn.put(key, raw, db=db.verification_dead.sdb)
 
-    def waiting_to_dead_letter(self, previous, record):
+    def waiting_to_dead(self, previous, record):
         """Move exhausted waiting work to verification_dead and remove its deadline."""
         db = self._db
         key = record.associationSaid.encode()
@@ -139,7 +139,7 @@ class VerificationWriter:
             txn.delete(old_due, db=db.verification_due.sdb)
             txn.put(key, raw, db=db.verification_dead.sdb)
 
-    def dead_letter_to_pending(self, previous, record):
+    def dead_to_pending(self, previous, record):
         """Move corrected verification_dead work to pending with a reset budget."""
         db = self._db
         key = record.associationSaid.encode()
@@ -151,7 +151,7 @@ class VerificationWriter:
             txn.delete(key, db=db.verification_dead.sdb)
             txn.put(key, raw, db=db.pending.sdb)
 
-    def complete_verified_candidate(self, result):
+    def complete_verified(self, result):
         """Commit result and acceptance obligation and remove verifying work atomically."""
         db = self._db
         key, raw = result.associationSaid.encode(), db.results.serializer(result)
@@ -168,7 +168,7 @@ class VerificationWriter:
             txn.put(key, acceptance_raw, db=db.accepting.sdb)
             txn.delete(key, db=db.verifying.sdb)
 
-    def complete_rejected_candidate(self, result):
+    def complete_rejected(self, result):
         """Commit rejected result and remove verifying work atomically."""
         db = self._db
         key, raw = result.associationSaid.encode(), db.results.serializer(result)

@@ -55,7 +55,7 @@ def test_internal_failure_preserves_active_grant_record(config, boundary):
         target, method = (
             (runtime.parser, "onceParsator")
             if boundary == "parser"
-            else (GrantWriter, "complete_grant")
+            else (GrantWriter, "complete")
         )
         # Include an embed stream only when exercising the parser boundary.
         with (
@@ -220,7 +220,7 @@ def test_completion_rollback_preserves_active_grant(config):
             ),
             pytest.raises(RuntimeError, match="after enqueue"),
         ):
-            GrantWriter(runtime.baser).complete_grant(
+            GrantWriter(runtime.baser).complete(
                 record, VerificationRecord("cred", "grant")
             )
         assert runtime.baser.pending.get(keys=("cred",)) is None

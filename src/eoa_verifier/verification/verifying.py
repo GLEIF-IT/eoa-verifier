@@ -40,11 +40,11 @@ class VerificationService:
 
     def next_verifying(self):
         """Read one interrupted verifying record without changing its attempt count."""
-        return self.reader.active_verification()
+        return self.reader.verifying()
 
     def next_waiting(self):
         """Read one due waiting record; leave future deadlines untouched."""
-        record = self.reader.waiting_verification()
+        record = self.reader.waiting()
         return (
             record
             if record is not None and record.nextAttemptAt <= self.clock()
@@ -53,7 +53,7 @@ class VerificationService:
 
     def next_pending(self):
         """Read one pending record without claiming it or inspecting other phases."""
-        return self.reader.pending_verification()
+        return self.reader.pending()
 
     def resume_verifying(self, record):
         """Charge one interrupted attempt, or dead-letter exhausted verifying work."""
@@ -63,7 +63,7 @@ class VerificationService:
                 reason=record.reason
                 or "verification interrupted; attempt budget exhausted",
             )
-            self.writer.verifying_to_dead_letter(record, dead)
+            self.writer.verifying_to_dead(record, dead)
             return None
         active = replace(
             record,
@@ -83,7 +83,7 @@ class VerificationService:
                 reason=record.reason
                 or "verification interrupted; attempt budget exhausted",
             )
-            self.writer.waiting_to_dead_letter(record, dead)
+            self.writer.waiting_to_dead(record, dead)
             return None
         active = replace(
             record,
@@ -111,24 +111,24 @@ class VerificationService:
         """Choose waiting or dead letter without holding a transaction during policy."""
         updated = replace(record, reason=reason, nextAttemptAt=next_attempt_at)
         if record.attempts >= max_attempts:
-            self.writer.verifying_to_dead_letter(record, updated)
+            self.writer.verifying_to_dead(record, updated)
         else:
             self.writer.verifying_to_waiting(record, updated)
 
     def retry(self, cred_said):
         """Reset one corrected dead letter with the service stopped."""
-        record = self.reader.dead_verification(cred_said)
+        record = self.reader.dead(cred_said)
         if record is None:
             raise ValueError("unknown verification dead letter")
         updated = replace(record, attempts=0, nextAttemptAt=0, reason="")
-        self.writer.dead_letter_to_pending(record, updated)
+        self.writer.dead_to_pending(record, updated)
 
     def finish(self, result):
         """Prepare an acceptance obligation only for a verified result."""
         if result.status == "verified":
-            self.writer.complete_verified_candidate(result)
+            self.writer.complete_verified(result)
         else:
-            self.writer.complete_rejected_candidate(result)
+            self.writer.complete_rejected(result)
 
     def prepare(self, record):
         """Validate a charged attempt; return its detached ACDC for RPC dispatch."""
@@ -142,7 +142,7 @@ class VerificationService:
 
     def apply_cue(self, cue):
         """Recheck local evidence after RPC and commit one correlated outcome."""
-        verification = self.reader.active_verification(cue["said"])
+        verification = self.reader.verifying(cue["said"])
         if verification is None:
             raise ValueError("dispatched verification has no active work")
         if cue["kin"] == "retry":

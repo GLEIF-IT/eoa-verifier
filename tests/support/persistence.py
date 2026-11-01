@@ -1,22 +1,19 @@
-"""Explicit test fixture preparation; not a production enqueue API."""
+"""Explicit fixture preparation through the production Grant completion boundary."""
+
+from eoa_verifier.persistence.grants import GrantWriter
+from eoa_verifier.persistence.records import GrantReplayRecord
 
 
 def enqueue_verification(baser, verification):
-    """Insert unfinished work once, preserving existing work and immutable results."""
-    db = baser
-    key, raw = (
-        verification.associationSaid.encode(),
-        db.pending.serializer(verification),
-    )
-    with db.env.begin(write=True) as txn:
-        if any(
-            txn.get(key, db=table.sdb) is not None
-            for table in (
-                db.results,
-                db.verifying,
-                db.waiting,
-                db.verification_dead,
-            )
-        ):
-            return False
-        return txn.put(key, raw, db=db.pending.sdb, overwrite=False)
+    """Prepare an active fixture Grant and complete it using the real atomic writer.
+
+    Return whether this call inserted pending work. Duplicate assertions observe
+    the actual result, not a copy of production deduplication rules.
+    """
+    key = (verification.associationSaid,)
+    previous = baser.pending.get(keys=key)
+    record = GrantReplayRecord(f"fixture-{verification.associationSaid}", {})
+    writer = GrantWriter(baser)
+    writer.start(record)
+    writer.complete(record, verification)
+    return previous is None and baser.pending.get(keys=key) == verification

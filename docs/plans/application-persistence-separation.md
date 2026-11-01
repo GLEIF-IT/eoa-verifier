@@ -37,7 +37,7 @@ tested integrity boundary, not a reason to wrap every business read in a writer.
 | `accept`, `apply_revocation`, `_status_delivery`, `nonce_key` | Acceptance prerequisites, protocol validation, nonce-conflict policy, status/event construction, serialization and writes | Association services and event builder prepare outcomes; writer enforces uniqueness and commits status/claim/outbox together; key encoding remains persistence-owned |
 | `next_delivery`, `record_attempt`, `delivery_result`, `retry_delivery` | Work selection, attempt/error state, success inference from empty error, schedule reset and table updates | Delivery service chooses explicit outcomes and schedule values; writer persists prepared delivery/phase/schedule records |
 | `bind_verification_scope`, `validate_nonce_history`, `_read_claim` | Startup trust policy, cross-record integrity decisions and full-history reading | Delete the history audit and paging; bootstrap checks one scope record; the nonce key alone enforces consumption |
-| `first_record`, `due_record`, `verification_progress` | Mostly storage queries; `due_record` also consumes an index and decides eligibility | Detached read functions; querying never consumes work or chooses retry policy |
+| `first_record`, `due_record`, `progress` | Mostly storage queries; `due_record` also consumes an index and decides eligibility | Detached read functions; querying never consumes work or chooses retry policy |
 | `receiving/grants.py:GrantNotificationDoer` | KERIpy notice access, EXN decoding, parser replay, retry policy and application writes inside a scheduler adapter | KERIpy Grant adapter handles KERI mechanisms; replay service orchestrates; doer schedules one item |
 | `verification/coordinating.py:VerificationCoordinator` | HIO request/cue plumbing, evidence decisions and direct application-table access | Verification service owns attempts/results/rechecks; coordinator handles scheduling and correlation |
 | `verification/credentials.py` | KERIpy KERI retrieval/read-through caches, schema/anchor mechanisms and application LE/QVI/issuer policy | Evidence adapter exposes detached facts and KERIpy validation results; credential rules evaluate trust/profile requirements |
@@ -359,7 +359,7 @@ revoking its credential. Deleted functionality is removed.
 
 The associations module is `revoking.py`, with `RevocationService`,
 `RevocationDoer` and `apply_revocation(credSaid)`. Persistence uses
-`record_revocation` and `record_revocation_and_queue_delivery`; test composition
+`rev` and `rev_and_queue`; test composition
 uses `revocation_service`. Oracle's qualification operation is
 `revoke_associations`, and contract withdrawal retains `withdrawEndorsement`.
 Comply describes removed APIs and delayed endorsement withdrawal explicitly.
@@ -395,8 +395,9 @@ StatusQuery explicitly composes association, verification and delivery readers.
 No application-wide facade, transaction object passed through services, or
 independently committing cross-feature calls replaces an atomic write.
 
-Production verification enqueue is GrantWriter.complete_grant. The former
-standalone enqueue method was test-only and fixture setup now lives in tests.
+Production verification enqueue is GrantWriter.complete. The former
+standalone enqueue method was test-only. Fixture setup now prepares a Grant and
+uses GrantWriter.complete, so duplicate assertions exercise production writes.
 Fresh pending work and manual retry both initialize attempts/deadline to zero.
 Invalid pending state is rejected unchanged; pending-to-dead is removed.
 Verifying exhaustion survives interrupted work, and waiting exhaustion remains
@@ -406,3 +407,12 @@ Deferral and activation retain separate deadline insertion/removal operations.
 VerifierReger's atomic TEL projection, evidence/Grant/key adapters and integration
 ReceiptStore retain their focused responsibilities. Storage keys, wire contracts,
 nonce-only consumption, revocation naming and queue priority are unchanged.
+
+Function names use their feature class as context: GrantReader.active and
+GrantWriter.complete; VerificationReader.result and VerificationWriter.complete_verified;
+AssociationWriter.accept / accept_and_queue and rev / rev_and_queue;
+DeliveryReader.active_ref and DeliveryWriter.ack / dead_to_ready. `rev` records
+an already-validated credential revocation; it never issues a TEL event.
+`ref` denotes a delivery reference, not the delivery record. Phase transitions
+retain explicit directions, including waiting_to_verifying and verifying_to_waiting.
+Old function names are removed without aliases.

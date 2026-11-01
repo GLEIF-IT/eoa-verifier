@@ -67,4 +67,4 @@ when needed, such as `revokedStatus`, rather than labels such as `handoff` or
 Feature persistence lives in grants.py, verification.py, associations.py and
 delivery.py. ScopeStore owns startup binding only; transport.claim_nonce is a
 separate authenticated-message replay operation. Test-only verification setup
-lives in tests/support/persistence.py; production enqueue is GrantWriter.complete_grant.
+lives in tests/support/persistence.py; production enqueue is GrantWriter.complete.

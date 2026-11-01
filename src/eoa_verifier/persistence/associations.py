@@ -38,7 +38,7 @@ class AssociationWriter:
         """Borrow the application's already-open store."""
         self._db = baser
 
-    def dead_letter_acceptance(self, previous, record):
+    def acceptance_to_dead(self, previous, record):
         """Move accepting to acceptance_dead with a prepared diagnostic."""
         db = self._db
         key = record.associationSaid.encode()
@@ -50,7 +50,7 @@ class AssociationWriter:
             txn.delete(key, db=db.accepting.sdb)
             txn.put(key, raw, db=db.acceptance_dead.sdb)
 
-    def retry_dead_acceptance(self, previous, record):
+    def dead_to_acceptance(self, previous, record):
         """Move corrected acceptance_dead back to accepting."""
         db = self._db
         key = record.associationSaid.encode()
@@ -62,7 +62,7 @@ class AssociationWriter:
             txn.delete(key, db=db.acceptance_dead.sdb)
             txn.put(key, raw, db=db.accepting.sdb)
 
-    def accept_association(self, status, nonce):
+    def accept(self, status, nonce):
         """Commit nonce ownership and accepted status without delivery.
 
         False means this SAID already has status. NonceConflict aborts all writes.
@@ -85,7 +85,7 @@ class AssociationWriter:
             txn.delete(key, db=db.accepting.sdb)
         return True
 
-    def accept_and_queue_delivery(self, status, nonce, delivery, reference, schedule):
+    def accept_and_queue(self, status, nonce, delivery, reference, schedule):
         """Commit nonce ownership and accepted status with its ready event.
 
         False means this SAID already has status. NonceConflict aborts all writes.
@@ -117,7 +117,7 @@ class AssociationWriter:
             txn.delete(key, db=db.accepting.sdb)
         return True
 
-    def reject_reused_nonce(self, status):
+    def reject_nonce(self, status):
         """Save nonce-reuse rejection and remove accepting; never write a nonce or event."""
         db = self._db
         key, raw = status.associationSaid.encode(), db.associations.serializer(status)
@@ -128,7 +128,7 @@ class AssociationWriter:
             txn.delete(key, db=db.accepting.sdb)
         return True
 
-    def record_revocation(self, previous, status):
+    def rev(self, previous, status):
         """Replace accepted status with revoked status without delivery."""
         db = self._db
         key = status.associationSaid.encode()
@@ -141,9 +141,7 @@ class AssociationWriter:
                 raise ValueError("association changed before revocation")
             txn.put(key, raw, db=db.associations.sdb)
 
-    def record_revocation_and_queue_delivery(
-        self, previous, status, delivery, reference
-    ):
+    def rev_and_queue(self, previous, status, delivery, reference):
         """Replace accepted status with revoked status and its ready revocation event."""
         db = self._db
         key = status.associationSaid.encode()

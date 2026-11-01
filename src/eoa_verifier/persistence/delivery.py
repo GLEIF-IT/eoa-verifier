@@ -14,19 +14,19 @@ class DeliveryReader:
         """Return an immutable event and its current delivery progress."""
         return self._db.outbox.get(keys=(event_id,))
 
-    def active_delivery_reference(self):
+    def active_ref(self):
         """Read the sender's interrupted delivery reference."""
         return self._db.delivery_active.get(keys=("sender",))
 
-    def ready_delivery_reference(self):
+    def ready_ref(self):
         """Read the ready delivery head without consuming it."""
         return first_record(self._db.delivery_ready)
 
-    def dead_delivery_reference(self, event_id):
+    def dead_ref(self, event_id):
         """Read one identified delivery dead letter."""
         return self._db.delivery_dead.get(keys=(event_id,))
 
-    def destination_schedule(self, destination):
+    def schedule(self, destination):
         """Return a detached destination pacing/backoff record."""
         return self._db.destinations.get(keys=(destination,))
 
@@ -38,7 +38,7 @@ class DeliveryWriter:
         """Borrow the application's already-open store."""
         self._db = baser
 
-    def delivery_ready_to_active(self, reference):
+    def ready_to_active(self, reference):
         """Move the expected ready reference to the single active sender slot."""
         db = self._db
         key, raw = reference.eventId.encode(), db.delivery_ready.serializer(reference)
@@ -51,7 +51,7 @@ class DeliveryWriter:
             txn.put(b"sender", active_raw, db=db.delivery_active.sdb)
             txn.delete(key, db=db.delivery_ready.sdb)
 
-    def record_delivery_attempt(self, previous, delivery, schedule):
+    def record_attempt(self, previous, delivery, schedule):
         """Persist charged outbox progress and request-start pacing before HTTP."""
         db = self._db
         key = delivery.eventId.encode()
@@ -66,7 +66,7 @@ class DeliveryWriter:
             txn.put(key, raw, db=db.outbox.sdb)
             txn.put(schedule_key, schedule_raw, db=db.destinations.sdb)
 
-    def defer_delivery(self, previous, delivery, schedule):
+    def defer(self, previous, delivery, schedule):
         """Persist retry progress and cooldown, retaining the active reference."""
         db = self._db
         key = delivery.eventId.encode()
@@ -81,7 +81,7 @@ class DeliveryWriter:
             txn.put(key, raw, db=db.outbox.sdb)
             txn.put(schedule_key, schedule_raw, db=db.destinations.sdb)
 
-    def acknowledge_delivery(self, previous, delivery, schedule, reference):
+    def ack(self, previous, delivery, schedule, reference):
         """Persist authenticated ACK progress and remove the matching ready/active references."""
         db = self._db
         key = delivery.eventId.encode()
@@ -100,7 +100,7 @@ class DeliveryWriter:
             if txn.get(b"sender", db=db.delivery_active.sdb) == active_raw:
                 txn.delete(b"sender", db=db.delivery_active.sdb)
 
-    def dead_letter_delivery(self, previous, delivery, schedule, reference):
+    def dead_letter(self, previous, delivery, schedule, reference):
         """Persist failed progress and move matching ready/active references to delivery_dead."""
         db = self._db
         key = delivery.eventId.encode()
@@ -121,7 +121,7 @@ class DeliveryWriter:
                 txn.delete(b"sender", db=db.delivery_active.sdb)
             txn.put(key, dead_raw, db=db.delivery_dead.sdb)
 
-    def retry_dead_delivery(self, previous, delivery, reference):
+    def dead_to_ready(self, previous, delivery, reference):
         """Save a prepared reset and move its expected dead reference back to ready."""
         db = self._db
         key, raw = delivery.eventId.encode(), db.outbox.serializer(delivery)

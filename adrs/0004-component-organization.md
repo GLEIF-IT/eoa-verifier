@@ -65,8 +65,8 @@ Each feature service reads detached records, decides the next phase, prepares it
 records, and calls a concrete atomic save. Clock, retry, trust and outcome policy
 run outside write transactions. No transaction spans KERIpy parsing or RPC. Each persistence method names one
 legal transition and fixes its source/destination tables. For example,
-`defer_grant` moves active to waiting, `retry_dead_grant` moves dead to waiting,
-and `acknowledge_delivery` removes only the matching scheduling references.
+`active_to_waiting` moves active to waiting, `dead_to_waiting` moves dead to waiting,
+and `ack` removes only the matching scheduling references.
 Do not pass source/target phase strings or outcome flags to a catch-all save.
 Keep the short transaction bodies explicit even when some code repeats.
 
