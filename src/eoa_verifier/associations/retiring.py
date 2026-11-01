@@ -1,38 +1,28 @@
-"""Reconcile accepted verified association revocation with durable application status."""
+"""Consume accepted TEL revocation handoffs, one credential per scheduler turn."""
 
 from hio.base import doing
-from keri import kering
 
 
 class RetirementDoer(doing.Doer):
-    """Borrow stores and scan a bounded page of associations each scheduler turn.
+    """Borrow both stores; retire locally before acknowledging the native handoff.
 
-    Read accepted local TEL state, without verification refreshes, peer polling or
-    account/source checks. The scan recovers KERIpy/application commit gaps after
-    restart and does not rely on transient cues or a new Grant notification.
+    A crash between commits repeats an idempotent retirement. Revocation before
+    initial acceptance is handled by verification and the acceptance TEL guard;
+    unrelated credentials do not create application status or delivery events.
     """
 
     def __init__(self, *, baser, rgy, tock=0.25, **kwa):
+        """Borrow the application store and service-owned VerifierReger."""
         self.baser, self.rgy = baser, rgy
-        self.after = ""
         super().__init__(tock=tock, **kwa)
 
     def recur(self, tyme):
-        """Retire only the exact SAID whose KERIpy TEL has accepted rev/brv state."""
-        page = self.baser.association_batch(after=self.after)
-        if not page:
-            self.after = ""
-        for association in page:
-            self.after = association.associationSaid
-            if association.status != "accepted":
-                continue
-            credential = self.rgy.reger.creds.get(keys=(self.after,))
-            if credential is None:
-                continue
-            try:
-                state = self.rgy.reger.tevers[credential.regi].vcState(self.after)
-            except (KeyError, kering.MissingEntryError):
-                continue
-            if state is not None and state.et in ("rev", "brv"):
-                self.baser.retire(self.after)
+        """Apply one handoff; completed association history is never a work source."""
+        handoff = self.rgy.reger.next_revocation()
+        if handoff is not None:
+            said, _ = handoff
+            association = self.baser.associations.get(keys=(said,))
+            if association is not None and association.status == "accepted":
+                self.baser.retire(said)
+            self.rgy.reger.revocations.rem(keys=(said,))
         return False
