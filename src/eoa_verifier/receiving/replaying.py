@@ -31,11 +31,11 @@ class GrantReplayService:
 
     def next_active(self):
         """Read one interrupted Grant without changing its attempt count."""
-        return self.reader.active_grant()
+        return self.reader.active()
 
     def next_waiting(self):
         """Read one due Grant retry without consuming its deadline index."""
-        record = self.reader.waiting_grant()
+        record = self.reader.waiting()
         return (
             record
             if record is not None and record.nextAttemptAt <= self.clock()
@@ -54,11 +54,11 @@ class GrantReplayService:
                 reason=record.reason
                 or "Grant replay interrupted; attempt budget exhausted",
             )
-            self.writer.dead_letter_grant(record, dead)
+            self.writer.active_to_dead(record, dead)
             self.grant_adapter.remove_notice(record.noticeId)
             return None
         active = replace(record, attempts=record.attempts + 1)
-        self.writer.resume_grant(record, active)
+        self.writer.resume(record, active)
         return active
 
     def retry_waiting(self, record):
@@ -71,23 +71,23 @@ class GrantReplayService:
                 reason=record.reason
                 or "Grant replay interrupted; attempt budget exhausted",
             )
-            self.writer.dead_letter_waiting_grant(record, dead)
+            self.writer.waiting_to_dead(record, dead)
             self.grant_adapter.remove_notice(record.noticeId)
             return None
         active = replace(record, attempts=record.attempts + 1)
-        self.writer.activate_waiting_grant(record, active)
+        self.writer.waiting_to_active(record, active)
         return active
 
     def start_notice(self, notice):
         """Persist one new KERIpy notice before acknowledging or replaying it."""
         active = replace(notice, attempts=1)
-        self.writer.start_grant(active)
+        self.writer.start(active)
         return active
 
     def process_one(self):
         """Schedule one interrupted, due or new Grant; never fall through after failure."""
         notice = self.next_notice()
-        if notice is not None and self.reader.dead_grant(notice.noticeId) is not None:
+        if notice is not None and self.reader.dead(notice.noticeId) is not None:
             self.grant_adapter.remove_notice(notice.noticeId)
             return
         if (record := self.next_active()) is not None:
@@ -117,22 +117,22 @@ class GrantReplayService:
                 nextAttemptAt=self.clock() + self.retry_delay,
             )
             if active.attempts >= self.max_attempts:
-                self.writer.dead_letter_grant(active, failed)
+                self.writer.active_to_dead(active, failed)
             else:
-                self.writer.defer_grant(active, failed)
+                self.writer.active_to_waiting(active, failed)
         except InvalidGrantError as exc:
             failed = replace(active, reason=str(exc) or type(exc).__name__)
-            self.writer.dead_letter_grant(active, failed)
+            self.writer.active_to_dead(active, failed)
         else:
             if verification is None:
-                self.writer.discard_unrelated_notice(active)
+                self.writer.discard_notice(active)
             else:
-                self.writer.complete_grant(active, verification)
+                self.writer.complete(active, verification)
 
     def retry(self, notice_id):
         """Resume a corrected dead letter with a fresh budget; service must be stopped."""
-        record = self.reader.dead_grant(notice_id)
+        record = self.reader.dead(notice_id)
         if record is None:
             raise ValueError("unknown Grant dead letter")
         waiting = replace(record, attempts=0, nextAttemptAt=0, reason="")
-        self.writer.retry_dead_grant(record, waiting)
+        self.writer.dead_to_waiting(record, waiting)

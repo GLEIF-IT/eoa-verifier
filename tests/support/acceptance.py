@@ -1,5 +1,9 @@
 """support/acceptance.py."""
 
+from eoa_verifier.persistence.associations import AssociationReader, AssociationWriter
+from eoa_verifier.persistence.delivery import DeliveryReader
+from eoa_verifier.persistence.verification import VerificationReader
+
 
 def accept_verified_result(baser):
     """Commit one known initial result with minimal association facts and target."""
@@ -20,19 +24,22 @@ def accept_verified_result(baser):
 def acceptance_service(baser):
     """Compose offline acceptance operations over a test-owned application store."""
     from eoa_verifier.associations.accepting import AcceptanceService
-    from eoa_verifier.persistence.reading import ApplicationReader
-    from eoa_verifier.persistence.writing import ApplicationWriter
 
-    return AcceptanceService(ApplicationReader(baser), ApplicationWriter(baser))
+    return AcceptanceService(
+        AssociationReader(baser),
+        AssociationWriter(baser),
+        verification_reader=VerificationReader(baser),
+    )
 
 
 def revocation_service(baser, rgy=None):
     """Compose idempotent revocation; KERIpy evidence is optional for direct operations."""
     from eoa_verifier.associations.evidence import AssociationEvidence
     from eoa_verifier.associations.revoking import RevocationService
-    from eoa_verifier.persistence.reading import ApplicationReader
-    from eoa_verifier.persistence.writing import ApplicationWriter
 
     return RevocationService(
-        ApplicationReader(baser), ApplicationWriter(baser), AssociationEvidence(rgy)
+        AssociationReader(baser),
+        AssociationWriter(baser),
+        AssociationEvidence(rgy),
+        delivery_reader=DeliveryReader(baser),
     )

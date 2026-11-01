@@ -7,19 +7,19 @@ from unittest.mock import patch
 import pytest
 from keri.db import dbing
 
+from eoa_verifier.persistence.associations import AssociationReader
 from eoa_verifier.persistence.basing import VerifierBaser
-from eoa_verifier.persistence.reading import ApplicationReader
 from eoa_verifier.persistence.records import (
     DestinationSchedule,
     VerificationRecord,
     VerificationResult,
 )
-from eoa_verifier.persistence.writing import ApplicationWriter
 from tests.support.acceptance import (
     accept_verified_result,
     acceptance_service,
     revocation_service,
 )
+from tests.support.persistence import enqueue_verification
 from tests.support.services import delivery_service, verification_service
 
 
@@ -28,16 +28,16 @@ def test_duplicates_completion_and_restart(tmp_path):
     baser = VerifierBaser(name="work", headDirPath=str(tmp_path), temp=False)
     try:
         verification = VerificationRecord("a", "first")
-        assert ApplicationWriter(baser).enqueue_verification(verification)
+        assert enqueue_verification(baser, verification)
         verificationService = verification_service(baser)
-        verification = verificationService.start_pending(verificationService.next_pending())
+        verification = verificationService.start_pending(
+            verificationService.next_pending()
+        )
         verification_service(baser).defer_verification(
             verification, reason="missing source", next_attempt_at=5
         )
-        assert not ApplicationWriter(baser).enqueue_verification(
-            VerificationRecord("a", "duplicate")
-        )
-        ApplicationWriter(baser).enqueue_verification(VerificationRecord("b", "first"))
+        assert not enqueue_verification(baser, VerificationRecord("a", "duplicate"))
+        enqueue_verification(baser, VerificationRecord("b", "first"))
         result = VerificationResult(
             "b",
             "verified",
@@ -51,9 +51,7 @@ def test_duplicates_completion_and_restart(tmp_path):
             verification_service(baser).finish(
                 VerificationResult("b", "rejected", "wrong")
             )
-        assert not ApplicationWriter(baser).enqueue_verification(
-            VerificationRecord("b", "duplicate")
-        )
+        assert not enqueue_verification(baser, VerificationRecord("b", "duplicate"))
         baser.close()
         baser.reopen()
         assert baser.waiting.get(keys=("a",)) == VerificationRecord(
@@ -61,7 +59,7 @@ def test_duplicates_completion_and_restart(tmp_path):
         )
         assert baser.pending.get(keys=("b",)) is None
         assert baser.results.get(keys=("b",)) == result
-        assert ApplicationReader(baser).acceptance() == result
+        assert AssociationReader(baser).acceptance() == result
     finally:
         baser.close()
 
@@ -70,9 +68,11 @@ def test_completion_rollback_after_result_write():
     """A failure deleting pending work rolls back the result written in the same transaction."""
     with dbing.openLMDB(cls=VerifierBaser) as baser:
         verification = VerificationRecord("a", "first")
-        ApplicationWriter(baser).enqueue_verification(verification)
+        enqueue_verification(baser, verification)
         verificationService = verification_service(baser)
-        verification = verificationService.start_pending(verificationService.next_pending())
+        verification = verificationService.start_pending(
+            verificationService.next_pending()
+        )
         real_env = baser.env
 
         class FailingTransaction:
@@ -122,7 +122,7 @@ def test_acceptance_and_delivery_progress_survive_reopen(verified_store):
     baser.close()
     baser.reopen()
     associationStatus = accept_verified_result(baser)
-    assert ApplicationReader(baser).acceptance() is None
+    assert AssociationReader(baser).acceptance() is None
     assert baser.delivery_ready.get(keys=(associationStatus.eventId,)) is not None
     delivery_service(baser).record_attempt(associationStatus.eventId)
     delivery_service(baser).defer(associationStatus.eventId, error="connection failed")
@@ -171,9 +171,7 @@ def test_failed_acceptance_rolls_back_status_and_event(verified_store):
 def test_rejected_result_cannot_create_acceptance_or_event(verified_store):
     """Rejected verification remains inspectable and never produces a success event."""
     baser = verified_store
-    ApplicationWriter(baser).enqueue_verification(
-        VerificationRecord("rejected", "grant")
-    )
+    enqueue_verification(baser, VerificationRecord("rejected", "grant"))
     verificationService = verification_service(baser)
     verificationService.start_pending(verificationService.next_pending())
     verification_service(baser).finish(

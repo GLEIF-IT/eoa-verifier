@@ -34,6 +34,7 @@ class DeliveryService:
         writer,
         transport=None,
         *,
+        association_reader,
         interval=1.0,
         backoff_base=1.0,
         backoff_cap=150.0,
@@ -43,6 +44,7 @@ class DeliveryService:
     ):
         """Borrow adapters; transport is unnecessary for offline recovery operations."""
         self.reader, self.writer, self.transport = reader, writer, transport
+        self.association_reader = association_reader
         self.interval, self.backoff_base, self.backoff_cap = (
             interval,
             backoff_base,
@@ -55,26 +57,26 @@ class DeliveryService:
 
     def next_active(self):
         """Read the active delivery without consulting or claiming ready work."""
-        reference = self.reader.active_delivery_reference()
+        reference = self.reader.active_ref()
         return self._delivery(reference.eventId) if reference is not None else None
 
     def next_ready(self):
         """Read the ready delivery head without changing its scheduling reference."""
-        reference = self.reader.ready_delivery_reference()
+        reference = self.reader.ready_ref()
         return self._delivery(reference.eventId) if reference is not None else None
 
     def start_ready(self, delivery):
         """Commit ready-to-active before attempting the selected delivery."""
-        self.writer.delivery_ready_to_active(DeliveryReference(delivery.eventId))
+        self.writer.ready_to_active(DeliveryReference(delivery.eventId))
 
     def retry(self, event_id):
         """Reset a corrected dead letter without resetting destination cooldown."""
-        reference = self.reader.dead_delivery_reference(event_id)
+        reference = self.reader.dead_ref(event_id)
         if reference is None:
             raise ValueError("unknown dead-letter event")
         previous = self.reader.delivery(event_id)
         delivery = replace(previous, blocked=False, error="", attempts=0)
-        self.writer.retry_dead_delivery(previous, delivery, reference)
+        self.writer.dead_to_ready(previous, delivery, reference)
 
     def record_attempt(self, event_id, *, next_attempt_at=None):
         """Prepare durable attempt accounting and request-start pacing before I/O."""
@@ -89,12 +91,12 @@ class DeliveryService:
             blocked=False,
             error="attempt started; authenticated ACK not recorded",
         )
-        schedule = self.reader.destination_schedule(delivery.destination)
+        schedule = self.reader.schedule(delivery.destination)
         if next_attempt_at is not None:
             schedule = replace(
                 schedule, nextAttemptAt=max(schedule.nextAttemptAt, next_attempt_at)
             )
-        self.writer.record_delivery_attempt(previous, delivery, schedule)
+        self.writer.record_attempt(previous, delivery, schedule)
         return delivery
 
     def acknowledge(self, event_id):
@@ -104,9 +106,9 @@ class DeliveryService:
             return
         delivery = replace(previous, error="", blocked=False, acknowledged=True)
         schedule = replace(
-            self.reader.destination_schedule(delivery.destination), failures=0
+            self.reader.schedule(delivery.destination), failures=0
         )
-        self.writer.acknowledge_delivery(
+        self.writer.ack(
             previous, delivery, schedule, DeliveryReference(event_id)
         )
 
@@ -116,8 +118,8 @@ class DeliveryService:
         if previous.acknowledged:
             return
         delivery = replace(previous, error=error, blocked=False, acknowledged=False)
-        schedule = schedule or self.reader.destination_schedule(delivery.destination)
-        self.writer.defer_delivery(previous, delivery, schedule)
+        schedule = schedule or self.reader.schedule(delivery.destination)
+        self.writer.defer(previous, delivery, schedule)
 
     def dead_letter(self, event_id, *, error, schedule=None):
         """Prepare a stopped event and its dedicated dead-letter reference."""
@@ -125,8 +127,8 @@ class DeliveryService:
         if previous.acknowledged:
             return
         delivery = replace(previous, error=error, blocked=True, acknowledged=False)
-        schedule = schedule or self.reader.destination_schedule(delivery.destination)
-        self.writer.dead_letter_delivery(
+        schedule = schedule or self.reader.schedule(delivery.destination)
+        self.writer.dead_letter(
             previous, delivery, schedule, DeliveryReference(event_id)
         )
 
@@ -145,7 +147,7 @@ class DeliveryService:
             if delivery is None:
                 return
             self.start_ready(delivery)
-        status = self.reader.association(delivery.associationSaid)
+        status = self.association_reader.association(delivery.associationSaid)
         if (
             status is None
             or status.status not in ("accepted", "revoked")
@@ -157,7 +159,7 @@ class DeliveryService:
             )
             return
         if (
-            self.reader.destination_schedule(delivery.destination).nextAttemptAt
+            self.reader.schedule(delivery.destination).nextAttemptAt
             <= self.clock()
         ):
             yield from self.attempt(delivery)
@@ -181,7 +183,7 @@ class DeliveryService:
                 error=str(error) or type(error).__name__,
             )
         except (_TransientFailure, OSError) as error:
-            schedule = self.reader.destination_schedule(delivery.destination)
+            schedule = self.reader.schedule(delivery.destination)
             schedule = replace(schedule, failures=schedule.failures + 1)
             exponent = min(
                 schedule.failures - 1,
@@ -254,6 +256,8 @@ class WebhookSender(doing.DoDoer):
         reader,
         writer,
         keys,
+        claim_nonce,
+        association_reader,
         timeout=10.0,
         interval=1.0,
         backoff_base=1.0,
@@ -263,11 +267,14 @@ class WebhookSender(doing.DoDoer):
         max_attempts=3,
         **kwa,
     ):
-        """Compose the delivery service with this scheduler's HTTP client adapter."""
+        """Borrow delivery persistence and a transport replay-claim callable.
+
+        Compose the delivery service with this scheduler's HTTP client adapter."""
         self.service = DeliveryService(
             reader,
             writer,
-            WebhookHttp(self, keys, writer.claim_nonce, timeout=timeout),
+            WebhookHttp(self, keys, claim_nonce, timeout=timeout),
+            association_reader=association_reader,
             interval=interval,
             backoff_base=backoff_base,
             backoff_cap=backoff_cap,

@@ -8,6 +8,11 @@ import sys
 
 from keri import kering
 
+from eoa_verifier.persistence.associations import AssociationReader, AssociationWriter
+from eoa_verifier.persistence.delivery import DeliveryReader, DeliveryWriter
+from eoa_verifier.persistence.grants import GrantReader, GrantWriter
+from eoa_verifier.persistence.verification import VerificationReader, VerificationWriter
+
 from .config import ServiceConfig
 from .serving import run_service
 
@@ -122,8 +127,6 @@ def main(argv=None):
         from eoa_verifier.associations.accepting import AcceptanceService
         from eoa_verifier.delivery.delivering import DeliveryService
         from eoa_verifier.persistence.basing import VerifierBaser
-        from eoa_verifier.persistence.reading import ApplicationReader
-        from eoa_verifier.persistence.writing import ApplicationWriter
         from eoa_verifier.receiving.replaying import GrantReplayService
         from eoa_verifier.verification.verifying import VerificationService
 
@@ -135,12 +138,23 @@ def main(argv=None):
                 headDirPath=args["head_dir"],
                 temp=False,
             ) as baser:
-                reader, writer = ApplicationReader(baser), ApplicationWriter(baser)
                 actions = {
-                    "retry-delivery": DeliveryService(reader, writer).retry,
-                    "retry-verification": VerificationService(reader, writer).retry,
-                    "retry-grant": GrantReplayService(reader, writer).retry,
-                    "retry-acceptance": AcceptanceService(reader, writer).retry,
+                    "retry-delivery": DeliveryService(
+                        DeliveryReader(baser),
+                        DeliveryWriter(baser),
+                        association_reader=AssociationReader(baser),
+                    ).retry,
+                    "retry-verification": VerificationService(
+                        VerificationReader(baser), VerificationWriter(baser)
+                    ).retry,
+                    "retry-grant": GrantReplayService(
+                        GrantReader(baser), GrantWriter(baser)
+                    ).retry,
+                    "retry-acceptance": AcceptanceService(
+                        AssociationReader(baser),
+                        AssociationWriter(baser),
+                        verification_reader=VerificationReader(baser),
+                    ).retry,
                 }
                 actions[args["command"]](args["identifier"])
         except (ValueError, OSError) as exc:

@@ -2,8 +2,8 @@
 
 import pytest
 
-from eoa_verifier.persistence.writing import ApplicationWriter
 from eoa_verifier.runtime.cli import main
+from tests.support.persistence import enqueue_verification
 from tests.support.services import verification_service
 
 
@@ -30,11 +30,11 @@ def test_retry_verification_command_uses_persistent_phase(tmp_path):
     with dbing.openLMDB(
         cls=VerifierBaser, name="operator", headDirPath=str(tmp_path), temp=False
     ) as baser:
-        ApplicationWriter(baser).enqueue_verification(
-            VerificationRecord("candidate", "grant")
-        )
+        enqueue_verification(baser, VerificationRecord("candidate", "grant"))
         verificationService = verification_service(baser)
-        verification = verificationService.start_pending(verificationService.next_pending())
+        verification = verificationService.start_pending(
+            verificationService.next_pending()
+        )
         verification_service(baser).defer_verification(
             verification, reason="RPC unavailable", next_attempt_at=5, max_attempts=1
         )

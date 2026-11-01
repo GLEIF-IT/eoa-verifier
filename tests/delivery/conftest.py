@@ -1,6 +1,7 @@
 """delivery/conftest.py."""
 
 from contextlib import ExitStack
+from functools import partial
 
 import pytest
 from keri.app import habbing
@@ -9,7 +10,7 @@ from keri.db import dbing
 from eoa_verifier.delivery.authing import ServiceAuthenticator
 from eoa_verifier.delivery.keys import ServiceKeys
 from eoa_verifier.persistence.basing import VerifierBaser
-from eoa_verifier.persistence.writing import ApplicationWriter
+from eoa_verifier.persistence.transport import claim_nonce
 
 
 @pytest.fixture
@@ -28,12 +29,12 @@ def peers(tmp_path):
         yield (
             ServiceAuthenticator(
                 keys=ServiceKeys(ah),
-                claim_nonce=ApplicationWriter(ab).claim_nonce,
+                claim_nonce=partial(claim_nonce, ab),
                 peer_aid=bh.pre,
             ),
             ServiceAuthenticator(
                 keys=ServiceKeys(bh),
-                claim_nonce=ApplicationWriter(bb).claim_nonce,
+                claim_nonce=partial(claim_nonce, bb),
                 peer_aid=ah.pre,
             ),
             ab,

@@ -8,8 +8,10 @@ import pytest
 from falcon.testing import TestClient
 
 from eoa_verifier.associations.statusing import StatusEnd, StatusQuery
-from eoa_verifier.persistence.reading import ApplicationReader
+from eoa_verifier.persistence.associations import AssociationReader
+from eoa_verifier.persistence.delivery import DeliveryReader
 from eoa_verifier.persistence.records import DestinationSchedule
+from eoa_verifier.persistence.verification import VerificationReader
 from tests.support.acceptance import accept_verified_result, revocation_service
 from tests.support.services import delivery_service
 
@@ -63,7 +65,13 @@ def test_revocation_commits_its_own_event_once_and_preserves_facts(verified_stor
     app = falcon.App()
     app.add_route(
         "/v1/associations/{said}/status",
-        StatusEnd(StatusQuery(ApplicationReader(baser))),
+        StatusEnd(
+            StatusQuery(
+                AssociationReader(baser),
+                VerificationReader(baser),
+                DeliveryReader(baser),
+            )
+        ),
     )
     response = TestClient(app).simulate_get("/v1/associations/association/status")
     assert response.json["status"] == "revoked"

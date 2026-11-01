@@ -5,6 +5,10 @@ from contextlib import contextmanager
 from hio.base import doing
 from keri.app import habbing
 
+from eoa_verifier.persistence.associations import AssociationReader
+from eoa_verifier.persistence.delivery import DeliveryReader, DeliveryWriter
+from eoa_verifier.persistence.verification import VerificationReader, VerificationWriter
+
 
 @contextmanager
 def verifier_service(config):
@@ -66,14 +70,13 @@ def entered_service(config):
 
 def verification_service(baser, rgy=None, **options):
     """Compose the production phase service over a test-owned application store."""
-    from eoa_verifier.persistence.reading import ApplicationReader
-    from eoa_verifier.persistence.writing import ApplicationWriter
+
     from eoa_verifier.verification.evidence import CredentialEvidence
     from eoa_verifier.verification.verifying import VerificationService
 
     return VerificationService(
-        ApplicationReader(baser),
-        ApplicationWriter(baser),
+        VerificationReader(baser),
+        VerificationWriter(baser),
         CredentialEvidence(rgy),
         **options,
     )
@@ -82,7 +85,9 @@ def verification_service(baser, rgy=None, **options):
 def delivery_service(baser):
     """Compose offline delivery operations without KERIpy keys or HTTP tasks."""
     from eoa_verifier.delivery.delivering import DeliveryService
-    from eoa_verifier.persistence.reading import ApplicationReader
-    from eoa_verifier.persistence.writing import ApplicationWriter
 
-    return DeliveryService(ApplicationReader(baser), ApplicationWriter(baser))
+    return DeliveryService(
+        DeliveryReader(baser),
+        DeliveryWriter(baser),
+        association_reader=AssociationReader(baser),
+    )

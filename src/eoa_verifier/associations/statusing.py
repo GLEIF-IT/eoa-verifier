@@ -8,20 +8,24 @@ import falcon
 class StatusQuery:
     """Build one stored association view without effects or work discovery."""
 
-    def __init__(self, reader):
-        """Borrow detached point queries; this view owns no store or network tasks."""
-        self.reader = reader
+    def __init__(self, associations, verification, delivery):
+        """Compose association, verification and delivery point reads explicitly."""
+        self.associations, self.verification, self.delivery = (
+            associations,
+            verification,
+            delivery,
+        )
 
     def get(self, said):
         """Return a detached public view, or None for an unknown candidate."""
-        associationStatus = self.reader.association(said)
-        verificationResult = self.reader.verification_result(said)
-        phase, verification = self.reader.verification_progress(said)
-        deadLetterResult = self.reader.dead_acceptance(said)
+        associationStatus = self.associations.association(said)
+        verificationResult = self.verification.result(said)
+        phase, verification = self.verification.progress(said)
+        deadLetterResult = self.associations.dead_acceptance(said)
         if associationStatus is not None:
             statusBody = asdict(associationStatus)
             delivery = (
-                self.reader.delivery(associationStatus.eventId)
+                self.delivery.delivery(associationStatus.eventId)
                 if associationStatus.eventId
                 else None
             )

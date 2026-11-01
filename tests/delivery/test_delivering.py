@@ -3,6 +3,7 @@
 import json
 from datetime import datetime, timezone
 from email.utils import format_datetime
+from functools import partial
 from unittest.mock import patch
 
 import falcon
@@ -19,12 +20,14 @@ from eoa_verifier.delivery.delivering import (
     _TransientFailure,
 )
 from eoa_verifier.delivery.keys import ServiceKeys
+from eoa_verifier.persistence.associations import AssociationReader
 from eoa_verifier.persistence.basing import VerifierBaser
-from eoa_verifier.persistence.reading import ApplicationReader
+from eoa_verifier.persistence.delivery import DeliveryReader, DeliveryWriter
 from eoa_verifier.persistence.records import VerificationRecord, VerificationResult
-from eoa_verifier.persistence.writing import ApplicationWriter
+from eoa_verifier.persistence.transport import claim_nonce
 from tests.support.acceptance import acceptance_service, revocation_service
 from tests.support.network import free_port
+from tests.support.persistence import enqueue_verification
 from tests.support.services import delivery_service, verification_service
 
 
@@ -67,7 +70,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
         target = f"http://127.0.0.1:{port}/hook?{query}"
         receiver = ServiceAuthenticator(
             keys=ServiceKeys(receiver_hab),
-            claim_nonce=ApplicationWriter(receiver_db).claim_nonce,
+            claim_nonce=partial(claim_nonce, receiver_db),
             peer_aid=sender_hab.pre,
         )
         received_bodies, references, effects = [], [], set()
@@ -141,9 +144,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
         else:
             server = http.Server(host="127.0.0.1", port=port, app=app)
             server_doer = http.ServerDoer(server=server)
-        ApplicationWriter(baser).enqueue_verification(
-            VerificationRecord("association", "grant")
-        )
+        enqueue_verification(baser, VerificationRecord("association", "grant"))
         verificationService = verification_service(baser)
         verificationService.start_pending(verificationService.next_pending())
         verification_service(baser).finish(
@@ -167,15 +168,19 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
             # Initial delivery is already acknowledged; revocation needs its own
             # event ACK, even if the target signs another acceptance of event 1.
             delivery_service(baser).acknowledge(associationStatus.eventId)
-            associationStatus = revocation_service(baser).apply_revocation("association")
+            associationStatus = revocation_service(baser).apply_revocation(
+                "association"
+            )
         sender = WebhookSender(
-            reader=ApplicationReader(baser),
-            writer=ApplicationWriter(baser),
+            reader=DeliveryReader(baser),
+            writer=DeliveryWriter(baser),
             keys=ServiceKeys(sender_hab),
             timeout=1,
             interval=0.05,
             backoff_base=0.05,
             backoff_cap=0.05,
+            claim_nonce=partial(claim_nonce, baser),
+            association_reader=AssociationReader(baser),
         )
         # Acceptance atomically queued this event; the sender reads only its work phase.
 
@@ -261,9 +266,7 @@ def test_malformed_chunk_response_preserves_pending_delivery(tmp_path):
         hab = hby.makeHab(name="sender")
         server = tcp.Server(host="127.0.0.1", port=free_port())
         peer = BadResponsePeer(server=server)
-        ApplicationWriter(baser).enqueue_verification(
-            VerificationRecord("association", "grant")
-        )
+        enqueue_verification(baser, VerificationRecord("association", "grant"))
         verificationService = verification_service(baser)
         verificationService.start_pending(verificationService.next_pending())
         verification_service(baser).finish(
@@ -282,9 +285,11 @@ def test_malformed_chunk_response_preserves_pending_delivery(tmp_path):
         )
         original = baser.outbox.get(keys=(status.eventId,))
         sender = WebhookSender(
-            reader=ApplicationReader(baser),
-            writer=ApplicationWriter(baser),
+            reader=DeliveryReader(baser),
+            writer=DeliveryWriter(baser),
             keys=ServiceKeys(hab),
+            claim_nonce=partial(claim_nonce, baser),
+            association_reader=AssociationReader(baser),
         )
         clients = []
 
@@ -318,7 +323,7 @@ def test_malformed_chunk_response_preserves_pending_delivery(tmp_path):
 
 def accept(baser, said):
     """Create a completed result and its event at one shared destination."""
-    ApplicationWriter(baser).enqueue_verification(VerificationRecord(said, "grant"))
+    enqueue_verification(baser, VerificationRecord(said, "grant"))
     verificationService = verification_service(baser)
     verificationService.start_pending(verificationService.next_pending())
     verification_service(baser).finish(
@@ -349,12 +354,14 @@ def test_retry_backoff_caps_and_paces_successes(outbox):
         return lower
 
     sender = WebhookSender(
-        reader=ApplicationReader(outbox),
-        writer=ApplicationWriter(outbox),
+        reader=DeliveryReader(outbox),
+        writer=DeliveryWriter(outbox),
         keys=ServiceKeys(None),
         clock=clock,
         uniform=lower_bound,
         max_attempts=12,
+        claim_nonce=partial(claim_nonce, outbox),
+        association_reader=AssociationReader(outbox),
     )
 
     def attempt(delivery):
@@ -385,11 +392,13 @@ def test_cooldown_survives_restart_and_gates_new_events(outbox):
     scheduler = doing.Doist(tock=0.01, limit=1)
     clock = lambda: 1000 + scheduler.tyme
     sender = WebhookSender(
-        reader=ApplicationReader(outbox),
-        writer=ApplicationWriter(outbox),
+        reader=DeliveryReader(outbox),
+        writer=DeliveryWriter(outbox),
         keys=ServiceKeys(None),
         clock=clock,
         uniform=lambda low, high: high,
+        claim_nonce=partial(claim_nonce, outbox),
+        association_reader=AssociationReader(outbox),
     )
 
     def unavailable(delivery):
@@ -408,10 +417,12 @@ def test_cooldown_survives_restart_and_gates_new_events(outbox):
     assert outbox.destinations.get(keys=(delivery.destination,)) == schedule
 
     resumed = WebhookSender(
-        reader=ApplicationReader(outbox),
-        writer=ApplicationWriter(outbox),
+        reader=DeliveryReader(outbox),
+        writer=DeliveryWriter(outbox),
         keys=ServiceKeys(None),
         clock=clock,
+        claim_nonce=partial(claim_nonce, outbox),
+        association_reader=AssociationReader(outbox),
     )
     starts = []
 
@@ -436,10 +447,12 @@ def test_permanent_failure_waits_for_explicit_resumption(outbox):
     scheduler = doing.Doist(tock=0.01, limit=2)
     clock = lambda: 1000 + scheduler.tyme
     sender = WebhookSender(
-        reader=ApplicationReader(outbox),
-        writer=ApplicationWriter(outbox),
+        reader=DeliveryReader(outbox),
+        writer=DeliveryWriter(outbox),
         keys=ServiceKeys(None),
         clock=clock,
+        claim_nonce=partial(claim_nonce, outbox),
+        association_reader=AssociationReader(outbox),
     )
 
     def misconfigured(delivery):
@@ -454,10 +467,12 @@ def test_permanent_failure_waits_for_explicit_resumption(outbox):
     outbox.close()
     outbox.reopen()
     resumed = WebhookSender(
-        reader=ApplicationReader(outbox),
-        writer=ApplicationWriter(outbox),
+        reader=DeliveryReader(outbox),
+        writer=DeliveryWriter(outbox),
         keys=ServiceKeys(None),
         clock=clock,
+        claim_nonce=partial(claim_nonce, outbox),
+        association_reader=AssociationReader(outbox),
     )
     with patch.object(resumed.service, "send") as network:
         scheduler.do(doers=[resumed], tyme=2)
@@ -480,10 +495,12 @@ def test_retry_after_supports_seconds_and_http_date():
     now = 1000
     future = format_datetime(datetime.fromtimestamp(1600, timezone.utc), usegmt=True)
     sender = WebhookSender(
-        reader=ApplicationReader(None),
-        writer=ApplicationWriter(None),
+        reader=DeliveryReader(None),
+        writer=DeliveryWriter(None),
         keys=ServiceKeys(None),
         clock=lambda: now,
+        claim_nonce=partial(claim_nonce, None),
+        association_reader=AssociationReader(None),
     )
     for value in ("600", future):
         with pytest.raises(_TransientFailure) as caught:
@@ -506,14 +523,16 @@ def test_transient_attempt_budget_moves_to_dead_letter_without_history_scan(outb
     """A finite sender stops after three failures and restart never discovers it again."""
     associationStatus = accept(outbox, "bounded")
     sender = WebhookSender(
-        reader=ApplicationReader(outbox),
-        writer=ApplicationWriter(outbox),
+        reader=DeliveryReader(outbox),
+        writer=DeliveryWriter(outbox),
         keys=ServiceKeys(None),
         interval=0.01,
         backoff_base=0.01,
         backoff_cap=0.01,
         clock=lambda: 1000,
         uniform=lambda low, high: low,
+        claim_nonce=partial(claim_nonce, outbox),
+        association_reader=AssociationReader(outbox),
     )
 
     def unavailable(delivery):

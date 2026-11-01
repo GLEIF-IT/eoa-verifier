@@ -16,9 +16,10 @@ from .events import status_delivery
 class RevocationService:
     """Commit application revocation before acknowledging its separate KERIpy record."""
 
-    def __init__(self, reader, writer, evidence=None):
-        """Borrow detached application adapters and optional KERIpy revocation access."""
+    def __init__(self, reader, writer, evidence=None, *, delivery_reader):
+        """Borrow association persistence, delivery reads and optional TEL evidence."""
         self.reader, self.writer, self.evidence = reader, writer, evidence
+        self.delivery_reader = delivery_reader
 
     def process_one(self):
         """Apply at most one credential revocation without scanning association history."""
@@ -38,7 +39,11 @@ class RevocationService:
             raise ValueError("revocation requires an accepted association")
         if previous.status == "revoked":
             return previous
-        original = self.reader.delivery(previous.eventId) if previous.eventId else None
+        original = (
+            self.delivery_reader.delivery(previous.eventId)
+            if previous.eventId
+            else None
+        )
         if previous.eventId and original is None:
             raise ValueError("accepted delivery event is absent")
         status = replace(
@@ -58,9 +63,9 @@ class RevocationService:
             else None
         )
         if delivery is None:
-            self.writer.record_revocation(previous, status)
+            self.writer.rev(previous, status)
         else:
-            self.writer.record_revocation_and_queue_delivery(
+            self.writer.rev_and_queue(
                 previous, status, delivery, DeliveryReference(delivery.eventId)
             )
         return status
