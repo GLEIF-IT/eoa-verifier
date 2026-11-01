@@ -1,5 +1,6 @@
 """Compose KERIpy intake, initial verification, revocation and status delivery."""
 
+import logging
 from collections import deque
 
 import falcon
@@ -17,6 +18,7 @@ from keri.app import (
 from keri.core import eventing, parsing, routing
 from keri.db import basing, dbing
 from keri.end import ending
+from keri.help import helping
 from keri.peer import exchanging
 from keri.vc import protocoling
 from keri.vdr import credentialing, verifying
@@ -46,6 +48,8 @@ from ..verification.verifying import VerificationService
 from ..verification.worker import EoaVerifierDoer
 from .bootstrap import bootstrap_service
 from .config import ServiceConfig
+
+logger = logging.getLogger(__name__)
 
 
 class VerifierService(doing.DoDoer):
@@ -162,7 +166,15 @@ class VerifierService(doing.DoDoer):
                 backoff_cap=config.webhook_backoff_cap,
                 association_reader=AssociationReader(baser),
             )
-            doers.append(self.sender)
+            if config.webhook_oobi:
+                hby.db.roobi.rem(keys=(config.webhook_oobi,))
+                hby.db.oobis.pin(
+                    keys=(config.webhook_oobi,),
+                    val=basing.OobiRecord(date=helping.nowIso8601()),
+                )
+                doers.append(doing.doify(self.sender_do))
+            else:
+                doers.append(self.sender)
         doers.append(
             AcceptanceDoer(
                 AcceptanceService(
@@ -182,6 +194,26 @@ class VerifierService(doing.DoDoer):
             app,
         )
         super().__init__(doers=doers, **kwa)
+
+    def sender_do(self, tymth, tock=0.0, **opts):
+        """Start delivery after the optional response-signer OOBI has accepted key state.
+
+        Intake, verification, acceptance and OOBI serving remain available while
+        resolving. No delivery attempt is consumed before this introduction.
+        """
+        yield tock
+        url = self.config.webhook_oobi
+        logger.info("Resolving webhook response-signer OOBI %s", url)
+        while True:
+            record = self.hby.db.roobi.get(keys=(url,))
+            if (
+                record
+                and record.state == oobiing.Result.resolved
+                and record.cid in self.hby.kevers
+            ):
+                self.extend([self.sender])
+                return
+            yield self.tock
 
     def exit(self, deeds: deque | None = None):
         """Attempt every child cleanup and propagate failures; stores belong to the caller."""

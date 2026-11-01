@@ -47,7 +47,7 @@ def parser() -> argparse.ArgumentParser:
     parser.add_argument("--local-only", action="store_true")
     parser.add_argument("--rpc-url")
     parser.add_argument("--webhook-url")
-    parser.add_argument("--peer-kel", type=Path)
+    parser.add_argument("--webhook-oobi")
     parser.add_argument("--said")
     parser.add_argument("--nonce")
     parser.add_argument("--wallet", type=int, choices=(1, 2), default=1)
@@ -151,7 +151,7 @@ def start(root: Path, configuration: dict, arguments) -> None:
         local_only=arguments.local_only,
         rpc_url=arguments.rpc_url,
         webhook_url=arguments.webhook_url,
-        peer_kel=arguments.peer_kel,
+        webhook_oobi=arguments.webhook_oobi,
     )
 
 

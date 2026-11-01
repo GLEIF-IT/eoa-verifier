@@ -38,6 +38,8 @@ class ServiceConfig:
     temp: bool = False
     # Optional destination URL; acceptance runs even without webhook delivery.
     webhook_url: str | None = None
+    # Optional response-signer introduction; URL-only unsigned targets need none.
+    webhook_oobi: str | None = None
     # Operational seconds: one in-flight request; backoff range is [lower, 2 * lower].
     webhook_max_attempts: int = 3
     webhook_timeout: float = 10.0
@@ -59,6 +61,19 @@ class ServiceConfig:
             raise ValueError("webhook timing values must be finite positive seconds")
         if self.webhook_backoff_cap < self.webhook_backoff_base:
             raise ValueError("webhook backoff cap must be at least the base")
+        if self.webhook_oobi:
+            oobi = urlsplit(self.webhook_oobi)
+            if (
+                not self.webhook_url
+                or oobi.scheme not in ("http", "https")
+                or not oobi.netloc
+                or oobi.fragment
+                or oobi.username
+                or oobi.password
+            ):
+                raise ValueError(
+                    "webhook OOBI requires a webhook and an absolute HTTP(S) URL"
+                )
         if self.webhook_url:
             target = urlsplit(self.webhook_url)
             if (

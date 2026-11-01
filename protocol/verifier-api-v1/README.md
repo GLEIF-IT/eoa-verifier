@@ -106,7 +106,8 @@ Resolve `keyid` only against locally accepted current KERI key state. The header
 never authorizes an arbitrary Oracle producer or supplies a trusted public key.
 Oracle checks the signer against `--verifier-aid`. Verifier verifies response
 signers without a required destination-AID setting; operators opting into signed
-responses provide their KEL through existing CESR intake and update it on rotation.
+responses configure `--webhook-oobi`. The native resolver obtains validated key
+state before delivery starts and refreshes the introduction on restart after rotation.
 Unknown keys are not fetched automatically. Initially support single-key,
 threshold-one transferable service AIDs; retain rotation/restart verification.
 

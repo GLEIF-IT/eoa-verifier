@@ -59,7 +59,8 @@ records. Nonces are passed unchanged; issuance permits reuse so Verifier policy
 can reject it during acceptance.
 
 A caller owning the full stack can start this fixture with `--rpc-url URL
---webhook-url URL`. Add `--peer-kel FILE` only when the target signs responses.
+--webhook-url URL`. Add `--webhook-oobi URL` when the target signs responses. Native OOBI resolution
+introduces both fixture peers; startup imports no KEL files.
 The caller owns that chain
 and receiver; this mode starts neither Anvil nor the focused status-event fixture.
 Repeat the original options on restart. Configuration changes require a new run.

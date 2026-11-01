@@ -81,6 +81,7 @@ def main(argv=None):
     start.add_argument(
         "--webhook-url", help="Configured destination for association-status events"
     )
+    start.add_argument("--webhook-oobi", help="Optional response-signer OOBI URL")
     start.add_argument(
         "--webhook-timeout",
         type=float,

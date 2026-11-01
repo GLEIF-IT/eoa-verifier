@@ -114,6 +114,8 @@ def verifier_command(root: Path, configuration: dict) -> list[str]:
             "--webhook-backoff-cap",
             ".2",
         ]
+    if configuration.get("webhookOobi"):
+        command += ["--webhook-oobi", configuration["webhookOobi"]]
     return command
 
 

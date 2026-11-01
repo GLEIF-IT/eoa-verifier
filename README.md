@@ -30,7 +30,7 @@ Send CESR to `/`; `/health` reports liveness. The listener defaults to loopback.
 Add `--webhook-url https://receiver.example/hook`
 to enable delivery of accepted/revoked status. Acceptance also runs without a
 webhook. A plain target needs no KERI setup. If it signs responses, provision its
-accepted key state through CESR intake; unknown signing keys block delivery.
+its OOBI using `--webhook-oobi URL`; delivery waits for accepted key state.
 
 Public `GET /v1/associations/{said}/status` returns stored `pending`, `rejected`,
 `verifying`, `waiting`, `dead-letter`, `verified`, `accepted` or `revoked` status and any initial account observation.
@@ -208,9 +208,9 @@ signed body digest, but the target may ignore signatures and return any ordinary
 means the target returned HTTP success.
 
 If a response supplies either signature header, Verifier requires a valid complete
-signature and matching digest. Provision that signer's KEL through the existing
-CESR intake before enabling signed responses, and supply validated rotations when
-keys change. Unknown keys fail verification; no arbitrary key discovery occurs.
+signature and matching digest. Configure `--webhook-oobi URL` for that signer. KERIpy resolves its
+KEL before delivery starts; restart with the same OOBI after rotation to refresh
+accepted key state. Unknown keys fail verification; no arbitrary key discovery occurs.
 Unsigned responses require no KERI setup. Use HTTPS for destination authentication
 and transport integrity; optional signatures do not provide downgrade resistance.
 See the [transport contract](protocol/verifier-api-v1/README.md#transport-signature-profile) for exact coverage and limitations.

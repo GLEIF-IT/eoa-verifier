@@ -9,8 +9,10 @@ from urllib.parse import urlsplit
 import falcon
 from hio.base import doing
 from hio.core import http
-from keri.app import habbing
-from keri.db import subing
+from keri.app import habbing, httping, oobiing
+from keri.db import basing, subing
+from keri.end import ending
+from keri.help import helping
 
 from eoa_verifier.delivery.authing import AuthenticationError, HttpSignatures
 from eoa_verifier.delivery.keys import ServiceKeys
@@ -107,8 +109,18 @@ class StatusEventService:
 class Receiver:
     """Authenticate exact producer bytes and acknowledge only durable status-event storage."""
 
-    def __init__(self, auth, status_event_service, target, *, drop_ack=None):
+    def __init__(
+        self,
+        auth,
+        status_event_service,
+        target,
+        *,
+        verifier_aid,
+        producer_ready,
+        drop_ack=None,
+    ):
         """Borrow authentication/status-event operations and an optional post-commit fault."""
+        self.verifier_aid, self.producer_ready = verifier_aid, producer_ready
         self.auth, self.status_event_service, self.target, self.drop_ack = (
             auth,
             status_event_service,
@@ -122,10 +134,15 @@ class Receiver:
         relative = parsed.path + ("?" + parsed.query if parsed.query else "")
         if req.relative_uri != relative:
             raise falcon.HTTPBadRequest(description="unexpected signed target")
+        if not self.producer_ready():
+            raise falcon.HTTPServiceUnavailable(
+                description="producer OOBI is not ready", retry_after=1
+            )
         statusEventBytes = req.bounded_stream.read()
         try:
             self.auth.verify(
                 method="POST",
+                expected_aid=self.verifier_aid,
                 target=self.target,
                 body=statusEventBytes,
                 headers=req.headers,
@@ -167,23 +184,31 @@ def main():
         name="receiver", headDirPath=str(root / "receiver"), temp=False
     ) as hby:
         hab = hby.habByName("receiver")
-        hby.psr.parse(ims=bytearray((root / "verifier.cesr").read_bytes()))
+        url = config["verifierUrl"] + "/oobi/" + config["verifierAid"]
+        hby.db.roobi.rem(keys=(url,))
+        hby.db.oobis.pin(keys=(url,), val=basing.OobiRecord(date=helping.nowIso8601()))
+        resolver = oobiing.Oobiery(hby=hby, clienter=httping.Clienter())
         store = StatusEventStore(hby.db)
         auth = HttpSignatures(
             keys=ServiceKeys(hab),
         )
         app = falcon.App()
+        app.add_route("/oobi/{aid}", ending.OOBIEnd(hby=hby))
         app.add_route(
             "/hook",
             Receiver(
                 auth,
                 StatusEventService(store),
                 config["webhookUrl"],
+                verifier_aid=config["verifierAid"],
+                producer_ready=lambda: config["verifierAid"] in hby.kevers,
                 drop_ack=store.drop_ack_once if config["dropAck"] else None,
             ),
         )
         server = http.Server(host="127.0.0.1", port=config["receiverPort"], app=app)
-        doing.Doist(real=True, tock=0.01).do(doers=[http.ServerDoer(server=server)])
+        doing.Doist(real=True, tock=0.01).do(
+            doers=[http.ServerDoer(server=server), *resolver.doers]
+        )
 
 
 def shutdown(signum, frame):

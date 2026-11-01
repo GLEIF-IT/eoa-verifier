@@ -456,3 +456,12 @@ tooling preparation and service-launch responsibilities while keeping lifecycle
 sequencing explicit. Update the test guide with current paths. This follow-up
 changes neither application source nor protocol/storage behavior; qualification
 results and exact dependency pins are recorded in the organization PRs.
+
+## Follow-up: OOBI introductions
+
+Replace startup public-KEL file imports with native KERIpy OOBI resolution.
+Oracle retains explicit producer-AID authorization and returns retryable 503 until
+its OOBI resolves accepted key state. Verifier optionally resolves its response
+signer before starting delivery; URL-only unsigned targets require no introduction.
+Refresh configured introductions on restart after rotation. Keep credential/TEL
+evidence intake, durable application phases and nonce consumption independent.
