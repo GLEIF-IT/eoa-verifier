@@ -22,7 +22,8 @@ def test_duplicates_completion_and_restart(tmp_path):
     try:
         work = PendingVerification("a", "first")
         assert baser.enqueue(work)
-        baser.note_pending("a", "missing source")
+        work = baser.next_verification(now=0)
+        baser.defer_verification(work, reason="missing source", next_attempt_at=5)
         assert not baser.enqueue(PendingVerification("a", "duplicate"))
         baser.enqueue(PendingVerification("b", "first"))
         result = VerificationResult(
@@ -30,6 +31,7 @@ def test_duplicates_completion_and_restart(tmp_path):
             "verified",
             eoaResult={"wallet": "wallet", "accountObservation": {"chainId": 31337}},
         )
+        baser.next_verification(now=0)
         baser.finish(result)
         baser.finish(result)
         with pytest.raises(ValueError, match="conflicting"):
@@ -37,12 +39,12 @@ def test_duplicates_completion_and_restart(tmp_path):
         assert not baser.enqueue(PendingVerification("b", "duplicate"))
         baser.close()
         baser.reopen()
-        assert baser.pending.get(keys=("a",)) == PendingVerification(
-            "a", "first", "missing source"
+        assert baser.waiting.get(keys=("a",)) == PendingVerification(
+            "a", "first", "missing source", 1, 5
         )
         assert baser.pending.get(keys=("b",)) is None
         assert baser.results.get(keys=("b",)) == result
-        assert baser.acceptance_batch() == [result]
+        assert baser.next_acceptance() == result
     finally:
         baser.close()
 
@@ -52,6 +54,7 @@ def test_completion_rollback_after_result_write():
     with dbing.openLMDB(cls=VerifierBaser) as baser:
         work = PendingVerification("a", "first")
         baser.enqueue(work)
+        work = baser.next_verification(now=0)
         real_env = baser.env
 
         class FailingTransaction:
@@ -85,7 +88,7 @@ def test_completion_rollback_after_result_write():
             pytest.raises(RuntimeError, match="between writes"),
         ):
             baser.finish(VerificationResult("a", "verified"))
-        assert baser.pending.get(keys=("a",)) == work
+        assert baser.verifying.get(keys=("a",)) == work
         assert baser.results.get(keys=("a",)) is None
         assert baser.accepting.cntAll() == 0
         baser.finish(VerificationResult("a", "rejected", "invalid proof"))
@@ -99,7 +102,7 @@ def test_acceptance_and_delivery_progress_survive_reopen(verified_store):
     baser.close()
     baser.reopen()
     accepted = accept_verified_result(baser)
-    assert baser.acceptance_batch() == []
+    assert baser.next_acceptance() is None
     assert baser.delivery_ready.get(keys=(accepted.eventId,)) is not None
     baser.record_attempt(accepted.eventId)
     baser.delivery_result(accepted.eventId, error="connection failed")
@@ -149,6 +152,7 @@ def test_rejected_result_cannot_create_acceptance_or_event(verified_store):
     """Rejected verification remains inspectable and never produces a success event."""
     baser = verified_store
     baser.enqueue(PendingVerification("rejected", "grant"))
+    baser.next_verification(now=0)
     baser.finish(VerificationResult("rejected", "rejected", "wrong schema"))
     with pytest.raises(ValueError, match="verified result"):
         baser.accept(

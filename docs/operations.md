@@ -30,7 +30,7 @@ KERIpy options for a new identity only. The application store is bound to its
 GEDA root and chain ID before workers start, including operation without webhook delivery.
 Changing either requires separate stores. Existing stores with completed results
 but no recorded scope are refused; preserve them and use fresh stores rather than guessing their original policy. Pre-policy stores are also refused: acceptance now requires permanent issuer/nonce
-history under policy `issuer-nonce-ascii-v1`. Association nonces must contain
+history under policy `durable-phases-v1`. Association nonces must contain
 1–128 ASCII characters from `[A-Za-z0-9_-]`; no normalization is applied. Use a deliberate fresh store set; there is
 no migration or backfill. Never reset accepted history to evade nonce rejection.
 Enabling webhook delivery with the same root/chain remains supported, but does not
@@ -81,6 +81,43 @@ when the association had an original outbox obligation. Local-only acceptance
 retires locally without an event.
 Retiring an old association does not retire its replacement.
 
+## Verification and intake failures
+
+The service progresses one item per worker through dedicated durable phases:
+
+| Work | Ready / active | Waiting | Manual intervention |
+| --- | --- | --- | --- |
+| Grant replay | native Noter / `grant-active.` | `grant-waiting.` with `grant-due.` deadline index | `grant-dead.` |
+| Initial verification | `pending.` / `verifying.` | `waiting.` with `verification-due.` deadline index | `verification-dead.` |
+| Acceptance | `accepting.` | none: local evidence was already verified | `acceptance-dead.` |
+| Verified revocation | `verifier-revocations.` in the native registry | none | unexpected storage errors stop the worker and retain work |
+
+Grant replay and verification allow three attempts with five-second UTC cooldowns.
+The attempt commits before processing; an interruption consumes that attempt.
+Due retries take precedence over fresh work. No batch paging, completed-history
+scanning or in-memory retry timing participates. A missing Grant moves out of
+native notifications so it cannot block later notices. Invalid Grants retain
+diagnostics immediately; invalid credential proofs become terminal rejections.
+
+Public association GET distinguishes `pending`, `verifying`, `waiting` and
+`dead-letter`, including attempts and the next eligible time. Acceptance failures
+show `phase: acceptance`. Grant failures can precede knowing the credential SAID;
+inspect `grant-dead.` records in the local application store for their notice ID,
+Grant attributes and reason. Correct the missing material or RPC configuration,
+stop the service, and explicitly resume the affected phase:
+
+```sh
+eoa-verifier retry-grant "$NOTICE_ID" --name verifier --head-dir /var/lib/eoa-verifier
+eoa-verifier retry-verification "$SAID" --name verifier --head-dir /var/lib/eoa-verifier
+eoa-verifier retry-acceptance "$SAID" --name verifier --head-dir /var/lib/eoa-verifier
+```
+
+Retry renews only the selected operation's budget; it does not bypass validation,
+revocation guards or nonce ownership. Known revocation cannot be repaired by retry.
+These queues require fresh stores. There are no compatibility readers or migration.
+The native `putTel` boundary is qualified against `gleif_keri==1.2.19`; upgrading
+that dependency requires checking its accepted-event write order and requalifying.
+
 ## Delivery failures
 
 Transient network/HTTP failures retry automatically with persisted destination
@@ -88,7 +125,7 @@ cooldown, up to `--webhook-max-attempts` (default three). Exhaustion moves the e
 to the durable dead-letter queue. Each attempt signs the same immutable event bytes anew. Only an expected
 authenticated HTTP 200 ACK completes it. Observation age never triggers refresh.
 Malformed HTTP chunk framing closes the affected client without stopping sibling
-tasks. RPC observations remain retryable; malformed webhook responses leave their
+tasks. RPC observations use a three-attempt verification budget; malformed webhook responses leave their
 events blocked and unacknowledged for correction and explicit resumption.
 Permanent failures remain blocked until the cause is corrected; restart alone
 does not unblock them. Inspect public status and fix peer keys, authorization,

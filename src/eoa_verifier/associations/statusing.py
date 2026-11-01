@@ -20,7 +20,8 @@ class StatusEnd:
         """
         accepted = self.baser.associations.get(keys=(said,))
         result = self.baser.results.get(keys=(said,))
-        pending = self.baser.pending.get(keys=(said,))
+        phase, pending = self.baser.verification_progress(said)
+        stopped = self.baser.acceptance_dead.get(keys=(said,))
         if accepted is not None:
             data = asdict(accepted)
             event = (
@@ -39,6 +40,14 @@ class StatusEnd:
                 if event is not None
                 else None
             )
+        elif stopped is not None:
+            data = {
+                "associationSaid": said,
+                "status": "dead-letter",
+                "phase": "acceptance",
+                "reason": stopped.reason,
+                "accountObservation": None,
+            }
         elif result is not None:
             data = {
                 "associationSaid": said,
@@ -56,8 +65,10 @@ class StatusEnd:
         elif pending is not None:
             data = {
                 "associationSaid": said,
-                "status": "pending",
+                "status": phase,
                 "reason": pending.reason,
+                "attempts": pending.attempts,
+                "nextAttemptAt": pending.nextAttemptAt,
                 "accountObservation": None,
             }
         else:

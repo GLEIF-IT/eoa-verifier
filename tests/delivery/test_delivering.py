@@ -133,6 +133,7 @@ def test_webhook_completes_only_for_expected_authenticated_ack(tmp_path, reply):
             server = http.Server(host="127.0.0.1", port=port, app=app)
             server_doer = http.ServerDoer(server=server)
         baser.enqueue(PendingVerification("association", "grant"))
+        baser.next_verification(now=0)
         baser.finish(
             VerificationResult(
                 "association",
@@ -247,6 +248,7 @@ def test_malformed_chunk_response_preserves_pending_delivery(tmp_path):
         server = tcp.Server(host="127.0.0.1", port=free_port())
         peer = BadResponsePeer(server=server)
         baser.enqueue(PendingVerification("association", "grant"))
+        baser.next_verification(now=0)
         baser.finish(
             VerificationResult(
                 "association",
@@ -296,6 +298,7 @@ def test_malformed_chunk_response_preserves_pending_delivery(tmp_path):
 def accept(baser, said):
     """Create a completed result and its event at one shared destination."""
     baser.enqueue(PendingVerification(said, "grant"))
+    baser.next_verification(now=0)
     baser.finish(
         VerificationResult(
             said, "verified", eoaResult={"wallet": "wallet", "accountObservation": {}}

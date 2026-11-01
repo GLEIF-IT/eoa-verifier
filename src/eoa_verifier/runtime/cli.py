@@ -104,15 +104,19 @@ def main(argv=None):
         help="Retry lower-bound cap in seconds; upper is twice this (default: 150)",
     )
     start.add_argument("--webhook-max-attempts", type=int, default=3)
-    retry = commands.add_parser(
-        "retry-delivery", help="Resume a corrected dead letter with service stopped"
-    )
-    retry.add_argument("event_id")
-    retry.add_argument("--name", default="eoa-verifier")
-    retry.add_argument("--base", default="")
-    retry.add_argument("--head-dir")
+    for phase in ("delivery", "verification", "grant", "acceptance"):
+        retry = commands.add_parser(
+            f"retry-{phase}",
+            help=f"Resume a corrected {phase} dead letter with service stopped",
+        )
+        retry.add_argument(
+            "identifier", help="Event ID, association SAID, or Grant notice ID"
+        )
+        retry.add_argument("--name", default="eoa-verifier")
+        retry.add_argument("--base", default="")
+        retry.add_argument("--head-dir")
     args = vars(parser.parse_args(argv))
-    if args["command"] == "retry-delivery":
+    if args["command"].startswith("retry-"):
         from keri.db import dbing
 
         from eoa_verifier.persistence.basing import VerifierBaser
@@ -125,7 +129,13 @@ def main(argv=None):
                 headDirPath=args["head_dir"],
                 temp=False,
             ) as baser:
-                baser.retry_delivery(args["event_id"])
+                actions = {
+                    "retry-delivery": baser.retry_delivery,
+                    "retry-verification": baser.retry_verification,
+                    "retry-grant": baser.retry_grant,
+                    "retry-acceptance": baser.retry_acceptance,
+                }
+                actions[args["command"]](args["identifier"])
         except (ValueError, OSError) as exc:
             print(f"eoa-verifier: {exc}", file=sys.stderr)
             return 1

@@ -3,9 +3,8 @@
 import json
 import re
 from dataclasses import replace
-from itertools import islice
 
-from keri.db import dbing, koming
+from keri.db import dbing, koming, subing
 
 from .records import (
     AcceptedNonce,
@@ -13,6 +12,7 @@ from .records import (
     Delivery,
     DeliveryReference,
     DestinationSchedule,
+    GrantWork,
     PendingVerification,
     ReplayClaim,
     VerificationResult,
@@ -33,6 +33,27 @@ class VerifierBaser(dbing.LMDBer):
         self.scope = koming.Komer(db=self, subkey="scope.", schema=VerificationScope)
         self.pending = koming.Komer(
             db=self, subkey="pending.", schema=PendingVerification
+        )
+        self.verifying = koming.Komer(
+            db=self, subkey="verifying.", schema=PendingVerification
+        )
+        self.waiting = koming.Komer(
+            db=self, subkey="waiting.", schema=PendingVerification
+        )
+        self.verification_due = subing.Suber(db=self, subkey="verification-due.")
+        self.grant_due = subing.Suber(db=self, subkey="grant-due.")
+        self.verification_dead = koming.Komer(
+            db=self, subkey="verification-dead.", schema=PendingVerification
+        )
+        self.grant_active = koming.Komer(
+            db=self, subkey="grant-active.", schema=GrantWork
+        )
+        self.grant_waiting = koming.Komer(
+            db=self, subkey="grant-waiting.", schema=GrantWork
+        )
+        self.grant_dead = koming.Komer(db=self, subkey="grant-dead.", schema=GrantWork)
+        self.acceptance_dead = koming.Komer(
+            db=self, subkey="acceptance-dead.", schema=VerificationResult
         )
         self.results = koming.Komer(
             db=self, subkey="results.", schema=VerificationResult
@@ -66,7 +87,7 @@ class VerifierBaser(dbing.LMDBer):
 
     def bind_verification_scope(self, *, trusted_geda_aid, chain_id):
         """Refuse another policy or previously completed results with unknown provenance."""
-        scope = VerificationScope(trusted_geda_aid, chain_id, "issuer-nonce-ascii-v1")
+        scope = VerificationScope(trusted_geda_aid, chain_id, "durable-phases-v1")
         try:
             existing = self.scope.get(keys=("verification",))
         except (TypeError, ValueError) as exc:
@@ -86,30 +107,192 @@ class VerifierBaser(dbing.LMDBer):
         """Insert new unfinished work once; completed or pending duplicates return False."""
         key = work.associationSaid.encode()
         with self.env.begin(write=True) as txn:
-            if txn.get(key, db=self.results.sdb) is not None:
+            if any(
+                txn.get(key, db=table.sdb) is not None
+                for table in (
+                    self.results,
+                    self.verifying,
+                    self.waiting,
+                    self.verification_dead,
+                )
+            ):
                 return False
             return txn.put(
                 key, self.pending.serializer(work), db=self.pending.sdb, overwrite=False
             )
 
-    def note_pending(self, said, reason):
-        """Update only waiting information, preserving identity and the first Grant reference."""
+    def begin_grant(self, notice=None, *, now, max_attempts=3):
+        """Claim one native notice or resume an interrupted/local waiting replay.
+
+        The caller removes the native notice only after this durable handoff. Its
+        ID remains in active work, so restart can finish that acknowledgement.
+        """
+        with self.env.begin(write=True) as txn:
+            work = self.grant_active.deserializer(
+                txn.get(b"receiver", db=self.grant_active.sdb)
+            )
+            if work is None:
+                work = due_record(txn, self.grant_due, self.grant_waiting, now)
+                if work is not None:
+                    txn.delete(work.noticeId.encode(), db=self.grant_waiting.sdb)
+                elif notice is not None:
+                    work = GrantWork(notice.rid, notice.attrs)
+                else:
+                    return None
+            if work.attempts >= max_attempts:
+                work.reason = (
+                    work.reason or "Grant replay interrupted; attempt budget exhausted"
+                )
+                txn.put(
+                    work.noticeId.encode(),
+                    self.grant_dead.serializer(work),
+                    db=self.grant_dead.sdb,
+                )
+                txn.delete(b"receiver", db=self.grant_active.sdb)
+                return None
+            work.attempts += 1
+            txn.put(
+                b"receiver",
+                self.grant_active.serializer(work),
+                db=self.grant_active.sdb,
+            )
+            return work
+
+    def settle_grant(
+        self, work, *, reason="", next_attempt_at=0, invalid=False, max_attempts=3
+    ):
+        """Acknowledge replay or atomically retain failed material for waiting/manual recovery."""
+        with self.env.begin(write=True) as txn:
+            if reason or invalid:
+                target = (
+                    self.grant_dead
+                    if invalid or work.attempts >= max_attempts
+                    else self.grant_waiting
+                )
+                work = replace(work, reason=reason, nextAttemptAt=next_attempt_at)
+                txn.put(work.noticeId.encode(), target.serializer(work), db=target.sdb)
+                if target is self.grant_waiting:
+                    txn.put(
+                        due_key(work.nextAttemptAt, work.noticeId),
+                        work.noticeId.encode(),
+                        db=self.grant_due.sdb,
+                    )
+            txn.delete(b"receiver", db=self.grant_active.sdb)
+
+    def retry_grant(self, notice_id):
+        """Resume a corrected Grant dead letter without requiring another IPEX delivery."""
+        key = notice_id.encode()
+        with self.env.begin(write=True) as txn:
+            work = self.grant_dead.deserializer(txn.get(key, db=self.grant_dead.sdb))
+            if work is None:
+                raise ValueError("unknown Grant dead letter")
+            work = replace(work, attempts=0, nextAttemptAt=0, reason="")
+            txn.put(key, self.grant_waiting.serializer(work), db=self.grant_waiting.sdb)
+            txn.put(due_key(0, work.noticeId), key, db=self.grant_due.sdb)
+            txn.delete(key, db=self.grant_dead.sdb)
+
+    def retry_acceptance(self, said):
+        """Recheck a stopped acceptance after restoring its local evidence."""
         key = said.encode()
         with self.env.begin(write=True) as txn:
-            raw = txn.get(key, db=self.pending.sdb)
-            if raw is None:
-                raise ValueError("pending work is absent")
-            work = self.pending.deserializer(raw)
-            if work.reason != reason:
-                work.reason = reason
-                txn.put(key, self.pending.serializer(work), db=self.pending.sdb)
+            result = self.acceptance_dead.deserializer(
+                txn.get(key, db=self.acceptance_dead.sdb)
+            )
+            if result is None:
+                raise ValueError("unknown acceptance dead letter")
+            result = replace(result, reason="")
+            txn.put(key, self.accepting.serializer(result), db=self.accepting.sdb)
+            txn.delete(key, db=self.acceptance_dead.sdb)
+
+    def next_verification(self, *, now, max_attempts=3):
+        """Durably begin one attempt, resuming interrupted work before new work.
+
+        Due retries take precedence over new work. A time-ordered index
+        selects eligible waiting work without walking the waiting records.
+        Interrupted attempts count against the same finite budget after restart.
+        """
+        with self.env.begin(write=True) as txn:
+            for table in (self.verifying, self.waiting, self.pending):
+                if table is self.waiting:
+                    work = due_record(txn, self.verification_due, self.waiting, now)
+                    if work is None:
+                        continue
+                    key = work.associationSaid.encode()
+                else:
+                    with txn.cursor(db=table.sdb) as cursor:
+                        if not cursor.first():
+                            continue
+                        key, raw = cursor.item()
+                        work = table.deserializer(raw)
+                txn.delete(key, db=table.sdb)
+                if work.attempts >= max_attempts:
+                    work.reason = (
+                        work.reason
+                        or "verification interrupted; attempt budget exhausted"
+                    )
+                    txn.put(
+                        key,
+                        self.verification_dead.serializer(work),
+                        db=self.verification_dead.sdb,
+                    )
+                    return None
+                work.attempts += 1
+                work.reason = "verification attempt started; result not committed"
+                txn.put(key, self.verifying.serializer(work), db=self.verifying.sdb)
+                return work
+        return None
+
+    def defer_verification(self, work, *, reason, next_attempt_at, max_attempts=3):
+        """Move the active attempt to durable waiting or dead letter in one commit."""
+        key = work.associationSaid.encode()
+        work = replace(work, reason=reason, nextAttemptAt=next_attempt_at)
+        target = (
+            self.verification_dead if work.attempts >= max_attempts else self.waiting
+        )
+        with self.env.begin(write=True) as txn:
+            if txn.get(key, db=self.verifying.sdb) is None:
+                raise ValueError("active verification is absent")
+            txn.put(key, target.serializer(work), db=target.sdb)
+            if target is self.waiting:
+                txn.put(
+                    due_key(work.nextAttemptAt, work.associationSaid),
+                    key,
+                    db=self.verification_due.sdb,
+                )
+            txn.delete(key, db=self.verifying.sdb)
+
+    def verification_progress(self, said):
+        """Read one candidate's phase without discovering work from result history."""
+        for phase, table in (
+            ("pending", self.pending),
+            ("verifying", self.verifying),
+            ("waiting", self.waiting),
+            ("dead-letter", self.verification_dead),
+        ):
+            work = table.get(keys=(said,))
+            if work is not None:
+                return phase, work
+        return None, None
+
+    def retry_verification(self, said):
+        """Explicitly give a dead-letter candidate a new bounded attempt budget."""
+        key = said.encode()
+        with self.env.begin(write=True) as txn:
+            work = self.verification_dead.deserializer(
+                txn.get(key, db=self.verification_dead.sdb)
+            )
+            if work is None:
+                raise ValueError("unknown verification dead letter")
+            work = replace(work, attempts=0, nextAttemptAt=0, reason="")
+            txn.put(key, self.pending.serializer(work), db=self.pending.sdb)
+            txn.delete(key, db=self.verification_dead.sdb)
 
     def finish(self, result):
-        """Atomically insert a result and remove pending work; reject conflicting completion.
+        """Atomically complete active verification and enqueue successful acceptance.
 
         The workflow chooses the outcome. Identical repeat completion is harmless;
-        a missing pending record cannot be completed for the first time. Serialization
-        or storage failure aborts the whole transaction, leaving pending recoverable.
+        a missing active record cannot be completed for the first time. Serialization
+        or storage failure aborts the whole transaction, leaving active work recoverable.
         """
         key = result.associationSaid.encode()
         with self.env.begin(write=True) as txn:
@@ -118,16 +301,12 @@ class VerifierBaser(dbing.LMDBer):
                 if self.results.deserializer(existing) != result:
                     raise ValueError("conflicting verification result")
                 return
-            if txn.get(key, db=self.pending.sdb) is None:
-                raise ValueError("pending work is absent")
+            if txn.get(key, db=self.verifying.sdb) is None:
+                raise ValueError("active verification is absent")
             txn.put(key, self.results.serializer(result), db=self.results.sdb)
             if result.status == "verified":
                 txn.put(key, self.accepting.serializer(result), db=self.accepting.sdb)
-            txn.delete(key, db=self.pending.sdb)
-
-    def pending_batch(self, *, after="", limit=32):
-        """Copy a bounded page strictly after the SAID; close its cursor before returning."""
-        return self._batch(self.pending, after=after, limit=limit)
+            txn.delete(key, db=self.verifying.sdb)
 
     def claim_nonce(self, peer, nonce, expires_at):
         """Insert a peer/nonce claim after authentication; return False on replay.
@@ -138,13 +317,24 @@ class VerifierBaser(dbing.LMDBer):
         """
         return self.replay_claims.put(keys=(peer, nonce), val=ReplayClaim(expires_at))
 
-    def acceptance_batch(self, *, after="", limit=1):
-        """Copy unfinished acceptance only; completed results never schedule work."""
-        return self._batch(self.accepting, after=after, limit=limit)
+    def next_acceptance(self):
+        """Read one local acceptance obligation; its transaction consumes it on success."""
+        return first_record(self.accepting)
 
-    def association_batch(self, *, after="", limit=32):
-        """Copy a bounded status page for local TEL revocation reconciliation."""
-        return self._batch(self.associations, after=after, limit=limit)
+    def stop_acceptance(self, said, reason):
+        """Dead-letter missing or revoked evidence instead of repeatedly rediscovering it."""
+        key = said.encode()
+        with self.env.begin(write=True) as txn:
+            result = self.accepting.deserializer(txn.get(key, db=self.accepting.sdb))
+            if result is None:
+                raise ValueError("acceptance work is absent")
+            result = replace(result, reason=reason)
+            txn.put(
+                key,
+                self.acceptance_dead.serializer(result),
+                db=self.acceptance_dead.sdb,
+            )
+            txn.delete(key, db=self.accepting.sdb)
 
     def next_delivery(self):
         """Claim one ready event, or resume the single interrupted delivery."""
@@ -186,17 +376,6 @@ class VerifierBaser(dbing.LMDBer):
                 db=self.delivery_ready.sdb,
             )
             txn.delete(key, db=self.delivery_dead.sdb)
-
-    def _batch(self, table, *, after, limit):
-        """Seek strictly after a key and release the LMDB cursor before returning."""
-        with self.env.begin(db=table.sdb) as txn, txn.cursor() as cursor:
-            if not cursor.set_range(after.encode()):
-                return []
-            if after and cursor.key() == after.encode() and not cursor.next():
-                return []
-            return [
-                table.deserializer(raw) for _, raw in islice(cursor.iternext(), limit)
-            ]
 
     def nonce_key(self, issuer, nonce):
         """Use Komer's ordinary issuer.nonce key; neither component contains dots."""
@@ -486,3 +665,29 @@ def _status_delivery(status, *, status_revision, destination, peer_aid):
         payload["reasonCode"] = status.reason
     body = json.dumps(payload, separators=(",", ":"), sort_keys=True)
     return Delivery(status.eventId, status.associationSaid, destination, peer_aid, body)
+
+
+def first_record(table):
+    """Detach the head of a phase and close its reader before any caller can mutate."""
+    with table.db.env.begin(db=table.sdb) as txn, txn.cursor() as cursor:
+        return table.deserializer(cursor.value()) if cursor.first() else None
+
+
+def due_key(when, identifier):
+    """Sort an unfinished retry deadline by nonnegative UTC microseconds, then ID."""
+    return f"{int(when * 1_000_000):016x}.{identifier}".encode()
+
+
+def due_record(txn, schedule, waiting, now):
+    """Consume one eligible deadline index inside its phase-transition transaction."""
+    with txn.cursor(db=schedule.sdb) as cursor:
+        if not cursor.first():
+            return None
+        deadline, key = cursor.item()
+        work = waiting.deserializer(txn.get(key, db=waiting.sdb))
+    if work is None:
+        raise ValueError("retry schedule has no waiting work")
+    if work.nextAttemptAt > now:
+        return None
+    txn.delete(deadline, db=schedule.sdb)
+    return work

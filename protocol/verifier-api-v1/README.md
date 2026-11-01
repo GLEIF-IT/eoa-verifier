@@ -31,7 +31,9 @@ account rule against the configured chain ID/RPC at an identified canonical bloc
 Confirm KERIpy status after the initial RPC wait before accepting. These checks
 do not assess delegated-code safety or prove against later wallet-key theft.
 
-Initial evidence or RPC unavailability leaves work `pending`; established failure
+Initial evidence or RPC unavailability moves work to `waiting` with a durable
+five-second cooldown. Three attempts exhaust into `dead-letter`; restart and
+duplicate Grants do not renew the budget. Established failure
 produces `rejected`, and completed initial checks produce `verified`. With a
 webhook configured, acceptance commits status and an event. Without a webhook,
 acceptance commits locally without an outbox obligation (`delivery` is null).
@@ -148,10 +150,11 @@ verifier status and cannot retire acceptance here. Contracts own their
 ## Stored status
 
 Public `GET /v1/associations/{said}/status` requires no caller KERI signature or
-signed response. Return stored pending/verified/rejected/accepted/revoked status and reason,
+signed response. Return stored pending/verifying/waiting/dead-letter/verified/rejected/accepted/revoked
+status and reason,
 plus the last-known initial account observation: wallet address, chain ID, code,
 block number/hash and observation time. Unknown observations remain unknown.
-Known pending/rejected candidates return `200`; unknown SAIDs return `404`.
+Known candidates, including waiting and dead-letter work, return `200`; unknown SAIDs return `404`.
 Observation age is informational. GET performs no RPC, refresh or enrollment;
 its response does not replace authenticated status delivery to the oracle.
 Delivery progress describes the requested association's current event; shared

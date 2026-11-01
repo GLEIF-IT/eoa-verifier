@@ -9,37 +9,35 @@ class AcceptanceDoer(doing.Doer):
 
     The accepting phase recovers completion-to-acceptance gaps after restart.
     Read locally stored issuance evidence; do not repeat cryptographic or account
-    verification. Missing local evidence leaves the completed result available for
-    recovery. Existing accepted status never expires or gets reverified here.
+    verification. Missing or revoked local evidence stops in a dead letter for
+    operator inspection. Existing accepted status never expires or gets reverified here.
     """
 
     def __init__(self, *, baser, rgy, destination=None, peer_aid=None, **kwa):
         self.baser, self.rgy = baser, rgy
         self.destination, self.peer_aid = destination, peer_aid
-        self.after = ""
         super().__init__(**kwa)
 
     def recur(self, tyme):
         """Inspect one unfinished acceptance per turn, retaining KERIpy/application store separation."""
-        page = self.baser.acceptance_batch(after=self.after)
-        if not page:
-            self.after = ""
-        for result in page:
-            self.after = result.associationSaid
-            if result.status != "verified" or self.baser.associations.get(
-                keys=(self.after,)
-            ):
-                continue
-            evidence = self.issuance_facts(self.after)
-            if evidence is not None:
-                association, nonce = evidence
-                self.baser.accept(
-                    self.after,
-                    association=association,
-                    nonce=nonce,
-                    destination=self.destination,
-                    peer_aid=self.peer_aid,
-                )
+        result = self.baser.next_acceptance()
+        if result is None:
+            return False
+        evidence = self.issuance_facts(result.associationSaid)
+        if evidence is None:
+            self.baser.stop_acceptance(
+                result.associationSaid,
+                "issuance evidence missing or revoked before acceptance",
+            )
+        else:
+            association, nonce = evidence
+            self.baser.accept(
+                result.associationSaid,
+                association=association,
+                nonce=nonce,
+                destination=self.destination,
+                peer_aid=self.peer_aid,
+            )
         return False
 
     def issuance_facts(self, said):

@@ -33,13 +33,13 @@ current key state must already be KERIpy-accepted by this verifier; missing
 keys leave delivery blocked pending correction. Omitting both retains verification-only operation.
 
 Public `GET /v1/associations/{said}/status` returns stored `pending`, `rejected`,
-`verified`, `accepted` or `revoked` status and any initial account observation.
+`verifying`, `waiting`, `dead-letter`, `verified`, `accepted` or `revoked` status and any initial account observation.
 Accepted/retired records also expose their current event’s delivery progress and
 errors. Unknown SAIDs return 404.
 GET requires no signature and performs no RPC or refresh.
 
 The sender keeps one request in flight and spaces starts by at least one second,
-including successes. Connection failures, timeouts, HTTP 408/429 and 5xx errors
+including successes. Up to three attempts handle connection failures, timeouts, HTTP 408/429 and 5xx errors
 (except 501/505) retry automatically with jittered backoff from 1–2 seconds to
 150–300 seconds. A valid `Retry-After` is a minimum, even beyond that cap.
 Cooldown applies to the whole destination and survives restart. Only the expected
@@ -71,7 +71,7 @@ account checks run, and Ethereum publication remains the oracle's responsibility
 | `verification` | `coordinating`, `credentials`, `eoa`, `worker`, `rpc`: initial credential/wallet/account verification; `constants`, `schema_cache`, `errors` support that contract. |
 | `associations` | `accepting`, `retiring`, `statusing`: application acceptance, verified association revocation and public stored status. |
 | `delivery` | `authing`, `delivering`: signed transport/replay protection and webhook attempts, retry pacing and ACK policy. |
-| `persistence` | `records`, `basing`: durable record schemas and atomic verification, acceptance/outbox and delivery transitions. |
+| `persistence` | `records`, `basing`, `registry`: durable record schemas and atomic verification, acceptance/outbox and delivery transitions. |
 
 These are sibling leaf component packages. Runtime composes them; workflow
 components depend on persistence and KERIpy evidence, not on runtime or each
@@ -85,14 +85,23 @@ or unusable RPC responses leave unfinished work for retry. KERIpy acceptance is
 separate from receipt of bytes; KELs, TELs, credentials and schemas live in the
 KERIpy Habery/Reger stores, not in the work record.
 
-Unfinished verification lives in `pending`; completed initial checks live in
-`results` with a `verified` or `rejected` outcome. Completion writes the result
-and removes pending work in one LMDB transaction. Duplicate Grants preserve the
-first Grant and never re-enqueue completed work. Verified results retain the
-wallet and initial account observation; they do not mean application acceptance,
-webhook delivery or Ethereum endorsement. Restart rediscovers pending work.
+Each worker handles one item at a time. A native Grant notice is durably handed
+into `grant-active.` before its native notification is removed. Replay creates
+`pending.` verification work. The coordinator moves one candidate into
+`verifying.` and charges its attempt before starting the EOA check. Missing
+material or transient RPC errors move it to `waiting.` with a persisted UTC retry
+deadline. A time-ordered deadline index selects the next due item; no work-history
+scan or in-memory retry calendar exists. Completion atomically writes `results.`,
+removes active work and, on success, queues `accepting.`.
 
-`AcceptanceDoer` reads completed results and locally accepted issuance evidence
+Grant replay and verification each allow three attempts, five seconds apart.
+Interrupted attempts count. Exhaustion retains diagnostics in `grant-dead.` or
+`verification-dead.` until explicit operator retry. Definitively invalid proofs
+produce a rejected result. Duplicate Grants preserve the original work and never
+re-enqueue completed or dead-letter candidates. Restart resumes durable phases.
+A verification result is not acceptance, webhook delivery or an Ethereum endorsement.
+
+`AcceptanceDoer` takes one unfinished `accepting.` record and locally accepted issuance evidence
 without repeating initial checks. Acceptance permanently binds the exact issuer/nonce
 to one SAID, atomically with immutable facts and any configured outbox obligation.
 Another SAID using that pair becomes locally `rejected` with `NONCE_REUSED`; its
@@ -105,24 +114,23 @@ Acceptance runs with or without webhooks. With no target, public `delivery` is n
 enabling delivery later does not backfill events for locally accepted records.
 Restart recovers results awaiting acceptance. KERIpy evidence lives in a separate
 database and is not part of the application transaction. Missing evidence or
-already-known revocation prevents first acceptance. Observation age does not
+already-known revocation moves the acceptance to `acceptance-dead.` for inspection. Observation age does not
 invalidate an accepted record.
 
-`RetirementDoer` scans bounded pages of accepted records against locally accepted
-association TEL state. KERIpy `rev`/`brv` retires only that SAID and atomically
-creates its second event when an original delivery exists, preserving original issuance facts, observation and
-webhook destination. Duplicate evidence and restart do not create more events or
-revive retirement. A different association for the same wallet is untouched;
-ownership selection belongs to the oracle.
+`VerifierReger` subclasses the pinned native registry at `putTel`, the final
+accepted-TEL index write. It atomically writes a `verifier-revocations.` handoff
+for `rev`/`brv` in that same registry environment. Native KERIpy validation and
+escrows still decide whether an event is accepted. Unanchored evidence creates
+no handoff.
 
-IPEX Grant delivers supporting KEL/TEL artifacts; the Grant’s embedded
-issuance or credential alone does not prove revocation. The existing shared parser
-and escrows validate those artifacts. Retirement also recovers from stored KERIpy
-state after restart, so it requires neither a retained cue nor another Grant.
-Missing or escrowed evidence leaves accepted status unchanged. This local scan
-performs no account/source reassessment or network refresh. Previously accepted
-records still retire when webhook sending is disabled; their delivery obligations
-remain stored for the original destination.
+`RetirementDoer` consumes one handoff, retires only its exact accepted association
+and commits its immutable second delivery event before acknowledging the handoff.
+Restart safely repeats either side of this two-store commit boundary. Completed
+association history is never scanned. Revocation before acceptance is caught by
+the final verification check and the local acceptance guard. Original issuance
+facts, observation and destination are preserved; other associations for the
+wallet are untouched. Previously accepted records still retire with sending
+disabled, retaining any original delivery obligations.
 
 `run_service()` owns shared stores through KERIpy context managers.
 `VerifierService` borrows those stores and composes the HIO tasks. HIO stops

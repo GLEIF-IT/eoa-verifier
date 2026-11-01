@@ -151,12 +151,11 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             yield from send(stream)
             deadline = workflow.tyme + 10
             while True:
-                store = (
-                    runtime.baser.pending
+                work = (
+                    runtime.baser.verification_progress(said)[1]
                     if expected == "pending"
-                    else runtime.baser.results
+                    else runtime.baser.results.get(keys=(said,))
                 )
-                work = store.get(keys=(said,))
                 if work is not None and (
                     expected == "pending" or work.status == expected
                 ):
@@ -287,7 +286,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             client_doer = http.ClientDoer(client=client)
             workflow.extend([runtime, client_doer])
             assert runtime.hab.pre == aid
-            assert runtime.baser.pending.get(keys=(creder.said,)) is not None
+            assert runtime.baser.verification_progress(creder.said)[1] is not None
             # Supporting evidence alone resumes persisted work; no new Grant required.
             yield from deliver(
                 streams["geda"] + streams["qvi"], creder.said, "verified"

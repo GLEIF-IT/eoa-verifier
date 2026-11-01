@@ -18,9 +18,10 @@ def test_public_get_returns_stored_status_and_old_observation(verified_store):
     app = falcon.App()
     app.add_route("/v1/associations/{said}/status", StatusEnd(baser))
     client = TestClient(app)
-    baser.enqueue(PendingVerification("pending", "grant", "missing source"))
     baser.enqueue(PendingVerification("rejected", "grant"))
+    baser.next_verification(now=0)
     baser.finish(VerificationResult("rejected", "rejected", "wrong schema"))
+    baser.enqueue(PendingVerification("pending", "grant", "missing source"))
     for said, status in (
         ("pending", "pending"),
         ("rejected", "rejected"),
@@ -53,6 +54,7 @@ def test_public_status_does_not_disclose_other_delivery_activity(verified_store)
     # A different association's event shares this destination.
     result = baser.results.get(keys=("association",))
     baser.enqueue(PendingVerification("other", "grant"))
+    baser.next_verification(now=0)
     baser.finish(VerificationResult("other", "verified", eoaResult=result.eoaResult))
     other = baser.accept(
         "other",
@@ -69,3 +71,31 @@ def test_public_status_does_not_disclose_other_delivery_activity(verified_store)
     assert "nextAttemptAt" not in before["delivery"]
     # Operators still have the complete durable schedule through local storage.
     assert baser.destinations.get(keys=(event.destination,)) == schedule
+
+
+def test_waiting_and_dead_letter_are_passive_statuses(verified_store):
+    """Public reads expose operational failures without asserting an invalid credential."""
+    import falcon.testing
+    from eoa_verifier.associations.statusing import StatusEnd
+
+    baser = verified_store
+    app = falcon.App()
+    app.add_route("/v1/associations/{said}/status", StatusEnd(baser))
+    client = falcon.testing.TestClient(app)
+    baser.enqueue(PendingVerification("waiting", "grant"))
+    work = baser.next_verification(now=100)
+    baser.defer_verification(work, reason="missing evidence", next_attempt_at=105)
+    status = client.simulate_get("/v1/associations/waiting/status").json
+    assert status["status"] == "waiting" and status["nextAttemptAt"] == 105
+    work = baser.next_verification(now=105)
+    baser.defer_verification(
+        work, reason="missing evidence", next_attempt_at=110, max_attempts=2
+    )
+    assert (
+        client.simulate_get("/v1/associations/waiting/status").json["status"]
+        == "dead-letter"
+    )
+    baser.stop_acceptance("association", "revoked before acceptance")
+    stopped = client.simulate_get("/v1/associations/association/status").json
+    assert stopped["phase"] == "acceptance" and stopped["status"] == "dead-letter"
+    assert baser.accepted_nonces.cntAll() == 0
