@@ -160,9 +160,9 @@ def test_one_notice_per_turn_and_bounded_missing_material(config):
             grants.process_notes()
         assert runtime.baser.grant_waiting.cntAll() == 0
         assert runtime.baser.grant_dead.cntAll() == 1
-        key, work = next(runtime.baser.grant_dead.getItemIter())
-        assert work.attempts == 3 and "missing" in work.reason
-        runtime.baser.retry_grant(work.noticeId)
+        key, grantRecord = next(runtime.baser.grant_dead.getItemIter())
+        assert grantRecord.attempts == 3 and "missing" in grantRecord.reason
+        runtime.baser.retry_grant(grantRecord.noticeId)
         assert runtime.baser.grant_dead.cntAll() == 0
         assert runtime.baser.grant_waiting.get(keys=key).attempts == 0
 
@@ -180,10 +180,12 @@ def test_interrupted_handoff_reopens_without_native_notice(config):
         ):
             grants.process_notes()
         assert grants.notifier.noter.getNoteCnt() == 0
-        work = runtime.baser.grant_active.get(keys=("receiver",))
-        assert work.attempts == 1
+        grantRecord = runtime.baser.grant_active.get(keys=("receiver",))
+        assert grantRecord.attempts == 1
     with entered_service(config) as runtime:
         grants = next(d for d in runtime.doers if isinstance(d, GrantNotificationDoer))
         grants.process_notes()
         assert runtime.baser.grant_active.cntAll() == 0
-        assert runtime.baser.grant_waiting.get(keys=(work.noticeId,)).attempts == 2
+        assert (
+            runtime.baser.grant_waiting.get(keys=(grantRecord.noticeId,)).attempts == 2
+        )

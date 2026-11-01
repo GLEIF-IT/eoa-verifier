@@ -43,7 +43,7 @@ class Receiver:
             raise falcon.HTTPBadRequest(description="unexpected signed target")
         body = req.bounded_stream.read()
         try:
-            received = self.auth.verify(
+            requestAuth = self.auth.verify(
                 method="POST",
                 target=self.target,
                 action="status",
@@ -78,7 +78,7 @@ class Receiver:
             target=self.target,
             action="ack",
             body=ack,
-            request=received.reference,
+            request=requestAuth.reference,
             status=200,
         )
         rep.data = ack

@@ -20,27 +20,27 @@ class AcceptanceDoer(doing.Doer):
 
     def recur(self, tyme):
         """Inspect one unfinished acceptance per turn, retaining KERIpy/application store separation."""
-        result = self.baser.next_acceptance()
-        if result is None:
+        verificationResult = self.baser.next_acceptance()
+        if verificationResult is None:
             return False
-        evidence = self.issuance_facts(result.associationSaid)
-        if evidence is None:
+        issuanceFacts = self.issuance_facts(verificationResult.associationSaid)
+        if issuanceFacts is None:
             self.baser.stop_acceptance(
-                result.associationSaid,
+                verificationResult.associationSaid,
                 "issuance evidence missing or revoked before acceptance",
             )
         else:
-            association, nonce = evidence
+            associationFacts, nonce = issuanceFacts
             self.baser.accept(
-                result.associationSaid,
-                association=association,
+                verificationResult.associationSaid,
+                associationFacts=associationFacts,
                 nonce=nonce,
                 destination=self.destination,
                 peer_aid=self.peer_aid,
             )
         return False
 
-    def issuance_facts(self, said):
+    def issuance_facts(self, credSaid):
         """Read association facts from KERIpy-accepted evidence for a completed verification.
 
         Return None when evidence is absent or already revoked; this is a local
@@ -48,13 +48,13 @@ class AcceptanceDoer(doing.Doer):
         The coordinator already verified signatures, relationships and witnesses.
         """
         reger = self.rgy.reger
-        if reger.saved.get(keys=(said,)) is None:
+        if reger.saved.get(keys=(credSaid,)) is None:
             return None
-        credential = reger.creds.get(keys=(said,))
+        credential = reger.creds.get(keys=(credSaid,))
         if credential is None:
             return None
         try:
-            state = reger.tevers[credential.regi].vcState(said)
+            state = reger.tevers[credential.regi].vcState(credSaid)
         except (KeyError, kering.MissingEntryError):
             return None
         if state is None or state.et not in ("iss", "bis"):

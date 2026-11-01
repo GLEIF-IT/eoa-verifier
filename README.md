@@ -118,13 +118,13 @@ already-known revocation moves the acceptance to `acceptance-dead.` for inspecti
 invalidate an accepted record.
 
 `VerifierReger` subclasses the pinned native registry at `putTel`, the final
-accepted-TEL index write. It atomically writes a `verifier-revocations.` handoff
+accepted-TEL index write. It atomically writes a `verifier-revocations.` record
 for `rev`/`brv` in that same registry environment. Native KERIpy validation and
 escrows still decide whether an event is accepted. Unanchored evidence creates
-no handoff.
+no revocation record.
 
-`RetirementDoer` consumes one handoff, retires only its exact accepted association
-and commits its immutable second delivery event before acknowledging the handoff.
+`RetirementDoer` consumes one `(credSaid, telEvtSaid)` record, retires only its exact accepted association
+and commits its immutable second delivery event before removing the revocation record.
 Restart safely repeats either side of this two-store commit boundary. Completed
 association history is never scanned. Revocation before acceptance is caught by
 the final verification check and the local acceptance guard. Original issuance

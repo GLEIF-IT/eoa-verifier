@@ -1,10 +1,10 @@
-"""Consume accepted TEL revocation handoffs, one credential per scheduler turn."""
+"""Consume accepted TEL revocation identifiers, one credential per scheduler turn."""
 
 from hio.base import doing
 
 
 class RetirementDoer(doing.Doer):
-    """Borrow both stores; retire locally before acknowledging the native handoff.
+    """Borrow both stores; retire locally before removing the native revocation record.
 
     A crash between commits repeats an idempotent retirement. Revocation before
     initial acceptance is handled by verification and the acceptance TEL guard;
@@ -17,12 +17,13 @@ class RetirementDoer(doing.Doer):
         super().__init__(tock=tock, **kwa)
 
     def recur(self, tyme):
-        """Apply one handoff; completed association history is never a work source."""
-        handoff = self.rgy.reger.next_revocation()
-        if handoff is not None:
-            said, _ = handoff
-            association = self.baser.associations.get(keys=(said,))
-            if association is not None and association.status == "accepted":
-                self.baser.retire(said)
-            self.rgy.reger.revocations.rem(keys=(said,))
+        """Apply one credential revocation; completed association history is never a work source."""
+        revocationIds = self.rgy.reger.next_revocation()
+        if revocationIds is not None:
+            credSaid, _telEvtSaid = revocationIds
+            # The TEL event SAID records provenance; retirement selects by credential.
+            associationStatus = self.baser.associations.get(keys=(credSaid,))
+            if associationStatus is not None and associationStatus.status == "accepted":
+                self.baser.retire(credSaid)
+            self.rgy.reger.revocations.rem(keys=(credSaid,))
         return False

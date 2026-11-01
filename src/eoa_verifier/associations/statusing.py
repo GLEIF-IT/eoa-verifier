@@ -18,59 +18,59 @@ class StatusEnd:
         return 404 for unknown SAIDs. Observation timestamps/block identifiers are
         informational. This method reads stored records only and never calls RPC.
         """
-        accepted = self.baser.associations.get(keys=(said,))
-        result = self.baser.results.get(keys=(said,))
-        phase, pending = self.baser.verification_progress(said)
-        stopped = self.baser.acceptance_dead.get(keys=(said,))
-        if accepted is not None:
-            data = asdict(accepted)
-            event = (
-                self.baser.outbox.get(keys=(accepted.eventId,))
-                if accepted.eventId
+        associationStatus = self.baser.associations.get(keys=(said,))
+        verificationResult = self.baser.results.get(keys=(said,))
+        phase, verification = self.baser.verification_progress(said)
+        deadLetterResult = self.baser.acceptance_dead.get(keys=(said,))
+        if associationStatus is not None:
+            statusBody = asdict(associationStatus)
+            delivery = (
+                self.baser.outbox.get(keys=(associationStatus.eventId,))
+                if associationStatus.eventId
                 else None
             )
-            data["delivery"] = (
+            statusBody["delivery"] = (
                 {
-                    "eventId": event.eventId,
-                    "acknowledged": event.acknowledged,
-                    "attempts": event.attempts,
-                    "error": event.error,
-                    "blocked": event.blocked,
+                    "eventId": delivery.eventId,
+                    "acknowledged": delivery.acknowledged,
+                    "attempts": delivery.attempts,
+                    "error": delivery.error,
+                    "blocked": delivery.blocked,
                 }
-                if event is not None
+                if delivery is not None
                 else None
             )
-        elif stopped is not None:
-            data = {
+        elif deadLetterResult is not None:
+            statusBody = {
                 "associationSaid": said,
                 "status": "dead-letter",
                 "phase": "acceptance",
-                "reason": stopped.reason,
+                "reason": deadLetterResult.reason,
                 "accountObservation": None,
             }
-        elif result is not None:
-            data = {
+        elif verificationResult is not None:
+            statusBody = {
                 "associationSaid": said,
-                "status": result.status,
-                "reason": result.reason,
+                "status": verificationResult.status,
+                "reason": verificationResult.reason,
                 "accountObservation": (
                     dict(
-                        result.eoaResult["accountObservation"],
-                        wallet=result.eoaResult["wallet"],
+                        verificationResult.eoaResult["accountObservation"],
+                        wallet=verificationResult.eoaResult["wallet"],
                     )
-                    if result.eoaResult
+                    if verificationResult.eoaResult
                     else None
                 ),
             }
-        elif pending is not None:
-            data = {
+        elif verification is not None:
+            statusBody = {
                 "associationSaid": said,
                 "status": phase,
-                "reason": pending.reason,
-                "attempts": pending.attempts,
-                "nextAttemptAt": pending.nextAttemptAt,
+                "reason": verification.reason,
+                "attempts": verification.attempts,
+                "nextAttemptAt": verification.nextAttemptAt,
                 "accountObservation": None,
             }
         else:
             raise falcon.HTTPNotFound(title="Unknown association")
-        rep.media = data
+        rep.media = statusBody

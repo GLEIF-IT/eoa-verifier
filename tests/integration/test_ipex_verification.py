@@ -170,18 +170,18 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             yield from send(stream)
             deadline = workflow.tyme + 10
             while True:
-                work = (
+                verification = (
                     runtime.baser.verification_progress(said)[1]
                     if expected == "pending"
                     else runtime.baser.results.get(keys=(said,))
                 )
-                if work is not None and (
-                    expected == "pending" or work.status == expected
+                if verification is not None and (
+                    expected == "pending" or verification.status == expected
                 ):
-                    return work
+                    return verification
                 assert workflow.tyme < deadline, (
                     expected,
-                    work,
+                    verification,
                     runtime.baser.verification_progress(said),
                 )
                 yield 0.01
@@ -236,10 +236,10 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
                 yield from issue_credential(issuer, registry, creder)
                 acdc = None
             rgy = actors["qvi" if holder else "le"][2]
-            evidence = b"".join(hab.db.clonePreIter(pre=hab.pre))
-            evidence += b"".join(rgy.reger.clonePreIter(pre=registry.regk))
-            evidence += grant(hab, rgy, creder, runtime.hab.pre, acdc=acdc)
-            return creder, evidence
+            presentationCesr = b"".join(hab.db.clonePreIter(pre=hab.pre))
+            presentationCesr += b"".join(rgy.reger.clonePreIter(pre=registry.regk))
+            presentationCesr += grant(hab, rgy, creder, runtime.hab.pre, acdc=acdc)
+            return creder, presentationCesr
 
         def run(tymth, tock=0.0, **kwa):
             """Yield through issuance, restart, replay and the held-result revocation scenario.
@@ -297,9 +297,9 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
                 assert rgy.reger.saved.get(keys=(creder.said,))
 
             # Deliver the association first, then reopen with its sources still absent.
-            creder, evidence = yield from issue_association()
+            creder, presentationCesr = yield from issue_association()
             yield from send_incomplete()
-            yield from deliver(evidence, creder.said, "pending")
+            yield from deliver(presentationCesr, creder.said, "pending")
             assert runtime.baser.accepted_nonces.cntAll() == 0
             aid = runtime.hab.pre
             workflow.remove([runtime, client_doer])
@@ -316,23 +316,26 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             )
             assert runtime.rgy.reger.saved.get(keys=(creder.said,))
             # Capture verified issuance facts after verification, without another RPC pass.
-            accepted = yield from wait_status(creder.said, "accepted")
-            assert accepted.association["issuerAid"] == le.pre
-            assert accepted.association["leSaid"] == credentials["qvi"].said
-            assert accepted.association["issuanceAnchor"] == {
+            associationStatus = yield from wait_status(creder.said, "accepted")
+            assert associationStatus.association["issuerAid"] == le.pre
+            assert associationStatus.association["leSaid"] == credentials["qvi"].said
+            assert associationStatus.association["issuanceAnchor"] == {
                 "sequenceNumber": le.kever.sn,
                 "said": le.kever.serder.said,
             }
-            assert accepted.accountObservation["chainId"] == 31337
-            assert bool(accepted.eventId) == delivery
+            assert associationStatus.accountObservation["chainId"] == 31337
+            assert bool(associationStatus.eventId) == delivery
             if delivery:
-                assert runtime.baser.outbox.get(keys=(accepted.eventId,)) is not None
+                assert (
+                    runtime.baser.outbox.get(keys=(associationStatus.eventId,))
+                    is not None
+                )
             # Replaying the same Grant must retain the completed work record.
             original = runtime.baser.results.get(keys=(creder.said,))
             # EXN deduplication may suppress a new notice entirely. Test application
             # replay explicitly after the HTTP redelivery, rather than observing the
             # already-existing result before the duplicate has been processed.
-            yield from send(evidence)
+            yield from send(presentationCesr)
 
             intake = next(
                 d for d in runtime.doers if isinstance(d, GrantNotificationDoer)
@@ -344,7 +347,9 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             else:
                 raise AssertionError("accepted Grant not found")
             assert runtime.baser.results.get(keys=(creder.said,)) == original
-            assert runtime.baser.associations.get(keys=(creder.said,)) == accepted
+            assert (
+                runtime.baser.associations.get(keys=(creder.said,)) == associationStatus
+            )
 
             # Two otherwise valid signed credentials sharing issuer/u: only the first accepts.
             other_key = "0x" + "0" * 63 + "2"
@@ -353,8 +358,10 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             )
             assert reused.said != creder.said
             result = yield from deliver(reused_stream, reused.said, "verified")
-            rejected = yield from wait_status(reused.said, "rejected")
-            assert result.status == "verified" and rejected.reason == "NONCE_REUSED"
+            rejectedStatus = yield from wait_status(reused.said, "rejected")
+            assert (
+                result.status == "verified" and rejectedStatus.reason == "NONCE_REUSED"
+            )
             assert runtime.baser.outbox.get(keys=(f"{reused.said}:1",)) is None
             assert runtime.baser.accepted_nonces.cntAll() == 1
 
@@ -364,10 +371,12 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             newer = yield from wait_status(successor.said, "accepted")
             assert (
                 newer.association["issuanceAnchor"]["sequenceNumber"]
-                > accepted.association["issuanceAnchor"]["sequenceNumber"]
+                > associationStatus.association["issuanceAnchor"]["sequenceNumber"]
             )
             initial_event = (
-                runtime.baser.outbox.get(keys=(accepted.eventId,)) if delivery else None
+                runtime.baser.outbox.get(keys=(associationStatus.eventId,))
+                if delivery
+                else None
             )
 
             # A fresh Grant still embeds issuance. Neither it nor unanchored TEL
@@ -388,7 +397,9 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             assert (
                 runtime.rgy.reger.tevers[creder.regi].vcState(creder.said).et == "iss"
             )
-            assert runtime.baser.associations.get(keys=(creder.said,)) == accepted
+            assert (
+                runtime.baser.associations.get(keys=(creder.said,)) == associationStatus
+            )
 
             # Model loss between accepted KERIpy TEL and application commit. Only
             # the missing KEL arrives now: no further Grant notification is needed.
@@ -402,21 +413,27 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
                     "verified revocation escrow did not resolve"
                 )
                 yield 0.01
-            assert runtime.baser.associations.get(keys=(creder.said,)) == accepted
+            assert (
+                runtime.baser.associations.get(keys=(creder.said,)) == associationStatus
+            )
             workflow.remove([runtime, client_doer])
             service_stores.close()
             runtime = open_service()
             client = http.Client(hostname="127.0.0.1", port=port)
             client_doer = http.ClientDoer(client=client)
             workflow.extend([runtime, client_doer])
-            retired = yield from wait_status(creder.said, "revoked")
+            revokedStatus = yield from wait_status(creder.said, "revoked")
             assert (
-                retired.association == accepted.association
+                revokedStatus.association == associationStatus.association
             )  # Keep issuance, not revocation anchor.
-            assert retired.accountObservation == accepted.accountObservation
-            assert retired.eventId == (f"{creder.said}:2" if delivery else "")
+            assert (
+                revokedStatus.accountObservation == associationStatus.accountObservation
+            )
+            assert revokedStatus.eventId == (f"{creder.said}:2" if delivery else "")
             retained = (
-                runtime.baser.outbox.get(keys=(accepted.eventId,)) if delivery else None
+                runtime.baser.outbox.get(keys=(associationStatus.eventId,))
+                if delivery
+                else None
             )
             if delivery:
                 # Retry progress may advance; immutable accepted-event bytes must not.
@@ -425,7 +442,9 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
                 assert retained is None
             assert runtime.baser.associations.get(keys=(successor.said,)) == newer
             # Replay both the original Grant and the now-revoked KERI artifacts.
-            yield from send(evidence + replay(le, le_rgy, registries["le"], creder))
+            yield from send(
+                presentationCesr + replay(le, le_rgy, registries["le"], creder)
+            )
 
             # Hold completion after a real RPC observation, then deliver KERIpy
             # revocation before applying the result. The final KERIpy recheck
@@ -442,7 +461,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             yield from send(stream)
             while runtime.baser.pending.get(keys=(raced.said,)) is None:
                 yield 0.01
-            while coordinator.inflight != raced.said:
+            while coordinator.activeCredSaid != raced.said:
                 coordinator.process_ready()
                 yield 0.01
             while not coordinator.eoa_verifier.cues:
@@ -453,8 +472,11 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             while runtime.rgy.reger.tevers[raced.regi].vcState(raced.said).et != "rev":
                 yield 0.01
             coordinator.process_results()
-            rejected = runtime.baser.results.get(keys=(raced.said,))
-            assert rejected.status == "rejected" and "revoked" in rejected.reason
+            rejectedResult = runtime.baser.results.get(keys=(raced.said,))
+            assert (
+                rejectedResult.status == "rejected"
+                and "revoked" in rejectedResult.reason
+            )
             assert (
                 runtime.baser.accepted_nonces.get(
                     keys=(runtime.baser.nonce_key(raced.issuer, raced.sad["u"]),)
@@ -469,8 +491,8 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
                 ("issuer", {"holder": qvi}, "issuer does not match"),
             ]:
                 candidate, stream = yield from issue_association(**options)
-                work = yield from deliver(stream, candidate.said, "rejected")
-                assert reason in work.reason, (label, work)
+                verification = yield from deliver(stream, candidate.said, "rejected")
+                assert reason in verification.reason, (label, verification)
                 assert (
                     runtime.baser.accepted_nonces.get(
                         keys=(
@@ -481,7 +503,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
                     )
                     is None
                 )
-            assert runtime.baser.associations.get(keys=(creder.said,)) == retired
+            assert runtime.baser.associations.get(keys=(creder.said,)) == revokedStatus
             assert len(
                 [
                     event

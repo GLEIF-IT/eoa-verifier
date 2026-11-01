@@ -39,9 +39,9 @@ def test_real_sender_recovers_commit_ack_gaps(
             server=http.Server(host="127.0.0.1", port=port, app=app)
         )
         baser = verified_store
-        accepted = baser.accept(
+        associationStatus = baser.accept(
             "association",
-            association={"issuerAid": sender_hab.pre},
+            associationFacts={"issuerAid": sender_hab.pre},
             nonce="gap-fixture",
             destination=target,
             peer_aid=receiver_hab.pre,
@@ -54,16 +54,16 @@ def test_real_sender_recovers_commit_ack_gaps(
         def attempt(*, expect_failure=False):
             """Own native HTTP tasks until exactly one durable sender attempt settles."""
             sender = WebhookSender(baser=baser, hab=sender_hab, timeout=1)
-            starting = baser.outbox.get(keys=(accepted.eventId,)).attempts
+            starting = baser.outbox.get(keys=(associationStatus.eventId,)).attempts
 
             def settled(tymth, tock=0.0, **kwargs):
                 yield tock
                 while True:
-                    event = baser.outbox.get(keys=(accepted.eventId,))
-                    if event.acknowledged or (
-                        event.attempts > starting
-                        and event.error
-                        and event.error
+                    delivery = baser.outbox.get(keys=(associationStatus.eventId,))
+                    if delivery.acknowledged or (
+                        delivery.attempts > starting
+                        and delivery.error
+                        and delivery.error
                         != "attempt started; authenticated ACK not recorded"
                     ):
                         parent.remove([server, sender])
@@ -87,10 +87,10 @@ def test_real_sender_recovers_commit_ack_gaps(
                 patch.setattr(baser, "delivery_result", fail)
             attempt(expect_failure=(gap == "before-sender-completion"))
 
-        committed = store.events.get(keys=(accepted.eventId,))
-        assert committed == baser.outbox.get(keys=(accepted.eventId,)).body
+        committed = store.events.get(keys=(associationStatus.eventId,))
+        assert committed == baser.outbox.get(keys=(associationStatus.eventId,)).body
         if gap != "none":
-            assert not baser.outbox.get(keys=(accepted.eventId,)).acknowledged
+            assert not baser.outbox.get(keys=(associationStatus.eventId,)).acknowledged
             baser.close()
             baser.reopen()
             # Rebind receipt subdatabases after a native persistent reopen.
@@ -104,7 +104,9 @@ def test_real_sender_recovers_commit_ack_gaps(
                 server=http.Server(host="127.0.0.1", port=port, app=app)
             )
             attempt()
-        acknowledged = baser.outbox.get(keys=(accepted.eventId,))
+        acknowledged = baser.outbox.get(keys=(associationStatus.eventId,))
         assert acknowledged.acknowledged
         assert acknowledged.attempts == (1 if gap == "none" else 2)
-        assert list(store.events.getItemIter()) == [((accepted.eventId,), committed)]
+        assert list(store.events.getItemIter()) == [
+            ((associationStatus.eventId,), committed)
+        ]

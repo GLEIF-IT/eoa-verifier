@@ -51,3 +51,14 @@ test obligation in this organization refactor.
 
 The oracle's maintained two-service qualification owns contract and consumer
 selection assertions. Keep them there rather than duplicating the workflow here.
+
+## Object names in source and tests
+
+Name the domain object and distinguish its representation: `credSaid` and
+`telEvtSaid` are identifier strings, `telSerder` is a parsed TEL event, and
+`presentationCesr` is encoded presentation material. Keep these names through
+callers, fixtures and assertions. `VerificationRecord`, `GrantReplayRecord`,
+`AssociationStatus` and `Delivery` identify different records; phase-table
+membership supplies their lifecycle state. Use state qualifiers with a noun
+when needed, such as `revokedStatus`, rather than labels such as `handoff` or
+`accepted` that conceal the object or become false as it advances.

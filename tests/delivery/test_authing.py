@@ -24,14 +24,14 @@ def test_signed_request_and_correlated_response(peers):
     """Authenticate a KERI AID-signed request and a response bound to its attempt/body."""
     sender, receiver = peers
     context = message()
-    headers, sent = sender.sign(**context)
-    received = receiver.verify(**context, headers=headers)
-    assert received == sent
+    headers, requestAuth = sender.sign(**context)
+    verifiedAuth = receiver.verify(**context, headers=headers)
+    assert verifiedAuth == requestAuth
     ack = dict(
         context,
         action="ack",
         body=b'{"ack":"one"}',
-        request=received.reference,
+        request=verifiedAuth.reference,
         status=200,
     )
     headers, _ = receiver.sign(**ack)
@@ -112,20 +112,20 @@ def test_signed_error_response_authenticates_without_implying_delivery(peers):
     """Authentication covers the actual status; delivery policy decides success."""
     sender, receiver = peers
     context = message()
-    headers, sent = sender.sign(**context)
-    received = receiver.verify(**context, headers=headers)
+    headers, requestAuth = sender.sign(**context)
+    verifiedAuth = receiver.verify(**context, headers=headers)
     response = {
         "method": context["method"],
         "target": context["target"],
         "action": "ack",
         "body": b'{"error":"unavailable"}',
-        "request": received.reference,
+        "request": verifiedAuth.reference,
         "status": 500,
     }
     headers, _ = receiver.sign(**response)
     with pytest.raises(AuthenticationError, match="mismatch"):
         sender.verify(**dict(response, status=200), headers=headers)
-    assert received.reference == sent.reference
+    assert verifiedAuth.reference == requestAuth.reference
     assert sender.verify(**response, headers=headers).peer == receiver.hab.pre
 
 
@@ -200,7 +200,7 @@ def test_signed_http_request_and_ack(peers):
         def on_post(self, req, rep):
             """Verify received bytes, then sign a test ACK; no application acceptance is claimed."""
             target = "https://oracle.example" + req.relative_uri
-            received = receiver.verify(
+            verifiedAuth = receiver.verify(
                 method=req.method,
                 target=target,
                 action="status",
@@ -213,7 +213,7 @@ def test_signed_http_request_and_ack(peers):
                 target=target,
                 body=body,
                 action="ack",
-                request=received.reference,
+                request=verifiedAuth.reference,
                 status=200,
             )
             rep.data = body
@@ -221,14 +221,14 @@ def test_signed_http_request_and_ack(peers):
 
     app = falcon.App()
     app.add_route("/hook", Endpoint())
-    headers, sent = sender.sign(**context)
+    headers, requestAuth = sender.sign(**context)
     response = TestClient(app).simulate_post(
         "/hook?chain=1", headers=headers, body=context["body"]
     )
     assert response.status_code == 200
     sender.verify(
         action="ack",
-        request=sent.reference,
+        request=requestAuth.reference,
         method=context["method"],
         target=context["target"],
         body=response.content,

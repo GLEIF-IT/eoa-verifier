@@ -101,10 +101,10 @@ class IssuerCeremony:
             streams[issuer_name] = replay(
                 registry.hab, issuer.rgy, registry, credential
             )
-            evidence = streams["geda"] + (
+            sourceCesr = streams["geda"] + (
                 streams["qvi"] if issuer_name == "qvi" else b""
             )
-            receive(holder_hby, holder_rgy, evidence)
+            receive(holder_hby, holder_rgy, sourceCesr)
             if not holder_rgy.reger.saved.get(keys=(credential.said,)):
                 raise RuntimeError(
                     f"{holder_name} did not accept its source credential"
@@ -163,10 +163,12 @@ class IssuerCeremony:
     def _export_association(self, credential, registry) -> dict:
         """Export exact KEL/TEL/Grant bytes addressed to the prepared Verifier AID."""
         _, le, rgy = self.actors["le"]
-        evidence = replay(le, rgy, registry, credential) + grant(
+        presentationCesr = replay(le, rgy, registry, credential) + grant(
             le, rgy, credential, self.configuration["verifierAid"]
         )
-        (self.root / "credentials" / f"{credential.said}.cesr").write_bytes(evidence)
+        (self.root / "credentials" / f"{credential.said}.cesr").write_bytes(
+            presentationCesr
+        )
         return {
             "said": credential.said,
             "issuerAid": le.pre,
@@ -247,8 +249,8 @@ def open_ceremony(root: Path):
         )
 
 
-def complete_ceremony(ceremony: IssuerCeremony, operation: Generator) -> dict:
-    """Drive one borrowed operation for at most 90 seconds and return its result.
+def complete_ceremony(ceremony: IssuerCeremony, ceremonyGen: Generator) -> dict:
+    """Drive one borrowed ceremony generator for at most 90 seconds and return its result.
 
     Scheduler shutdown precedes the caller closing the ceremony's native stores.
     No domain branching or state mutation is hidden inside this scheduler adapter.
@@ -259,7 +261,7 @@ def complete_ceremony(ceremony: IssuerCeremony, operation: Generator) -> dict:
         """Bridge a native generator result to the owning HIO scheduler."""
         yield tock
         try:
-            results.append((yield from operation))
+            results.append((yield from ceremonyGen))
         finally:
             scheduler.remove(list(scheduler.doers[:-1]))
 

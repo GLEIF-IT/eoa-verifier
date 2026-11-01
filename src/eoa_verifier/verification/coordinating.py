@@ -47,7 +47,7 @@ class VerificationCoordinator(doing.DoDoer):
             clock,
         )
         # Only dispatch correlation is transient. A new worker resumes durable active work.
-        self.inflight = None
+        self.activeCredSaid = None
         super().__init__(doers=[eoa_verifier, doing.doify(self.verify_do)], **kwa)
 
     def verify_do(self, tymth, tock=0.0, **opts):
@@ -63,69 +63,71 @@ class VerificationCoordinator(doing.DoDoer):
         if not self.eoa_verifier.cues:
             return
         cue = self.eoa_verifier.cues.popleft()
-        if cue["said"] != self.inflight:
+        if cue["said"] != self.activeCredSaid:
             return
-        op = self.baser.verifying.get(keys=(self.inflight,))
-        if op is None:
+        verification = self.baser.verifying.get(keys=(self.activeCredSaid,))
+        if verification is None:
             raise ValueError("dispatched verification has no active work")
         if cue["kin"] == "retry":
-            self._retry(op, cue["error"])
+            self._retry(verification, cue["error"])
         elif cue["kin"] == "failed":
-            self._finish(op, "rejected", reason=cue["error"])
+            self._finish(verification, "rejected", reason=cue["error"])
         elif cue["kin"] == "verified":
             try:
-                self._verify(op)
+                self._verify(verification)
             except MissingCredentialArtifactsError as exc:
-                self._retry(op, str(exc))
+                self._retry(verification, str(exc))
             except (VerificationError, kering.ValidationError) as exc:
-                self._finish(op, "rejected", reason=str(exc))
+                self._finish(verification, "rejected", reason=str(exc))
             else:
-                self._finish(op, "verified", eoaResult=cue["eoaResult"])
+                self._finish(verification, "verified", eoaResult=cue["eoaResult"])
         else:
             raise ValueError("unknown EOA result")
-        self.inflight = None
+        self.activeCredSaid = None
         return True
 
     def process_ready(self):
         """Claim one attempt before local validation or external RPC dispatch."""
-        if self.inflight is not None:
+        if self.activeCredSaid is not None:
             return
-        op = self.baser.next_verification(
+        verification = self.baser.next_verification(
             now=self.clock(), max_attempts=self.max_attempts
         )
-        if op is None:
+        if verification is None:
             return
         try:
-            association = self._verify(op)
+            association = self._verify(verification)
         except MissingCredentialArtifactsError as exc:
-            self._retry(op, str(exc))
+            self._retry(verification, str(exc))
         except (VerificationError, kering.ValidationError) as exc:
-            self._finish(op, "rejected", reason=str(exc))
+            self._finish(verification, "rejected", reason=str(exc))
         else:
-            self.inflight = op.associationSaid
+            self.activeCredSaid = verification.associationSaid
             self.eoa_verifier.msgs.append(association.sad)
 
-    def _verify(self, op):
+    def _verify(self, verification):
         """Require native acceptance; Grant bytes can justify rejection, never acceptance."""
         return verify_association(
             rgy=self.rgy,
-            said=op.associationSaid,
+            said=verification.associationSaid,
             schema_said=self.association_schema,
-            candidate=grant_candidate(self.rgy, op.grantSaid),
+            candidate=grant_candidate(self.rgy, verification.grantSaid),
             trusted_geda_aid=self.trusted_geda_aid,
         )
 
-    def _retry(self, op, reason):
+    def _retry(self, verification, reason):
         """Persist both cooldown and budget; restarting never renews either."""
         self.baser.defer_verification(
-            op,
+            verification,
             reason=reason,
             next_attempt_at=self.clock() + self.retry_delay,
             max_attempts=self.max_attempts,
         )
 
-    def _finish(self, op, status, *, reason="", eoaResult=None):
+    def _finish(self, verification, status, *, reason="", eoaResult=None):
         """Commit the result and, for success, its separate acceptance obligation."""
         self.baser.finish(
-            VerificationResult(op.associationSaid, status, reason, eoaResult or {})
+            VerificationResult(
+                verification.associationSaid, status, reason, eoaResult or {}
+            )
         )

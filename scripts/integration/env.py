@@ -37,23 +37,23 @@ COMMANDS = (
 
 def parser() -> argparse.ArgumentParser:
     """Describe the explicit run, candidate/artifact inputs and operation parameters."""
-    result = argparse.ArgumentParser(description=__doc__)
-    result.add_argument("command", choices=COMMANDS)
-    result.add_argument("--run-dir", required=True, type=Path)
-    result.add_argument("--verifier-source", type=Path, default=SOURCE)
-    result.add_argument("--verifier-wheel", type=Path)
-    result.add_argument("--tool-revision")
-    result.add_argument("--witness-count", type=int, choices=(1, 6), default=6)
-    result.add_argument("--local-only", action="store_true")
-    result.add_argument("--rpc-url")
-    result.add_argument("--webhook-url")
-    result.add_argument("--webhook-aid")
-    result.add_argument("--peer-kel", type=Path)
-    result.add_argument("--said")
-    result.add_argument("--nonce")
-    result.add_argument("--wallet", type=int, choices=(1, 2), default=1)
-    result.add_argument("--service")
-    return result
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=COMMANDS)
+    parser.add_argument("--run-dir", required=True, type=Path)
+    parser.add_argument("--verifier-source", type=Path, default=SOURCE)
+    parser.add_argument("--verifier-wheel", type=Path)
+    parser.add_argument("--tool-revision")
+    parser.add_argument("--witness-count", type=int, choices=(1, 6), default=6)
+    parser.add_argument("--local-only", action="store_true")
+    parser.add_argument("--rpc-url")
+    parser.add_argument("--webhook-url")
+    parser.add_argument("--webhook-aid")
+    parser.add_argument("--peer-kel", type=Path)
+    parser.add_argument("--said")
+    parser.add_argument("--nonce")
+    parser.add_argument("--wallet", type=int, choices=(1, 2), default=1)
+    parser.add_argument("--service")
+    return parser
 
 
 def main() -> None:
@@ -167,15 +167,15 @@ def issue_or_revoke(root: Path, arguments) -> None:
         raise ValueError("revoke requires --said")
     with redirect_stdout(sys.stderr), open_ceremony(root) as ceremony:
         if arguments.command == "_bootstrap":
-            operation = ceremony.bootstrap_sources()
+            ceremonyGen = ceremony.bootstrap_sources()
         elif arguments.command == "issue":
-            operation = ceremony.issue_association(
+            ceremonyGen = ceremony.issue_association(
                 "0x" + "0" * 63 + str(arguments.wallet), arguments.nonce
             )
         else:
-            operation = ceremony.revoke_association(arguments.said)
-        descriptor = complete_ceremony(ceremony, operation)
-    print(json.dumps(descriptor))
+            ceremonyGen = ceremony.revoke_association(arguments.said)
+        ceremonyResult = complete_ceremony(ceremony, ceremonyGen)
+    print(json.dumps(ceremonyResult))
 
 
 def shutdown(signum, frame) -> None:

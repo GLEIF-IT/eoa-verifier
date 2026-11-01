@@ -40,8 +40,8 @@ def run_flow(root: Path, configuration: dict) -> None:
             assert response.read() == raw
     first = _issue(root, TEST_KEYS[1], str(uuid4()))
     present_credential(root, configuration, first["said"])
-    accepted = wait_for_status(configuration, first["said"], "accepted")
-    _assert_delivery_mode(configuration, accepted)
+    associationStatus = wait_for_status(configuration, first["said"], "accepted")
+    _assert_delivery_mode(configuration, associationStatus)
     duplicate = _reject_reused_nonce(root, configuration, first["nonce"])
     receipts = (
         request_json(configuration["webhookUrl"])
@@ -51,8 +51,10 @@ def run_flow(root: Path, configuration: dict) -> None:
     if receipts is not None:
         stop(root, "receiver")
     restart_verifier(root, configuration)
-    reopened = wait_for_status(configuration, first["said"], "accepted")
-    assert reopened["accountObservation"] == accepted["accountObservation"]
+    reopenedStatus = wait_for_status(configuration, first["said"], "accepted")
+    assert (
+        reopenedStatus["accountObservation"] == associationStatus["accountObservation"]
+    )
     if receipts is not None:
         assert request_json(configuration["webhookUrl"]) == receipts
 
@@ -62,7 +64,7 @@ def run_flow(root: Path, configuration: dict) -> None:
     # Downstream replacement does not revoke the first credential's acceptance.
     assert (
         wait_for_status(configuration, first["said"], "accepted")["eventId"]
-        == accepted["eventId"]
+        == associationStatus["eventId"]
     )
     for descriptor in (first, second):
         with open_ceremony(root) as ceremony:
@@ -77,7 +79,7 @@ def run_flow(root: Path, configuration: dict) -> None:
             "first": first,
             "second": second,
             "rejected": duplicate,
-            "accountObservation": accepted["accountObservation"],
+            "accountObservation": associationStatus["accountObservation"],
         },
     )
 
@@ -94,19 +96,22 @@ def _reject_reused_nonce(root: Path, configuration: dict, nonce: str) -> dict:
     """Prove a valid different-wallet credential cannot reuse an accepted pair."""
     duplicate = _issue(root, TEST_KEYS[2], nonce)
     present_credential(root, configuration, duplicate["said"])
-    rejected = wait_for_status(configuration, duplicate["said"], "rejected")
-    assert rejected["reason"] == "NONCE_REUSED" and rejected["delivery"] is None
+    rejectedStatus = wait_for_status(configuration, duplicate["said"], "rejected")
+    assert (
+        rejectedStatus["reason"] == "NONCE_REUSED"
+        and rejectedStatus["delivery"] is None
+    )
     return duplicate
 
 
-def _assert_delivery_mode(configuration: dict, accepted: dict) -> None:
+def _assert_delivery_mode(configuration: dict, associationStatus: dict) -> None:
     """Distinguish target-free acceptance from retried authenticated delivery."""
     if configuration["localOnly"]:
-        assert accepted["delivery"] is None
+        assert associationStatus["delivery"] is None
     else:
-        assert accepted["delivery"]["acknowledged"]
+        assert associationStatus["delivery"]["acknowledged"]
         assert (
-            accepted["delivery"]["attempts"] >= 2
+            associationStatus["delivery"]["attempts"] >= 2
         )  # Receiver deliberately drops its first ACK.
 
 
