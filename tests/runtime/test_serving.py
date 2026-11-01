@@ -132,14 +132,11 @@ def test_webhook_timings_reach_sender_and_reject_invalid_config(config):
         replace(configured, webhook_backoff_cap=1)
 
 
-def test_saved_verification_keeps_its_trust_scope_when_enabling_delivery(config):
-    """Restart may enable delivery, but cannot reinterpret saved results under another root/chain."""
-    from keri import core
-
+def test_enabling_delivery_preserves_results_without_config_warning(config, caplog):
+    """Delivery options do not change the recorded trust/network settings."""
     from eoa_verifier.persistence.records import VerificationResult
 
     with entered_service(config) as service:
-        # Isolate storage policy: KERIpy verification itself is covered by test_ipex_integration.
         service.baser.results.put(
             keys=("saved",), val=VerificationResult("saved", "verified")
         )
@@ -151,21 +148,42 @@ def test_saved_verification_keeps_its_trust_scope_when_enabling_delivery(config)
     with entered_service(delivery) as reopened:
         assert reopened.sender is not None
         assert reopened.baser.results.get(keys=("saved",)).status == "verified"
-    for changed in (
-        replace(delivery, trusted_geda_aid=core.Signer().verfer.qb64),
-        replace(delivery, chain_id=1),
-    ):
-        with pytest.raises(
-            ValueError, match="another GEDA root, chain or acceptance policy"
-        ):
-            with verifier_service(changed):
-                pass
-    with entered_service(delivery) as reopened:
-        assert reopened.baser.results.get(keys=("saved",)).status == "verified"
+    assert "startup settings changed" not in caplog.text
 
 
-def test_unscoped_saved_results_are_preserved_and_refused(config):
-    """Old stores lack proof of their verification policy; do not silently adopt them."""
+@pytest.mark.parametrize("field", ["trusted_geda_aid", "chain_id"])
+def test_changed_config_warns_and_reopens_without_reset(config, caplog, field):
+    """Changed settings become the baseline; results and consumed nonces survive."""
+    from keri import core
+
+    from eoa_verifier.persistence.records import AcceptedNonce, VerificationResult
+
+    result = VerificationResult("saved", "verified")
+    nonce = AcceptedNonce("saved")
+    with entered_service(config) as service:
+        service.baser.results.put(keys=("saved",), val=result)
+        service.baser.accepted_nonces.put(keys=("nonce",), val=nonce)
+    assert "startup settings changed" not in caplog.text
+    value = core.Signer().verfer.qb64 if field == "trusted_geda_aid" else 1
+    changed = replace(config, **{field: value})
+    with entered_service(changed) as service:
+        assert service.baser.results.get(keys=("saved",)) == result
+        assert service.baser.accepted_nonces.get(keys=("nonce",)) == nonce
+    assert "Verifier startup settings changed" in caplog.text
+    assert str(getattr(config, field)) in caplog.text
+    assert str(value) in caplog.text
+    assert caplog.records[-1].levelname == "WARNING"
+    caplog.clear()
+    with entered_service(changed):
+        pass
+    assert "startup settings changed" not in caplog.text
+    with entered_service(config):
+        pass
+    assert "Verifier startup settings changed" in caplog.text
+
+
+def test_missing_config_baseline_does_not_reject_saved_results(config, caplog):
+    """A missing advisory record is initialized without auditing retained history."""
     from eoa_verifier.persistence.records import VerificationResult
 
     with entered_service(config) as service:
@@ -173,21 +191,12 @@ def test_unscoped_saved_results_are_preserved_and_refused(config):
             keys=("saved",), val=VerificationResult("saved", "verified")
         )
         service.baser.scope.rem(keys=("verification",))
-    with pytest.raises(ValueError, match="unscoped results"):
-        with verifier_service(config):
-            pass
-    from keri.db import dbing
-
-    from eoa_verifier.persistence.basing import VerifierBaser
-
-    with dbing.openLMDB(
-        cls=VerifierBaser,
-        name=config.name,
-        base=config.base,
-        headDirPath=config.head_dir,
-        temp=False,
-    ) as store:
-        assert store.results.get(keys=("saved",)).status == "verified"
+    with entered_service(config) as reopened:
+        assert reopened.baser.results.get(keys=("saved",)).status == "verified"
+        assert (
+            reopened.baser.scope.get(keys=("verification",)).chainId == config.chain_id
+        )
+    assert "startup settings changed" not in caplog.text
 
 
 def test_runtime_has_one_receiver_and_no_mailbox(config):

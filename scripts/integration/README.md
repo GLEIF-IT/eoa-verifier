@@ -67,3 +67,11 @@ The modules keep CLI dispatch, artifact/build selection, process lifetimes,
 native infrastructure, issuer ceremonies and scenario assertions separate. Native
 Habery/Regery contexts and Doist task ownership follow the pinned KERIpy patterns.
 No tooling is included in the application wheel.
+
+## Configuration ownership
+
+The installed service warns and continues when its recorded startup settings
+change. Operators own compatibility with retained state; see the
+[configuration guidance](../../docs/operations.md#configuration-changes-and-stored-state). Fixture manifests still select reproducible
+inputs: prepare a fresh run when changing its deployment or source inputs, and
+keep existing run directories for restart and diagnosis.

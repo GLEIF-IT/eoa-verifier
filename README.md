@@ -62,6 +62,21 @@ account checks run, and Ethereum publication remains the oracle's responsibility
 | `--webhook-backoff-cap`  | 150     | Maximum lower bound; upper bound is twice this.       |
 
 
+## Operator responsibility for stored state
+
+Operators own the choice of stores for a trust root and Ethereum network. Startup
+logs a warning when the trusted GEDA AID or chain ID differs from the previous
+startup, then continues and records the new settings. An unchanged restart is
+quiet. The advisory record contains public settings only; it is not an approval
+or proof that retained state is compatible.
+
+Changing settings does not revalidate saved results, release consumed nonces,
+reset queues or retarget existing deliveries. Before restarting with different
+settings, decide whether that retained state belongs to the intended deployment.
+Use a separate store set for an independent deployment; preserve the existing
+stores for its outstanding work and nonce history. Do not erase consumed nonces
+merely to clear a warning. See the [operator guide](docs/operations.md#configuration-changes-and-stored-state).
+
 ## Maintainer orientation
 
 | Component | Modules and responsibility |

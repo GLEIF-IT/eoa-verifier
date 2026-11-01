@@ -26,7 +26,7 @@ class VerifierBaser(dbing.LMDBer):
     def reopen(self, **kwa):
         """Open verification, acceptance/outbox and transport replay tables in one environment."""
         super().reopen(**kwa)
-        self.scope = koming.Komer(db=self, subkey="scope.", schema=VerificationScope)
+        self.scope = koming.Komer(db=self, subkey="startup.", schema=VerificationScope)
         self.pending = koming.Komer(
             db=self, subkey="pending.", schema=VerificationRecord
         )

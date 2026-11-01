@@ -1,32 +1,17 @@
-"""Persistent startup scope binding and bounded history-existence checks."""
-
-from .queues import first_record
+"""Last observed startup settings; operators own store/deployment compatibility."""
 
 
 class ScopeStore:
-    """Borrow storage only for startup scope checks and binding."""
+    """Borrow storage for one advisory startup record."""
 
     def __init__(self, baser):
         """Borrow the application's already-open store."""
         self._db = baser
 
-    def scope(self):
-        """Read the persisted trust/network policy binding."""
+    def get(self):
+        """Return the previous startup settings, or None on first use."""
         return self._db.scope.get(keys=("verification",))
 
-    def has_history(self):
-        """Check history existence from heads, without counting every stored record."""
-        return any(
-            first_record(table) is not None
-            for table in (self._db.results, self._db.associations, self._db.outbox)
-        )
-
-    def bind_scope(self, scope):
-        """Insert a prepared scope once, rejecting a conflicting storage binding."""
-        db = self._db
-        raw = db.scope.serializer(scope)
-        with db.env.begin(write=True) as txn:
-            existing = txn.get(b"verification", db=db.scope.sdb)
-            if existing is not None and existing != raw:
-                raise ValueError("verifier scope changed")
-            txn.put(b"verification", raw, db=db.scope.sdb, overwrite=False)
+    def save(self, scope):
+        """Replace the startup baseline without touching verification or nonce state."""
+        self._db.scope.pin(keys=("verification",), val=scope)

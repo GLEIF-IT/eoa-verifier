@@ -26,13 +26,9 @@ checkout. CI installs the wheel outside the checkout and runs the integration te
 Foundry 1.5.1.
 
 Reuse name, base, alias, store root and passcode on restart. `--incept-file` supplies
-KERIpy options for a new identity only. The application store is bound to its
-GEDA root and chain ID before workers start, including operation without webhook delivery.
-Changing either requires separate stores. Use fresh application stores for the
-`nonce-key-v1` policy. Each nonce is a direct key, consumed permanently across all
-issuers in that store. Startup checks the fixed scope record without auditing
-nonce or association history. Nonces contain 1–128 ASCII characters from
-`[A-Za-z0-9_-]`; no normalization is applied. There are no old-format readers,
+KERIpy options for a new identity only. Each nonce is a direct key, consumed
+permanently across all issuers in that store. Nonces contain 1–128 ASCII characters
+from `[A-Za-z0-9_-]`; no normalization is applied. There are no old-format readers,
 migrations or backfills. Preserve the store across restart.
 Enabling webhook delivery with the same root/chain remains supported, but does not
 create deliveries for associations accepted without a configured target. Preserve the entire KERIpy/application
@@ -45,6 +41,29 @@ no signature, reads stored status/initial account observation and performs no RP
 It exposes delivery attempts and blocked/error state for that association's event.
 Shared destination timing and failure counts stay local. The returned observation
 is not a continuous account check.
+
+## Configuration changes and stored state
+
+Selecting a store compatible with the configured trust root and network is the
+operator's responsibility. Startup compares the trusted GEDA AID and chain ID
+with its last recorded settings. A change emits a logger warning containing the
+previous and current public values, then startup continues. The new values become
+the baseline, so an unchanged restart is quiet; changing back warns again.
+A missing baseline is initialized without inspecting historical results or
+associations. The advisory record lives in `startup.` and has no nonce-policy
+version marker or old-format reader.
+
+The warning does not revalidate results, replay acceptance, clear consumed
+nonces, or rewrite pending deliveries and their original destinations. Inspect
+outstanding work before repurposing a store. Use separate stores for an
+independent deployment and retain the previous stores for its work and permanent
+nonce history. A fresh store has independent nonce history; it is not a way to
+reset the nonce policy of an existing deployment. Preserve the KERIpy and
+application stores together.
+
+Normal configuration syntax, credential verification, nonce rejection and peer
+authentication still apply. This warning only replaces rejection of changed
+startup settings; it does not grant trust to invalid credentials or messages.
 
 ## Introduce the webhook peer and present evidence
 
@@ -168,7 +187,7 @@ provides the local verifier/oracle/Anvil setup and qualification.
 ## Protocol and store baseline
 
 Use the current [Verifier API](../protocol/verifier-api-v1/README.md) with a compatible
-consumer. Application stores require the current acceptance policy and have no
+consumer. Application stores use the current record layout and have no
 old-format readers, migrations or backfill. Preserve operator data and select
 fresh demonstration stores deliberately. Oracle selection/supersession does not
 revoke Verifier acceptance; verified association revocation does.

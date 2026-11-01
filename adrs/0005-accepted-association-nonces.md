@@ -32,9 +32,11 @@ process coordination; there is no application mutex or extra nonce environment.
 
 ## Breaking storage contract
 
-Use fresh application stores with policy `nonce-key-v1`. There are no old-format
-readers, migrations, backfills or compatibility APIs. Startup checks the fixed
-trust/network scope record, not the nonce or association datasets. Atomic writes
+Use fresh application stores for this direct nonce-key layout. There are no old-format
+readers, migrations, backfills or compatibility APIs. Startup settings are advisory:
+changed trust/network settings log a warning and update their baseline without
+auditing the nonce or association datasets. Operators own store selection; no
+nonce-policy version marker gates startup. Atomic writes
 prevent partial acceptance; the application does not reconstruct history or
 attempt to repair manual database edits. Preserve the store across restart.
 Uniqueness is local to that verifier store, not shared across independent deployments.

@@ -133,8 +133,8 @@ getItemIter delegates to a generator whose LMDB reader remains open across yield
 Keep that distinction visible in adapter contracts. Nonce consumption uses the
 exact nonce key with no-overwrite insertion. Delete full-history audits and their
 paging helpers; startup does not traverse accepted nonces or associations.
-Scope checks that only need to know whether history exists read a head record;
-they do not count every row.
+Startup settings use one fixed-key advisory record; no history-existence check
+or historical-record audit is part of startup.
 
 Application services validate inputs, choose phases, construct final records and
 build immutable webhook bytes before persistence. The writer encodes keys and
@@ -388,7 +388,7 @@ Feature ownership replaces the application-wide reader/writer interfaces:
 | VerificationReader / VerificationWriter | VerificationService; attempt/retry/result transitions, including atomic acceptance enqueue. AcceptanceService borrows verification-result reads explicitly. |
 | AssociationReader / AssociationWriter | AcceptanceService and RevocationService; permanent nonce consumption, status, and associated delivery obligations remain one commit. |
 | DeliveryReader / DeliveryWriter | DeliveryService and WebhookSender; references, progress, scheduling, ACK and recovery. RevocationService borrows delivery reads explicitly. DeliveryService borrows association reads explicitly before sending. |
-| ScopeStore | Startup scope/history-existence checks and immutable scope binding only. |
+| ScopeStore | Last observed public startup settings; simple point read/save for advisory warnings. |
 | transport.claim_nonce | Authentication replay claim only; bound as a callable at composition. |
 
 StatusQuery explicitly composes association, verification and delivery readers.
@@ -416,3 +416,14 @@ an already-validated credential revocation; it never issues a TEL event.
 `ref` denotes a delivery reference, not the delivery record. Phase transitions
 retain explicit directions, including waiting_to_verifying and verifying_to_waiting.
 Old function names are removed without aliases.
+
+## Advisory startup settings
+
+Supersedes the earlier immutable scope/history guard: operators own compatibility
+between configured trust/network settings and retained state. bootstrap.note_config
+warns on changed GEDA/chain settings and saves the latest baseline. ScopeStore has
+only get/save; history-existence checks, acceptancePolicy and nonce-key-v1 are
+removed. The advisory record uses startup.; no old binding reader or migration
+is introduced. Work, results, consumed nonces and delivery records are unchanged.
+Runtime tests cover first use, changed settings with retained data, quiet reopen
+and changing back. The README and operator guide describe the responsibility.

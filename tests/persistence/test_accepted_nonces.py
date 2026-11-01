@@ -186,18 +186,19 @@ def test_existing_nonce_key_rejects_without_decoding_its_value(raw):
 
 
 def test_scope_reopen_does_not_audit_nonce_or_association_values():
-    """Startup checks its policy record, not the growing accepted-history dataset."""
-    from eoa_verifier.runtime.bootstrap import bind_verification_scope
+    """Startup only records settings, even with no baseline and opaque history."""
+    from eoa_verifier.runtime.bootstrap import note_config
 
     with dbing.openLMDB(cls=VerifierBaser) as baser:
         scope_store = ScopeStore(baser)
-        bind_verification_scope(scope_store, trusted_geda_aid="geda", chain_id=1)
+        note_config(scope_store, trusted_geda_aid="geda", chain_id=1)
         with baser.env.begin(write=True) as txn:
             txn.put(b"nonce", b"opaque consumed value", db=baser.accepted_nonces.sdb)
             txn.put(
                 b"credential", b"opaque historical value", db=baser.associations.sdb
             )
-        bind_verification_scope(scope_store, trusted_geda_aid="geda", chain_id=1)
+        baser.scope.rem(keys=("verification",))
+        note_config(scope_store, trusted_geda_aid="other-geda", chain_id=2)
 
 
 @pytest.mark.parametrize("same_said", [False, True])
