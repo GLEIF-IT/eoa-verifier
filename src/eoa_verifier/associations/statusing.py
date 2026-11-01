@@ -32,7 +32,7 @@ class StatusQuery:
             statusBody["delivery"] = (
                 {
                     "eventId": delivery.eventId,
-                    "acknowledged": delivery.acknowledged,
+                    "delivered": delivery.delivered,
                     "attempts": delivery.attempts,
                     "error": delivery.error,
                     "blocked": delivery.blocked,

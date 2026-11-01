@@ -6,12 +6,12 @@ owners so the command dispatcher contains no business workflow.
 """
 
 import argparse
-from contextlib import redirect_stdout
 import json
 import os
-from pathlib import Path
 import signal
 import sys
+from contextlib import redirect_stdout
+from pathlib import Path
 
 from .environment import clean_run, load_run, prepare_run, present_credential, start_run
 from .processes import is_running, process_records, stop
@@ -47,7 +47,6 @@ def parser() -> argparse.ArgumentParser:
     parser.add_argument("--local-only", action="store_true")
     parser.add_argument("--rpc-url")
     parser.add_argument("--webhook-url")
-    parser.add_argument("--webhook-aid")
     parser.add_argument("--peer-kel", type=Path)
     parser.add_argument("--said")
     parser.add_argument("--nonce")
@@ -152,7 +151,6 @@ def start(root: Path, configuration: dict, arguments) -> None:
         local_only=arguments.local_only,
         rpc_url=arguments.rpc_url,
         webhook_url=arguments.webhook_url,
-        webhook_aid=arguments.webhook_aid,
         peer_kel=arguments.peer_kel,
     )
 

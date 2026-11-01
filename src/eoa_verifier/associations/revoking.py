@@ -57,7 +57,6 @@ class RevocationService:
                 status,
                 status_revision=2,
                 destination=original.destination,
-                peer_aid=original.peerAid,
             )
             if original
             else None

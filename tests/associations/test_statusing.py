@@ -53,16 +53,16 @@ def test_public_get_returns_stored_status_and_old_observation(verified_store):
     response = client.simulate_get("/v1/associations/association/status")
     assert response.json["status"] == "accepted"
     assert response.json["accountObservation"]["observedAt"] == "2000-01-01T00:00:00Z"
-    assert response.json["delivery"]["acknowledged"] is False
+    assert response.json["delivery"]["delivered"] is False
     assert client.simulate_get("/v1/associations/unknown/status").status_code == 404
 
 
 def test_public_status_does_not_disclose_other_delivery_activity(verified_store):
-    """Another event's shared cooldown cannot change an acknowledged association's public view."""
+    """Another event's shared cooldown cannot change an delivered association's public view."""
     baser = verified_store
     associationStatus = accept_verified_result(baser)
     delivery_service(baser).record_attempt(associationStatus.eventId)
-    delivery_service(baser).acknowledge(associationStatus.eventId)
+    delivery_service(baser).complete(associationStatus.eventId)
     delivery = baser.outbox.get(keys=(associationStatus.eventId,))
     app = falcon.App()
     app.add_route(
@@ -92,7 +92,6 @@ def test_public_status_does_not_disclose_other_delivery_activity(verified_store)
         associationFacts={"issuerAid": "issuer"},
         nonce="other",
         destination=delivery.destination,
-        peer_aid=delivery.peerAid,
     )
     delivery_service(baser).record_attempt(other.eventId, next_attempt_at=3000000000)
     schedule = DestinationSchedule(failures=3, nextAttemptAt=4000000000)

@@ -1,4 +1,8 @@
-"""Pure decoding and canonicalization for the pinned KERI HTTP signature profile."""
+"""Small KERIpy HTTP signature profile over method, path and exact body bytes.
+
+Signature-Input.keyid identifies the signer. Signature verification has no
+persistence effects; application event IDs own duplicate handling.
+"""
 
 import base64
 import hashlib
@@ -8,48 +12,28 @@ from keri import kering
 from keri.core import coring
 from keri.end import ending
 
-# Exact KERIpy HTTP signature profile; changing coverage requires peer coordination.
-FIELDS = (
-    "@method",
-    "@path",
-    "content-digest",
-    "content-type",
-    "eoa-target",
-    "eoa-audience",
-    "eoa-action",
-    "eoa-request",
-    "eoa-status",
-)
-# HTTP signature label and context distinguish this service transport profile.
+FIELDS = ("@method", "@path", "content-digest")
 LABEL = "sig0"
-CONTEXT = "eoa-verifier/v1"
 
 
 class AuthenticationError(ValueError):
-    """The message cannot be authenticated for its expected peer and operation."""
+    """The supplied signature or locally accepted signing key is invalid."""
 
 
 def body_digest(body):
-    """Return the SHA-256 Content-Digest field for exact bytes, without JSON rewriting."""
+    """Return SHA-256 Content-Digest for the exact transmitted bytes."""
     return "sha-256=:" + base64.b64encode(hashlib.sha256(body).digest()).decode() + ":"
 
 
-def _path(target):
-    """Return the HTTP path/query of an absolute configured target; reject fragments."""
-    parts = urlsplit(target)
-    if parts.scheme not in ("http", "https") or not parts.netloc or parts.fragment:
-        raise ValueError("target must be an absolute HTTP URL without a fragment")
-    return (parts.path or "/") + ("?" + parts.query if parts.query else "")
+def request_path(target):
+    """Extract the HTTP path; origin and query are outside signature coverage."""
+    return urlsplit(target).path or "/"
 
 
-def read_signature(headers, *, peer_aid, lifetime, now):
-    """Decode one KERI AID signature and enforce peer/profile/message-time constraints.
-
-    Return normalized headers, parsed input and signature. Malformed data raises
-    AuthenticationError; no replay state is claimed at this boundary.
-    """
+def read_signature(headers):
+    """Decode the fixed KERIpy profile, rejecting partial or malformed signatures."""
     try:
-        lowered = {k.lower(): v for k, v in headers.items()}
+        lowered = {k.lower(): value for k, value in headers.items()}
         if len(lowered) != len(headers):
             raise AuthenticationError("duplicate header names")
         inputs = ending.desiginput(lowered["signature-input"].encode())
@@ -60,42 +44,31 @@ def read_signature(headers, *, peer_aid, lifetime, now):
         if (
             inp.name != LABEL
             or tuple(inp.fields) != FIELDS
-            or inp.keyid != peer_aid
-            or inp.context != CONTEXT
+            or not isinstance(inp.keyid, str)
+            or not inp.keyid
             or inp.alg != "ed25519"
-            or sig.signer != peer_aid
+            or type(inp.created) is not int
+            or inp.expires is not None
+            or inp.nonce is not None
+            or inp.context is not None
+            or sig.signer not in (None, inp.keyid)
             or sig.indexed
             or set(sig.markers) != {LABEL}
             or sig.kind != "CESR"
             or not isinstance(sig.markers[LABEL], coring.Cigar)
         ):
-            raise AuthenticationError("untrusted peer or signature profile")
-        if (
-            type(inp.created) is not int
-            or type(inp.expires) is not int
-            or not inp.created <= now < inp.expires
-            or not 0 < inp.expires - inp.created <= lifetime
-            or not isinstance(inp.nonce, str)
-            or len(inp.nonce) != 32
-            or any(c not in "0123456789abcdef" for c in inp.nonce)
-        ):
-            raise AuthenticationError("invalid message lifetime or nonce")
-        return lowered, inp, sig
-    except (KeyError, TypeError, ValueError, kering.KeriError) as exc:
+            raise AuthenticationError("invalid signature profile")
+        if coring.Prefixer(qb64=inp.keyid).qb64 != inp.keyid:
+            raise AuthenticationError("invalid signer AID")
+        return lowered, inp, sig.markers[LABEL]
+    except (KeyError, TypeError, ValueError, IndexError, kering.KeriError) as exc:
         raise AuthenticationError(str(exc)) from exc
 
 
-def signature_base(inp, method, target, expected):
-    """Rebuild the exact pinned KERIpy siginput base for KERI AID signature verification.
-
-    Preserve its field and parameter spelling/order; this narrow compatibility
-    function is not a general RFC 9421 canonicalizer.
-    """
-    values = {"@method": method, "@path": _path(target), **expected}
-    lines = [f'"{field}": {values[field].strip()}' for field in FIELDS]
-    params = (
-        f"({' '.join(FIELDS)});created={inp.created};expires={inp.expires}"
-        f";nonce={inp.nonce};keyid={inp.keyid};context={CONTEXT};alg=ed25519"
-    )
+def signature_base(inp, method, path, digest):
+    """Reproduce pinned KERIpy siginput encoding, not a general RFC canonicalizer."""
+    values = {"@method": method, "@path": path, "content-digest": digest}
+    lines = [f'"{field}": {ending.normalize(values[field])}' for field in FIELDS]
+    params = f"({' '.join(FIELDS)});created={inp.created};keyid={inp.keyid};alg=ed25519"
     lines.append(f'"@signature-params: {params}"')
     return "\n".join(lines).encode()

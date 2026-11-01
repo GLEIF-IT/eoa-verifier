@@ -1,1 +1,1 @@
-"""Authenticated webhook delivery and acknowledgement policy."""
+"""Signed webhooks and optional response verification."""

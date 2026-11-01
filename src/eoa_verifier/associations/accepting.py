@@ -25,14 +25,13 @@ class AcceptanceService:
         *,
         verification_reader,
         destination=None,
-        peer_aid=None,
     ):
         """Borrow association persistence and verification-result reads.
 
         KERIpy evidence is required only for scheduled acceptance."""
         self.reader, self.writer, self.evidence = reader, writer, evidence
         self.verification_reader = verification_reader
-        self.destination, self.peer_aid = destination, peer_aid
+        self.destination = destination
 
     def process_one(self):
         """Guard one verified candidate against locally missing or revoked issuance."""
@@ -52,12 +51,9 @@ class AcceptanceService:
                 associationFacts=associationFacts,
                 nonce=nonce,
                 destination=self.destination,
-                peer_aid=self.peer_aid,
             )
 
-    def accept(
-        self, credSaid, *, associationFacts, nonce, destination=None, peer_aid=None
-    ):
+    def accept(self, credSaid, *, associationFacts, nonce, destination=None):
         """Accept once or reject nonce reuse; same-SAID races return their committed status."""
         previous = self.reader.association(credSaid)
         if previous is not None:
@@ -65,8 +61,6 @@ class AcceptanceService:
         result = self.verification_reader.result(credSaid)
         if result is None or result.status != "verified":
             raise ValueError("acceptance requires a completed verified result")
-        if bool(destination) != bool(peer_aid):
-            raise ValueError("delivery requires both destination and peer AID")
         observation = dict(
             result.eoaResult["accountObservation"], wallet=result.eoaResult["wallet"]
         )
@@ -78,9 +72,7 @@ class AcceptanceService:
             observation,
         )
         delivery = (
-            status_delivery(
-                status, status_revision=1, destination=destination, peer_aid=peer_aid
-            )
+            status_delivery(status, status_revision=1, destination=destination)
             if destination
             else None
         )

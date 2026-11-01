@@ -1,5 +1,8 @@
 # Separate application work from persistence and transport
 
+Current transport decision: the [optional HTTP signatures plan](optional-http-signatures.md) supersedes earlier mutual-ACK and transport replay-claim requirements.
+
+
 Status: Implemented in five slices. Final qualification evidence is recorded in the linked PRs.
 Scope: eoa-verifier application code, its tests and affected integration tooling.
 Source reviewed: `3a36fe33642de0ae8c2bdc1f940417eb13301f54` (runtime tree from the merged naming refactor).
@@ -45,7 +48,7 @@ tested integrity boundary, not a reason to wrap every business read in a writer.
 | `associations/accepting.py`, `revoking.py` | Scheduling, direct KERIpy/application reads, eligibility decisions and multi-store sequencing | Acceptance/revocation services own the operations; doers delegate; KERIpy evidence adapter exposes facts and revocation identifiers |
 | `associations/statusing.py:StatusEnd` | Falcon handling, multi-table reads, phase precedence and response construction | Status query service builds the detached view; endpoint maps it to HTTP |
 | `delivery/delivering.py:WebhookSender` | Queue access, attempt budgets/backoff, HTTP lifecycle, authentication/ACK policy and persistence | Delivery service owns progression; HTTP adapter owns I/O; explicit ACK rules and authentication service produce outcomes |
-| `delivery/authing.py:ServiceAuthenticator` | Key retrieval, signature mechanics, trust/time rules and replay consumption | Keep a clearly named authentication service; separate signature codec from its key and replay-store dependencies; successful authentication explicitly includes nonce claiming |
+| `delivery/authing.py:HttpSignatures` | Signatures and accepted-key access | Stateless HTTP content verification; Oracle separately authorizes its producer; no transport replay store |
 | `runtime/serving.py:VerifierService.__init__` | Composition plus scope/history checks, inception-file reading, schema installation and identity bootstrap | Explicit bootstrap operation precedes composition; runtime retains resource and HIO lifetime ownership |
 | `runtime/cli.py` retry dispatch | Commands invoke workflow methods on the database object | CLI opens resources and invokes the owning service's retry operation |
 | `scripts/integration/receiver.py` | HTTP handling, status-event/conflict decisions, several writes and ACK-loss injection | Small fixture status-event operation separates durable status-event storage from HTTP and fault injection; keep it a focused fixture |
@@ -224,12 +227,12 @@ replay between those commits remains idempotent. No cross-environment transactio
 - Account observation: adapter validates RPC envelopes/quantities and closes each
   client; service distinguishes invalid proofs/accounts from unavailable RPC. Keep
   identified-block code reads and current timeout semantics.
-- Authentication: pure signature operations do not mutate state. The authentication
-  service explicitly verifies and claims the transport nonce before returning
-  authenticated success. Do not accidentally make a caller responsible for an
-  optional replay check. Preserve current ACK body/signature/correlation ordering.
+- Authentication: signature operations do not mutate state. Check any supplied
+  response signature, but allow a target to return ordinary unsigned HTTP success.
+  Oracle authorizes its producer before event persistence and handles duplicates
+  through durable event identity/body/revision checks.
 - Delivery: keep durable attempt accounting before POST, identical event bytes on
-  retry, bounded attempts, destination cooldown and authenticated ACK rules. A late
+  retry, bounded attempts, destination cooldown and optional-signature response rules. A late
   result must not remove a different active reference or change association status.
 - Query: build status views from a bounded set of detached records. The endpoint
   only handles HTTP representation/errors. No RPC, work discovery or scheduling.
@@ -389,7 +392,7 @@ Feature ownership replaces the application-wide reader/writer interfaces:
 | AssociationReader / AssociationWriter | AcceptanceService and RevocationService; permanent nonce consumption, status, and associated delivery obligations remain one commit. |
 | DeliveryReader / DeliveryWriter | DeliveryService and WebhookSender; references, progress, scheduling, ACK and recovery. RevocationService borrows delivery reads explicitly. DeliveryService borrows association reads explicitly before sending. |
 | ScopeStore | Last observed public startup settings; simple point read/save for advisory warnings. |
-| transport.claim_nonce | Authentication replay claim only; bound as a callable at composition. |
+| HttpSignatures | Stateless signing and verification; no transport replay store. |
 
 StatusQuery explicitly composes association, verification and delivery readers.
 No application-wide facade, transaction object passed through services, or
@@ -434,8 +437,9 @@ The integration receiver uses StatusEventStore, StatusEventService and
 StatusEventConflict. event_json returns the retained JSON string; record_event
 commits it with delivery-attempt accounting; stored_events returns detached
 diagnostics. Variables distinguish statusEventBytes, statusEventJson, the parsed
-statusEvent and ackBytes. A signed ACK confirms durable status-event storage,
-not Ethereum publication. Actual KERI witness receipts retain their names.
+statusEvent and ackBytes. Oracle and the signed fixture report durable storage
+in their signed results, not Ethereum publication; other webhook targets need
+only return HTTP success. Actual KERI witness receipts retain their names.
 
 This is a source/API naming change: immutable-body checks, replay protection,
 restart and post-commit ACK-loss behavior, wire values and subdatabase names stay

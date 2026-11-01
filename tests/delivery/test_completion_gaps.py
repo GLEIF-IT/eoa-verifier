@@ -1,19 +1,16 @@
 """Producer recovery at durable receiver and sender completion boundaries."""
 
-from functools import partial
-
 import falcon
 import pytest
 from hio.base import doing
 from hio.core import http
 from keri.app import habbing
 
-from eoa_verifier.delivery.authing import ServiceAuthenticator
+from eoa_verifier.delivery.authing import HttpSignatures
 from eoa_verifier.delivery.delivering import DeliveryService, WebhookSender
 from eoa_verifier.delivery.keys import ServiceKeys
 from eoa_verifier.persistence.associations import AssociationReader
 from eoa_verifier.persistence.delivery import DeliveryReader, DeliveryWriter
-from eoa_verifier.persistence.transport import claim_nonce
 from scripts.integration.receiver import Receiver, StatusEventService, StatusEventStore
 from tests.support.acceptance import acceptance_service
 from tests.support.network import free_port
@@ -37,10 +34,8 @@ def test_real_sender_recovers_commit_ack_gaps(
         port = free_port()
         target = f"http://127.0.0.1:{port}/hook"
         store = StatusEventStore(receiver.db)
-        auth = ServiceAuthenticator(
+        auth = HttpSignatures(
             keys=ServiceKeys(receiver_hab),
-            claim_nonce=store.claim_nonce,
-            peer_aid=sender_hab.pre,
         )
         app = falcon.App()
         app.add_route("/hook", Receiver(auth, StatusEventService(store), target))
@@ -53,7 +48,6 @@ def test_real_sender_recovers_commit_ack_gaps(
             associationFacts={"issuerAid": sender_hab.pre},
             nonce="gap-fixture",
             destination=target,
-            peer_aid=receiver_hab.pre,
         )
 
         def fail(*args, **kwargs):
@@ -67,7 +61,6 @@ def test_real_sender_recovers_commit_ack_gaps(
                 writer=DeliveryWriter(baser),
                 keys=ServiceKeys(sender_hab),
                 timeout=1,
-                claim_nonce=partial(claim_nonce, baser),
                 association_reader=AssociationReader(baser),
             )
             starting = baser.outbox.get(keys=(associationStatus.eventId,)).attempts
@@ -76,11 +69,11 @@ def test_real_sender_recovers_commit_ack_gaps(
                 yield tock
                 while True:
                     delivery = baser.outbox.get(keys=(associationStatus.eventId,))
-                    if delivery.acknowledged or (
+                    if delivery.delivered or (
                         delivery.attempts > starting
                         and delivery.error
                         and delivery.error
-                        != "attempt started; authenticated ACK not recorded"
+                        != "attempt started; HTTP success not recorded"
                     ):
                         parent.remove([server, sender])
                         return
@@ -100,29 +93,29 @@ def test_real_sender_recovers_commit_ack_gaps(
             if gap == "before-ack":
                 patch.setattr(auth, "sign", fail)
             elif gap == "before-sender-completion":
-                patch.setattr(DeliveryService, "acknowledge", fail)
+                patch.setattr(DeliveryService, "complete", fail)
             attempt(expect_failure=(gap == "before-sender-completion"))
 
         committed = store.events.get(keys=(associationStatus.eventId,))
         assert committed == baser.outbox.get(keys=(associationStatus.eventId,)).body
         if gap != "none":
-            assert not baser.outbox.get(keys=(associationStatus.eventId,)).acknowledged
+            assert not baser.outbox.get(keys=(associationStatus.eventId,)).delivered
             baser.close()
             baser.reopen()
             # Rebind status-event subdatabases after a KERIpy database reopen.
             receiver.db.close(clear=False)
             receiver.db.reopen()
             store = StatusEventStore(receiver.db)
-            auth.claim_nonce = store.claim_nonce
+
             app = falcon.App()
             app.add_route("/hook", Receiver(auth, StatusEventService(store), target))
             server = http.ServerDoer(
                 server=http.Server(host="127.0.0.1", port=port, app=app)
             )
             attempt()
-        acknowledged = baser.outbox.get(keys=(associationStatus.eventId,))
-        assert acknowledged.acknowledged
-        assert acknowledged.attempts == (1 if gap == "none" else 2)
+        delivered = baser.outbox.get(keys=(associationStatus.eventId,))
+        assert delivered.delivered
+        assert delivered.attempts == (1 if gap == "none" else 2)
         assert list(store.events.getItemIter()) == [
             ((associationStatus.eventId,), committed)
         ]

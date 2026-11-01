@@ -1,7 +1,6 @@
 """Compose KERIpy intake, initial verification, revocation and status delivery."""
 
 from collections import deque
-from functools import partial
 
 import falcon
 from hio.base import doing
@@ -27,7 +26,6 @@ from eoa_verifier.persistence.associations import AssociationReader, Association
 from eoa_verifier.persistence.delivery import DeliveryReader, DeliveryWriter
 from eoa_verifier.persistence.grants import GrantReader, GrantWriter
 from eoa_verifier.persistence.scope import ScopeStore
-from eoa_verifier.persistence.transport import claim_nonce
 from eoa_verifier.persistence.verification import VerificationReader, VerificationWriter
 
 from ..associations.accepting import AcceptanceDoer, AcceptanceService
@@ -156,7 +154,6 @@ class VerifierService(doing.DoDoer):
             self.sender = WebhookSender(
                 reader=DeliveryReader(baser),
                 writer=DeliveryWriter(baser),
-                claim_nonce=partial(claim_nonce, baser),
                 keys=ServiceKeys(hab),
                 timeout=config.webhook_timeout,
                 max_attempts=config.webhook_max_attempts,
@@ -173,7 +170,6 @@ class VerifierService(doing.DoDoer):
                     AssociationWriter(baser),
                     AssociationEvidence(rgy),
                     destination=config.webhook_url,
-                    peer_aid=config.webhook_aid,
                     verification_reader=VerificationReader(baser),
                 ),
             )

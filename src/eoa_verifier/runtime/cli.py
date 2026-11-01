@@ -82,9 +82,6 @@ def main(argv=None):
         "--webhook-url", help="Configured destination for association-status events"
     )
     start.add_argument(
-        "--webhook-aid", help="Trusted destination AID; required with --webhook-url"
-    )
-    start.add_argument(
         "--webhook-timeout",
         type=float,
         default=10.0,

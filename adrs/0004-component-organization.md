@@ -20,7 +20,7 @@ Keep the src layout and six sibling leaf component packages:
 | receiving | CESR HTTP intake, shared parser/escrows, Grant replay and enqueue |
 | verification | Initial credential-chain, wallet-proof and account checks, including RPC |
 | associations | Acceptance, revocation and public stored-status projection |
-| delivery | HTTP authentication, nonce claims, webhook attempts, retries and ACK policy |
+| delivery | HTTP signatures, webhook attempts, retries and response policy |
 | persistence | Durable schemas, detached reads and atomic saves of prepared records |
 
 Component packages contain implementation modules, with minimal initializers.

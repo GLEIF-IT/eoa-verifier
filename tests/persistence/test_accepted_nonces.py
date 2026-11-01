@@ -59,7 +59,7 @@ with dbing.openLMDB(cls=VerifierBaser, name="process", headDirPath=root, temp=Fa
         baser.env = SimpleNamespace(begin=lambda **kwargs: InterruptedTransaction()
                                     if kwargs.get("write") else env.begin(**kwargs))
     status = AcceptanceService(AssociationReader(baser), AssociationWriter(baser), verification_reader=VerificationReader(baser)).accept(said, associationFacts={"issuerAid":"issuer"}, nonce="process-nonce",
-                          destination="https://receiver.example/hook", peer_aid="peer")
+                          destination="https://receiver.example/hook")
     if mode == "commit":
         os._exit(24)
     print(status.status, flush=True)
@@ -84,7 +84,6 @@ def accept(baser, said, *, issuer="issuer", nonce="nonce", delivery=True):
         associationFacts={"issuerAid": issuer},
         nonce=nonce,
         destination="https://receiver.example/hook" if delivery else None,
-        peer_aid="peer" if delivery else None,
     )
 
 
@@ -281,7 +280,7 @@ def test_process_death_before_and_after_commit(tmp_path):
             assert baser.results.get(keys=("first",)).status == "verified"
             if expected:
                 original = baser.outbox.get(keys=("first:1",))
-                assert not original.acknowledged
+                assert not original.delivered
                 assert accept(baser, "first").status == "accepted"
                 assert baser.outbox.get(keys=("first:1",)) == original
 

@@ -130,7 +130,6 @@ def start_run(
     local_only: bool = False,
     rpc_url: str | None = None,
     webhook_url: str | None = None,
-    webhook_aid: str | None = None,
     peer_kel: Path | None = None,
 ) -> None:
     """Start/reopen this run with immutable mode, peer and chain configuration.
@@ -148,9 +147,7 @@ def start_run(
         "externalRpc": bool(rpc_url),
     }
     if webhook_url:
-        if not webhook_aid or peer_kel is None:
-            raise ValueError("External webhook requires an explicit AID and KEL file")
-        requested.update(webhookUrl=webhook_url, receiverAid=webhook_aid)
+        requested.update(webhookUrl=webhook_url)
     if configuration.get("configured"):
         if any(configuration.get(key) != value for key, value in requested.items()):
             raise ValueError(
@@ -188,7 +185,7 @@ def start_run(
             "verifier",
             lambda: request_json(configuration["verifierUrl"] + "/health"),
         )
-        if not local_only:
+        if not local_only and (root / "receiver.cesr").is_file():
             request_json(
                 configuration["verifierUrl"] + "/",
                 (root / "receiver.cesr").read_bytes(),
@@ -212,8 +209,9 @@ def restart_verifier(root: Path, configuration: dict) -> None:
         webhook_url=configuration["webhookUrl"]
         if configuration["externalWebhook"]
         else None,
-        webhook_aid=configuration["receiverAid"],
-        peer_kel=root / "receiver.cesr",
+        peer_kel=(root / "receiver.cesr")
+        if (root / "receiver.cesr").is_file()
+        else None,
     )
 
 
@@ -238,7 +236,7 @@ def wait_for_status(
             )
             delivery = last.get("delivery")
             if last["status"] == expected and (
-                delivery is None or delivery["acknowledged"]
+                delivery is None or delivery["delivered"]
             ):
                 return last
         except OSError:
@@ -346,8 +344,6 @@ def _verifier_command(root: Path, configuration: dict) -> list[str]:
         command += [
             "--webhook-url",
             configuration["webhookUrl"],
-            "--webhook-aid",
-            configuration["receiverAid"],
             "--webhook-timeout",
             "1",
             "--webhook-interval",

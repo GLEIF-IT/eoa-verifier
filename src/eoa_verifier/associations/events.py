@@ -5,8 +5,8 @@ import json
 from eoa_verifier.persistence.records import Delivery
 
 
-def status_delivery(associationStatus, *, status_revision, destination, peer_aid):
-    """Serialize one immutable v1 event for the existing outbox/ACK protocol."""
+def status_delivery(associationStatus, *, status_revision, destination):
+    """Serialize one immutable v1 event for URL-only webhook delivery."""
     statusEvent = {
         "version": "1",
         "eventId": associationStatus.eventId,
@@ -23,6 +23,5 @@ def status_delivery(associationStatus, *, status_revision, destination, peer_aid
         associationStatus.eventId,
         associationStatus.associationSaid,
         destination,
-        peer_aid,
         statusEventJson,
     )

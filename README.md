@@ -27,7 +27,7 @@ Reuse `--name`, `--base`, `--alias` and `--head-dir` on restart. `--incept-file`
 accepts KERIpy inception options for a new identity, including witnesses.
 Send CESR to `/`; `/health` reports liveness. The listener defaults to loopback.
 
-Add `--webhook-url https://receiver.example/hook --webhook-aid "$RECEIVER_AID"`
+Add `--webhook-url https://receiver.example/hook`
 to enable application acceptance and delivery. Configure both together. The peer's
 current key state must already be KERIpy-accepted by this verifier; missing
 keys leave delivery blocked pending correction. Omitting both retains verification-only operation.
@@ -42,13 +42,13 @@ The sender keeps one request in flight and spaces starts by at least one second,
 including successes. Up to three attempts handle connection failures, timeouts, HTTP 408/429 and 5xx errors
 (except 501/505) retry automatically with jittered backoff from 1–2 seconds to
 150–300 seconds. A valid `Retry-After` is a minimum, even beyond that cap.
-Cooldown applies to the whole destination and survives restart. Only the expected
-authenticated ACK completes delivery and resets the failure count.
+Cooldown applies to the whole destination and survives restart. Only a complete
+HTTP success with any supplied signature verified completes delivery and resets the failure count.
 
-Permanent HTTP, payload, signature or configuration failures remain visible as
+Permanent HTTP, signature or configuration failures remain visible as
 `delivery.blocked`, with the current event's `error`. Shared destination scheduling
 state stays in local storage. After correcting the cause, an embedding caller can resume
-with `service.sender.request(event_id)`; restart alone does not unblock it.
+with `service.sender.service.retry(event_id)`; restart alone does not unblock it.
 There is no retry REST route; the [operator guide](docs/operations.md#delivery-failures)
 also describes an offline resume for standalone deployments. Old acceptance events superseded by revocation stay
 stored and blocked; revocation requires its own ACK. No periodic verification or
@@ -85,7 +85,7 @@ merely to clear a warning. See the [operator guide](docs/operations.md#configura
 | `receiving` | `directing`, `grants`: finite CESR HTTP intake, shared parser/escrows, IPEX replay and duplicate-safe work creation. |
 | `verification` | `coordinating`, `credentials`, `eoa`, `worker`, `rpc`: initial credential/wallet/account verification; `constants`, `schema_cache`, `errors` support that contract. |
 | `associations` | `accepting`, `revoking`, `statusing`: application acceptance, verified association revocation and public stored status. |
-| `delivery` | `authing`, `delivering`: signed transport/replay protection and webhook attempts, retry pacing and ACK policy. |
+| `delivery` | `authing`, `delivering`: HTTP signatures, webhook attempts, retry pacing and response policy. |
 | `persistence` | `records`, `basing`, `registry`: durable record schemas and atomic verification, acceptance/outbox and delivery transitions. |
 
 These are sibling leaf component packages. Runtime composes them; workflow
@@ -161,21 +161,17 @@ parser and escrows. There is no mailbox polling, mailbox store or SSE query serv
 
 See the [testing guide](docs/testing.md) for component and integration lookup.
 
-## Service authentication primitives
+## HTTP signature primitives
 
-`delivery.authing.ServiceAuthenticator` signs and authenticates exact HTTP body bytes with
-the KERIpy service habitat and one configured peer AID. It uses the pinned KERI
-`Signature-Input`/`Signature` format, checks locally accepted current keys, and
-stores nonce claims in `VerifierBaser` across restart. Single-key transferable
-Ed25519 service AIDs at threshold one are supported. See the
-[transport profile](protocol/verifier-api-v1/README.md#transport-signature-profile).
+`delivery.authing.HttpSignatures` signs exact body digests with the service AID
+and verifies locally accepted current keys. It has no replay store or configured
+receiver AID. Single-key transferable Ed25519 service AIDs at threshold one are
+supported. See the [transport profile](protocol/verifier-api-v1/README.md#transport-signature-profile).
 
-`WebhookSender` uses these common primitives and owns ACK policy: actual HTTP 200,
-expected peer, exact attempt reference and a `stored: true` acknowledgment for the event.
-The receiver commits durable status-event storage before signing an ACK and acknowledges
-redelivery without repeating effects. This does not confirm contract publication. See [Verifier API v1](protocol/verifier-api-v1/README.md)
-for event and ACK definitions. Authentication alone is not delivery
-completion or Ethereum confirmation.
+`WebhookSender` accepts any complete 2xx response after checking any supplied
+signature. A target need not know KERI or return a particular JSON body. Oracle
+opts into request verification and response signing; it commits before responding.
+Delivery, Oracle storage/selection and Ethereum confirmation are distinct.
 
 ## Test
 
@@ -203,3 +199,18 @@ webhook/ACK profile. Oracle owns its selection/publication API; Comply owns the
 registry ABI and calldata fixtures.
 
 For an independent witnessed local environment, see [the integration commands](scripts/integration/README.md).
+
+## Optional webhook verification
+
+Configure only `--webhook-url`. Requests are signed with the Verifier AID and a
+signed body digest, but the target may ignore signatures and return any ordinary
+2xx response. No receiver AID or JSON ACK schema is required. `delivery.delivered`
+means the target returned HTTP success.
+
+If a response supplies either signature header, Verifier requires a valid complete
+signature and matching digest. Provision that signer's KEL through the existing
+CESR intake before enabling signed responses, and supply validated rotations when
+keys change. Unknown keys fail verification; no arbitrary key discovery occurs.
+Unsigned responses require no KERI setup. Use HTTPS for destination authentication
+and transport integrity; optional signatures do not provide downgrade resistance.
+See the [transport contract](protocol/verifier-api-v1/README.md#transport-signature-profile) for exact coverage and limitations.

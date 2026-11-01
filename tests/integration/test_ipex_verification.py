@@ -99,7 +99,6 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             head_dir=str(tmp_path),
             http_port=port,
             webhook_url="http://127.0.0.1:1/hook" if delivery else None,
-            webhook_aid=geda.pre if delivery else None,
         )
         service_stores = stack.enter_context(ExitStack())
         epoch = time.time()
@@ -312,8 +311,7 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
             workflow.extend([runtime, client_doer])
             assert runtime.hab.pre == aid
             assert (
-                VerificationReader(runtime.baser).progress(creder.said)[1]
-                is not None
+                VerificationReader(runtime.baser).progress(creder.said)[1] is not None
             )
             # Supporting evidence alone resumes persisted work; no new Grant required.
             yield from deliver(
