@@ -27,7 +27,8 @@ def test_public_get_returns_stored_status_and_old_observation(verified_store):
     ApplicationWriter(baser).enqueue_verification(
         VerificationRecord("rejected", "grant")
     )
-    verification_service(baser).next_verification(now=0)
+    verificationService = verification_service(baser)
+    verificationService.start_pending(verificationService.next_pending())
     verification_service(baser).finish(
         VerificationResult("rejected", "rejected", "wrong schema")
     )
@@ -69,7 +70,8 @@ def test_public_status_does_not_disclose_other_delivery_activity(verified_store)
     # A different association's event shares this destination.
     result = baser.results.get(keys=("association",))
     ApplicationWriter(baser).enqueue_verification(VerificationRecord("other", "grant"))
-    verification_service(baser).next_verification(now=0)
+    verificationService = verification_service(baser)
+    verificationService.start_pending(verificationService.next_pending())
     verification_service(baser).finish(
         VerificationResult("other", "verified", eoaResult=result.eoaResult)
     )
@@ -108,13 +110,15 @@ def test_waiting_and_dead_letter_are_passive_statuses(verified_store):
     ApplicationWriter(baser).enqueue_verification(
         VerificationRecord("waiting", "grant")
     )
-    verification = verification_service(baser).next_verification(now=100)
+    verificationService = verification_service(baser, clock=lambda: 100)
+    verification = verificationService.start_pending(verificationService.next_pending())
     verification_service(baser).defer_verification(
         verification, reason="missing evidence", next_attempt_at=105
     )
     status = client.simulate_get("/v1/associations/waiting/status").json
     assert status["status"] == "waiting" and status["nextAttemptAt"] == 105
-    verification = verification_service(baser).next_verification(now=105)
+    verificationService = verification_service(baser, clock=lambda: 105)
+    verification = verificationService.retry_waiting(verificationService.next_waiting())
     verification_service(baser).defer_verification(
         verification, reason="missing evidence", next_attempt_at=110, max_attempts=2
     )

@@ -33,7 +33,8 @@ def test_retry_verification_command_uses_persistent_phase(tmp_path):
         ApplicationWriter(baser).enqueue_verification(
             VerificationRecord("candidate", "grant")
         )
-        verification = verification_service(baser).next_verification(now=0)
+        verificationService = verification_service(baser)
+        verification = verificationService.start_pending(verificationService.next_pending())
         verification_service(baser).defer_verification(
             verification, reason="RPC unavailable", next_attempt_at=5, max_attempts=1
         )

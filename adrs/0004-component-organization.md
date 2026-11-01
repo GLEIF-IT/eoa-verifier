@@ -69,6 +69,14 @@ legal transition and fixes its source/destination tables. For example,
 and `acknowledge_delivery` removes only the matching scheduling references.
 Do not pass source/target phase strings or outcome flags to a catch-all save.
 Keep the short transaction bodies explicit even when some code repeats.
+
+Queue reads are phase-specific and do not consume work. Verification exposes
+`next_verifying`, `next_waiting` and `next_pending`; its coordinator explicitly
+chooses interrupted work, then a due retry, then new work. Grant replay and
+delivery use the same separation of phase reads from named transitions. A dead
+letter still consumes the turn: never interpret an exhausted item as permission
+to start a second item. Status queries may read several named phases for one
+identifier because they neither select nor advance work.
 The Grant replay service commits verification enqueue and active-Grant removal
 together after KERIpy replay; a rollback preserves the active Grant.
 

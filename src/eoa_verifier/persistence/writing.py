@@ -161,7 +161,7 @@ class ApplicationWriter:
                 return False
             return txn.put(key, raw, db=db.pending.sdb, overwrite=False)
 
-    def start_verification(self, previous, record):
+    def pending_to_verifying(self, previous, record):
         """Move pending to verifying with a prepared charged attempt."""
         db = self._db
         key = record.associationSaid.encode()
@@ -173,7 +173,7 @@ class ApplicationWriter:
             txn.delete(key, db=db.pending.sdb)
             txn.put(key, raw, db=db.verifying.sdb)
 
-    def resume_verification(self, previous, record):
+    def resume_verifying(self, previous, record):
         """Replace interrupted verifying work with its prepared next attempt."""
         db = self._db
         key = record.associationSaid.encode()
@@ -184,7 +184,7 @@ class ApplicationWriter:
                 raise ValueError("verification source is absent or changed")
             txn.put(key, raw, db=db.verifying.sdb)
 
-    def activate_waiting_verification(self, previous, record):
+    def waiting_to_verifying(self, previous, record):
         """Move waiting to verifying and remove its due index."""
         db = self._db
         key = record.associationSaid.encode()
@@ -198,7 +198,7 @@ class ApplicationWriter:
             txn.delete(old_due, db=db.verification_due.sdb)
             txn.put(key, raw, db=db.verifying.sdb)
 
-    def defer_verification(self, previous, record):
+    def verifying_to_waiting(self, previous, record):
         """Move verifying to waiting with a prepared retry deadline."""
         db = self._db
         key = record.associationSaid.encode()
@@ -212,7 +212,7 @@ class ApplicationWriter:
             txn.put(key, raw, db=db.waiting.sdb)
             txn.put(new_due, key, db=db.verification_due.sdb)
 
-    def dead_letter_verification(self, previous, record):
+    def verifying_to_dead_letter(self, previous, record):
         """Move failed or interrupted verifying work to verification_dead."""
         db = self._db
         key = record.associationSaid.encode()
@@ -224,7 +224,7 @@ class ApplicationWriter:
             txn.delete(key, db=db.verifying.sdb)
             txn.put(key, raw, db=db.verification_dead.sdb)
 
-    def dead_letter_waiting_verification(self, previous, record):
+    def waiting_to_dead_letter(self, previous, record):
         """Move exhausted waiting work to verification_dead and remove its deadline."""
         db = self._db
         key = record.associationSaid.encode()
@@ -238,7 +238,7 @@ class ApplicationWriter:
             txn.delete(old_due, db=db.verification_due.sdb)
             txn.put(key, raw, db=db.verification_dead.sdb)
 
-    def dead_letter_pending_verification(self, previous, record):
+    def pending_to_dead_letter(self, previous, record):
         """Move exhausted pending work to verification_dead."""
         db = self._db
         key = record.associationSaid.encode()
@@ -250,7 +250,7 @@ class ApplicationWriter:
             txn.delete(key, db=db.pending.sdb)
             txn.put(key, raw, db=db.verification_dead.sdb)
 
-    def retry_dead_verification(self, previous, record):
+    def dead_letter_to_pending(self, previous, record):
         """Move corrected verification_dead work to pending with a reset budget."""
         db = self._db
         key = record.associationSaid.encode()
@@ -430,7 +430,7 @@ class ApplicationWriter:
             keys=(peer, nonce), val=ReplayClaim(expires_at)
         )
 
-    def activate_delivery(self, reference):
+    def delivery_ready_to_active(self, reference):
         """Move the expected ready reference to the single active sender slot."""
         db = self._db
         key, raw = reference.eventId.encode(), db.delivery_ready.serializer(reference)

@@ -2,6 +2,8 @@
 
 from unittest.mock import patch
 
+import pytest
+
 from hio.base import tyming
 from keri.db import dbing
 
@@ -23,11 +25,16 @@ def test_active_waiting_budget_and_manual_retry_survive_restart(tmp_path):
         cls=VerifierBaser, name="phases", headDirPath=str(tmp_path), temp=False
     ) as baser:
         ApplicationWriter(baser).enqueue_verification(VerificationRecord("a", "first"))
-        verification = verification_service(baser).next_verification(now=100)
+        verificationService = verification_service(baser, clock=lambda: 100)
+        verification = verificationService.start_pending(
+            verificationService.next_pending()
+        )
         assert verification.attempts == 1 and baser.pending.cntAll() == 0
         baser.close()
         baser.reopen()
-        verification = verification_service(baser).next_verification(now=100)
+        verification = verificationService.resume_verifying(
+            verificationService.next_verifying()
+        )
         assert verification.attempts == 2  # Interrupted dispatch consumes an attempt.
         verification_service(baser).defer_verification(
             verification, reason="RPC unavailable", next_attempt_at=105
@@ -37,24 +44,35 @@ def test_active_waiting_budget_and_manual_retry_survive_restart(tmp_path):
         )
         baser.close()
         baser.reopen()
-        assert verification_service(baser).next_verification(now=104) is None
-        verification = verification_service(baser).next_verification(now=105)
+        verificationService.clock = lambda: 104
+        assert verificationService.next_waiting() is None
+        verificationService.clock = lambda: 105
+        verification = verificationService.retry_waiting(
+            verificationService.next_waiting()
+        )
         assert verification.attempts == 3 and verification.grantSaid == "first"
         verification_service(baser).defer_verification(
             verification, reason="RPC unavailable", next_attempt_at=110
         )
         assert ApplicationReader(baser).verification_progress("a")[0] == "dead-letter"
-        assert verification_service(baser).next_verification(now=1000) is None
+        assert verificationService.next_verifying() is None
+        assert verificationService.next_waiting() is None
+        assert verificationService.next_pending() is None
         assert not ApplicationWriter(baser).enqueue_verification(
             VerificationRecord("a", "duplicate")
         )
         verification_service(baser).retry("a")
-        verification = verification_service(baser).next_verification(now=1000)
+        verificationService.clock = lambda: 1000
+        verification = verificationService.start_pending(
+            verificationService.next_pending()
+        )
         assert verification.attempts == 1
         verification_service(baser).finish(
             VerificationResult("a", "rejected", "bad proof")
         )
-        assert verification_service(baser).next_verification(now=1001) is None
+        assert verificationService.next_verifying() is None
+        assert verificationService.next_waiting() is None
+        assert verificationService.next_pending() is None
         assert not ApplicationWriter(baser).enqueue_verification(
             VerificationRecord("a", "duplicate")
         )
@@ -75,7 +93,7 @@ def test_busy_worker_and_waiting_do_not_schedule_other_active_work():
         )
         coordinator.activeCredSaid = "busy"
         with patch.object(
-            coordinator.service, "next_verification", side_effect=AssertionError
+            coordinator.service, "next_verifying", side_effect=AssertionError
         ):
             coordinator.process_ready()
         coordinator.activeCredSaid = None
@@ -105,7 +123,8 @@ def test_rpc_retry_and_success_move_only_on_completion():
     """Cues move active work to waiting or acceptance; completed history is inert."""
     with dbing.openLMDB(cls=VerifierBaser) as baser:
         ApplicationWriter(baser).enqueue_verification(VerificationRecord("a", "first"))
-        verification_service(baser).next_verification(now=0)
+        verificationService = verification_service(baser)
+        verificationService.start_pending(verificationService.next_pending())
         worker = EoaVerifierDoer(rpc_url="http://unused", chain_id=31337)
         coordinator = VerificationCoordinator(
             service=verification_service(
@@ -118,7 +137,8 @@ def test_rpc_retry_and_success_move_only_on_completion():
         coordinator.process_results()
         assert baser.waiting.get(keys=("a",)).reason == "RPC unavailable"
         assert baser.verifying.cntAll() == 0 and baser.results.cntAll() == 0
-        verification_service(baser).next_verification(now=5)
+        verificationService.clock = lambda: 5
+        verificationService.retry_waiting(verificationService.next_waiting())
         coordinator.activeCredSaid = "a"
         observation = {"wallet": "wallet", "accountObservation": {"chainId": 31337}}
         worker.cues.append({"kin": "verified", "said": "a", "eoaResult": observation})
@@ -184,3 +204,31 @@ def test_completion_requires_an_active_attempt():
             verification_service(baser).finish(VerificationResult("a", "verified"))
         assert baser.pending.get(keys=("a",)) is not None
         assert baser.results.cntAll() == 0
+
+
+@pytest.mark.parametrize("phase", ["verifying", "waiting", "pending"])
+def test_exhausted_phase_consumes_only_one_scheduler_turn(phase):
+    """Dead-lettering one exhausted item must not charge the next queued item."""
+    with dbing.openLMDB(cls=VerifierBaser) as baser:
+        writer = ApplicationWriter(baser)
+        exhausted = VerificationRecord("a", "first", attempts=3)
+        other = VerificationRecord("b", "second")
+        writer.enqueue_verification(exhausted)
+        writer.enqueue_verification(other)
+        if phase == "verifying":
+            writer.pending_to_verifying(exhausted, exhausted)
+        elif phase == "waiting":
+            writer.pending_to_verifying(exhausted, exhausted)
+            writer.verifying_to_waiting(exhausted, exhausted)
+        service = verification_service(baser, clock=lambda: 10)
+        # Reads do not charge attempts or consume a phase, even when all are queried.
+        assert service.next_verifying() == (exhausted if phase == "verifying" else None)
+        assert service.next_waiting() == (exhausted if phase == "waiting" else None)
+        assert service.next_pending() == (exhausted if phase == "pending" else other)
+        assert getattr(baser, phase).get(keys=("a",)) == exhausted
+        worker = EoaVerifierDoer(rpc_url="http://unused", chain_id=31337)
+        coordinator = VerificationCoordinator(service=service, eoa_verifier=worker)
+        coordinator.process_ready()
+        assert baser.verification_dead.get(keys=("a",)).attempts == 3
+        assert baser.pending.get(keys=("b",)) == other
+        assert not worker.msgs

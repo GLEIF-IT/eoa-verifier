@@ -35,7 +35,18 @@ class VerificationCoordinator(doing.DoDoer):
         """Dispatch prepared work only while no observation is in flight."""
         if self.activeCredSaid is not None:
             return
-        association = self.service.prepare()
+        # Select one phase explicitly. An exhausted record still consumes this turn.
+        if (record := self.service.next_verifying()) is not None:
+            verification = self.service.resume_verifying(record)
+        elif (record := self.service.next_waiting()) is not None:
+            verification = self.service.retry_waiting(record)
+        elif (record := self.service.next_pending()) is not None:
+            verification = self.service.start_pending(record)
+        else:
+            return
+        if verification is None:
+            return
+        association = self.service.prepare(verification)
         if association is not None:
             self.activeCredSaid = association.said
             self.eoa_verifier.msgs.append(association.sad)

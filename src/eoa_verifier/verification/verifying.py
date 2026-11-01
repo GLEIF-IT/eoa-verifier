@@ -38,68 +38,86 @@ class VerificationService:
             clock,
         )
 
-    def next_verification(self, *, now, max_attempts=3):
-        """Choose one active/due/new candidate and durably charge its attempt."""
-        record = self.reader.active_verification()
-        if record is not None:
-            if record.attempts >= max_attempts:
-                dead = replace(
-                    record,
-                    reason=record.reason
-                    or "verification interrupted; attempt budget exhausted",
-                )
-                self.writer.dead_letter_verification(record, dead)
-                return None
-            active = replace(
-                record,
-                attempts=record.attempts + 1,
-                reason="verification attempt started; result not committed",
-            )
-            self.writer.resume_verification(record, active)
-            return active
+    def next_verifying(self):
+        """Read one interrupted verifying record without changing its attempt count."""
+        return self.reader.active_verification()
+
+    def next_waiting(self):
+        """Read one due waiting record; leave future deadlines untouched."""
         record = self.reader.waiting_verification()
-        if record is not None and record.nextAttemptAt <= now:
-            if record.attempts >= max_attempts:
-                dead = replace(
-                    record,
-                    reason=record.reason
-                    or "verification interrupted; attempt budget exhausted",
-                )
-                self.writer.dead_letter_waiting_verification(record, dead)
-                return None
-            active = replace(
+        return (
+            record
+            if record is not None and record.nextAttemptAt <= self.clock()
+            else None
+        )
+
+    def next_pending(self):
+        """Read one pending record without claiming it or inspecting other phases."""
+        return self.reader.pending_verification()
+
+    def resume_verifying(self, record):
+        """Charge one interrupted attempt, or dead-letter exhausted verifying work."""
+        if record.attempts >= self.max_attempts:
+            dead = replace(
                 record,
-                attempts=record.attempts + 1,
-                reason="verification attempt started; result not committed",
+                reason=record.reason
+                or "verification interrupted; attempt budget exhausted",
             )
-            self.writer.activate_waiting_verification(record, active)
-            return active
-        record = self.reader.pending_verification()
-        if record is not None:
-            if record.attempts >= max_attempts:
-                dead = replace(
-                    record,
-                    reason=record.reason
-                    or "verification interrupted; attempt budget exhausted",
-                )
-                self.writer.dead_letter_pending_verification(record, dead)
-                return None
-            active = replace(
+            self.writer.verifying_to_dead_letter(record, dead)
+            return None
+        active = replace(
+            record,
+            attempts=record.attempts + 1,
+            reason="verification attempt started; result not committed",
+        )
+        self.writer.resume_verifying(record, active)
+        return active
+
+    def retry_waiting(self, record):
+        """Charge one due retry, or dead-letter exhausted waiting work."""
+        if record.nextAttemptAt > self.clock():
+            raise ValueError("verification retry is not due")
+        if record.attempts >= self.max_attempts:
+            dead = replace(
                 record,
-                attempts=record.attempts + 1,
-                reason="verification attempt started; result not committed",
+                reason=record.reason
+                or "verification interrupted; attempt budget exhausted",
             )
-            self.writer.start_verification(record, active)
-            return active
-        return None
+            self.writer.waiting_to_dead_letter(record, dead)
+            return None
+        active = replace(
+            record,
+            attempts=record.attempts + 1,
+            reason="verification attempt started; result not committed",
+        )
+        self.writer.waiting_to_verifying(record, active)
+        return active
+
+    def start_pending(self, record):
+        """Charge one pending attempt, or dead-letter exhausted pending work."""
+        if record.attempts >= self.max_attempts:
+            dead = replace(
+                record,
+                reason=record.reason
+                or "verification interrupted; attempt budget exhausted",
+            )
+            self.writer.pending_to_dead_letter(record, dead)
+            return None
+        active = replace(
+            record,
+            attempts=record.attempts + 1,
+            reason="verification attempt started; result not committed",
+        )
+        self.writer.pending_to_verifying(record, active)
+        return active
 
     def defer_verification(self, record, *, reason, next_attempt_at, max_attempts=3):
         """Choose waiting or dead letter without holding a transaction during policy."""
         updated = replace(record, reason=reason, nextAttemptAt=next_attempt_at)
         if record.attempts >= max_attempts:
-            self.writer.dead_letter_verification(record, updated)
+            self.writer.verifying_to_dead_letter(record, updated)
         else:
-            self.writer.defer_verification(record, updated)
+            self.writer.verifying_to_waiting(record, updated)
 
     def retry(self, cred_said):
         """Reset one corrected dead letter with the service stopped."""
@@ -107,7 +125,7 @@ class VerificationService:
         if record is None:
             raise ValueError("unknown verification dead letter")
         updated = replace(record, attempts=0, nextAttemptAt=0, reason="")
-        self.writer.retry_dead_verification(record, updated)
+        self.writer.dead_letter_to_pending(record, updated)
 
     def finish(self, result):
         """Prepare an acceptance obligation only for a verified result."""
@@ -116,13 +134,8 @@ class VerificationService:
         else:
             self.writer.complete_rejected_candidate(result)
 
-    def prepare(self):
-        """Claim and validate one candidate; return its detached ACDC for RPC dispatch."""
-        record = self.next_verification(
-            now=self.clock(), max_attempts=self.max_attempts
-        )
-        if record is None:
-            return None
+    def prepare(self, record):
+        """Validate a charged attempt; return its detached ACDC for RPC dispatch."""
         try:
             return self._verify(record)
         except MissingCredentialArtifactsError as exc:

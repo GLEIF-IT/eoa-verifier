@@ -67,7 +67,8 @@ with dbing.openLMDB(cls=VerifierBaser, name="process", headDirPath=root, temp=Fa
 def verify(baser, said):
     """Seed only initial verification for storage-boundary tests, not intake qualification."""
     ApplicationWriter(baser).enqueue_verification(VerificationRecord(said, "grant"))
-    verification_service(baser).next_verification(now=0)
+    verificationService = verification_service(baser)
+    verificationService.start_pending(verificationService.next_pending())
     verification_service(baser).finish(
         VerificationResult(
             said, "verified", eoaResult={"wallet": "wallet", "accountObservation": {}}
@@ -352,7 +353,8 @@ def test_invalid_nonce_is_rejected_without_consumption(nonce):
         ApplicationWriter(baser).enqueue_verification(
             VerificationRecord("candidate", "grant")
         )
-        verification_service(baser).next_verification(now=0)
+        verificationService = verification_service(baser)
+        verificationService.start_pending(verificationService.next_pending())
         verification_service(baser).finish(
             VerificationResult(
                 "candidate",

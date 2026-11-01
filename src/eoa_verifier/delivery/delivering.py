@@ -53,18 +53,19 @@ class DeliveryService:
             raise ValueError("max_attempts must be positive")
         self.max_attempts = max_attempts
 
-    def next_delivery(self):
-        """Resume active work before claiming the ready head; never scan outbox history."""
+    def next_active(self):
+        """Read the active delivery without consulting or claiming ready work."""
         reference = self.reader.active_delivery_reference()
-        if reference is None:
-            reference = self.reader.ready_delivery_reference()
-            if reference is None:
-                return None
-            self.writer.activate_delivery(reference)
-        delivery = self.reader.delivery(reference.eventId)
-        if delivery is None:
-            raise ValueError("scheduled delivery event is absent")
-        return delivery
+        return self._delivery(reference.eventId) if reference is not None else None
+
+    def next_ready(self):
+        """Read the ready delivery head without changing its scheduling reference."""
+        reference = self.reader.ready_delivery_reference()
+        return self._delivery(reference.eventId) if reference is not None else None
+
+    def start_ready(self, delivery):
+        """Commit ready-to-active before attempting the selected delivery."""
+        self.writer.delivery_ready_to_active(DeliveryReference(delivery.eventId))
 
     def retry(self, event_id):
         """Reset a corrected dead letter without resetting destination cooldown."""
@@ -138,9 +139,12 @@ class DeliveryService:
 
     def process_one(self):
         """Advance one ready/current event, yielding only through its HTTP effect."""
-        delivery = self.next_delivery()
+        delivery = self.next_active()
         if delivery is None:
-            return
+            delivery = self.next_ready()
+            if delivery is None:
+                return
+            self.start_ready(delivery)
         status = self.reader.association(delivery.associationSaid)
         if (
             status is None

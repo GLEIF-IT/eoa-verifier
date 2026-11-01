@@ -29,44 +29,80 @@ class GrantReplayService:
             max_attempts,
         )
 
+    def next_active(self):
+        """Read one interrupted Grant without changing its attempt count."""
+        return self.reader.active_grant()
+
+    def next_waiting(self):
+        """Read one due Grant retry without consuming its deadline index."""
+        record = self.reader.waiting_grant()
+        return (
+            record
+            if record is not None and record.nextAttemptAt <= self.clock()
+            else None
+        )
+
+    def next_notice(self):
+        """Read one detached KERIpy notice without acknowledging it."""
+        return self.grant_adapter.next_notice()
+
+    def resume_active(self, record):
+        """Charge interrupted Grant replay or stop its exhausted attempt budget."""
+        if record.attempts >= self.max_attempts:
+            dead = replace(
+                record,
+                reason=record.reason
+                or "Grant replay interrupted; attempt budget exhausted",
+            )
+            self.writer.dead_letter_grant(record, dead)
+            self.grant_adapter.remove_notice(record.noticeId)
+            return None
+        active = replace(record, attempts=record.attempts + 1)
+        self.writer.resume_grant(record, active)
+        return active
+
+    def retry_waiting(self, record):
+        """Charge due Grant replay or move exhausted waiting work to dead letters."""
+        if record.nextAttemptAt > self.clock():
+            raise ValueError("Grant retry is not due")
+        if record.attempts >= self.max_attempts:
+            dead = replace(
+                record,
+                reason=record.reason
+                or "Grant replay interrupted; attempt budget exhausted",
+            )
+            self.writer.dead_letter_waiting_grant(record, dead)
+            self.grant_adapter.remove_notice(record.noticeId)
+            return None
+        active = replace(record, attempts=record.attempts + 1)
+        self.writer.activate_waiting_grant(record, active)
+        return active
+
+    def start_notice(self, notice):
+        """Persist one new KERIpy notice before acknowledging or replaying it."""
+        active = replace(notice, attempts=1)
+        self.writer.start_grant(active)
+        return active
+
     def process_one(self):
-        """Persist one attempt before acknowledging/replaying its KERIpy notice."""
-        notice = self.grant_adapter.next_notice()
+        """Schedule one interrupted, due or new Grant; never fall through after failure."""
+        notice = self.next_notice()
         if notice is not None and self.reader.dead_grant(notice.noticeId) is not None:
             self.grant_adapter.remove_notice(notice.noticeId)
             return
-        record = self.reader.active_grant()
-        if record is not None:
-            if record.attempts >= self.max_attempts:
-                dead = replace(
-                    record,
-                    reason=record.reason
-                    or "Grant replay interrupted; attempt budget exhausted",
-                )
-                self.writer.dead_letter_grant(record, dead)
-                self.grant_adapter.remove_notice(record.noticeId)
-                return
-            active = replace(record, attempts=record.attempts + 1)
-            self.writer.resume_grant(record, active)
+        if (record := self.next_active()) is not None:
+            active = self.resume_active(record)
+        elif (record := self.next_waiting()) is not None:
+            active = self.retry_waiting(record)
+        elif notice is not None:
+            active = self.start_notice(notice)
         else:
-            record = self.reader.waiting_grant()
-            if record is not None and record.nextAttemptAt <= self.clock():
-                if record.attempts >= self.max_attempts:
-                    dead = replace(
-                        record,
-                        reason=record.reason
-                        or "Grant replay interrupted; attempt budget exhausted",
-                    )
-                    self.writer.dead_letter_waiting_grant(record, dead)
-                    self.grant_adapter.remove_notice(record.noticeId)
-                    return
-                active = replace(record, attempts=record.attempts + 1)
-                self.writer.activate_waiting_grant(record, active)
-            elif notice is not None:
-                active = replace(notice, attempts=1)
-                self.writer.start_grant(active)
-            else:
-                return
+            return
+        if active is not None:
+            self.replay(active)
+
+    def replay(self, active):
+        """Acknowledge durable work, then replay and commit its explicit outcome."""
         self.grant_adapter.remove_notice(active.noticeId)
         try:
             verification = (
