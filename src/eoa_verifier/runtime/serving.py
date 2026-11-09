@@ -31,7 +31,11 @@ from eoa_verifier.persistence.verification import VerificationReader, Verificati
 
 from ..associations.accepting import AcceptanceDoer, AcceptanceService
 from ..associations.evidence import AssociationEvidence
-from ..associations.revoking import RevocationDoer, RevocationService
+from ..associations.revoking import (
+    RevocationDoer,
+    RevocationService,
+    RevocationWorkDoer,
+)
 from ..associations.statusing import StatusEnd, StatusQuery
 from ..delivery.delivering import WebhookSender
 from ..delivery.keys import ServiceKeys
@@ -147,16 +151,14 @@ class VerifierService(doing.DoDoer):
                 ),
             ),
         ]
-        doers.append(
-            RevocationDoer(
-                RevocationService(
-                    AssociationReader(baser),
-                    AssociationWriter(baser),
-                    AssociationEvidence(rgy),
-                    delivery_reader=DeliveryReader(baser),
-                )
-            )
+        revocations = RevocationService(
+            AssociationReader(baser),
+            AssociationWriter(baser),
+            AssociationEvidence(rgy),
+            delivery_reader=DeliveryReader(baser),
         )
+        doers.append(RevocationDoer(revocations))
+        doers.append(RevocationWorkDoer(revocations))
         self.sender = None
         if config.webhook_url:
             self.sender = WebhookSender(

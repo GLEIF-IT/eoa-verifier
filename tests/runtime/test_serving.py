@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 from keri.app import indirecting, storing
 
+from eoa_verifier.associations.revoking import RevocationDoer, RevocationWorkDoer
 from eoa_verifier.receiving.directing import Receiver
 from eoa_verifier.runtime.serving import run_service
 from tests.support.services import entered_service, verifier_service
@@ -222,3 +223,10 @@ def test_runtime_has_one_receiver_and_no_mailbox(config):
                 for d in service.doers
             )
             assert service.parser is receivers[0].parser
+
+
+def test_runtime_schedules_both_revocation_stages(config):
+    """One service composes the registry and work revocation stages."""
+    with entered_service(config) as service:
+        assert sum(isinstance(d, RevocationDoer) for d in service.doers) == 1
+        assert sum(isinstance(d, RevocationWorkDoer) for d in service.doers) == 1

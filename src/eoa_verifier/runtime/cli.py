@@ -52,6 +52,7 @@ def make_parser():
         ("verification", retry_verification, "Association credential SAID"),
         ("grant", retry_grant, "IPEX Grant notice ID"),
         ("acceptance", retry_acceptance, "Association credential SAID"),
+        ("revocation", retry_revocation, "Association credential SAID"),
     ):
         retry_parser = commands.add_parser(
             f"retry-{phase}",
@@ -237,6 +238,18 @@ def retry_acceptance(args):
             AssociationReader(baser),
             AssociationWriter(baser),
             verification_reader=VerificationReader(baser),
+        ).retry(args.identifier)
+
+
+def retry_revocation(args):
+    """Requeue one upstream revocation dead letter, retaining its recorded cause."""
+    from eoa_verifier.associations.revoking import RevocationService
+
+    with _open_store(args) as baser:
+        RevocationService(
+            AssociationReader(baser),
+            AssociationWriter(baser),
+            delivery_reader=DeliveryReader(baser),
         ).retry(args.identifier)
 
 
