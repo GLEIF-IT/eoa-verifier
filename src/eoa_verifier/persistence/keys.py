@@ -17,3 +17,8 @@ def nonce_key(nonce):
             "nonce must contain 1 to 128 ASCII letters, digits, underscores or hyphens"
         )
     return nonce.encode("ascii")
+
+
+def source_link_key(source_said, association_said):
+    """Return the raw fan-out key; SAIDs never contain the Suber "." separator."""
+    return f"{source_said}.{association_said}".encode()

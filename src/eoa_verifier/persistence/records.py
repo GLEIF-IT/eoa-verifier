@@ -90,6 +90,9 @@ class AssociationStatus:
     for revocation. association holds issuer, LE, wallet and issuance facts;
     accountObservation holds the initial RPC snapshot and wallet. Revocation keeps
     those original facts. There is no intrinsic expiry or continuing RPC refresh.
+    revocationSource is empty unless revocation came from the verified chain; then
+    it holds the credentialSaid, role ("le" or "qvi") and telEventSaid of that cause.
+    It is exposed by status reads and never added to the webhook event.
 
     Acceptance does not select Oracle ownership or publish an Ethereum endorsement.
     A NONCE_REUSED rejection leaves the separate verified initial result intact.
@@ -100,6 +103,25 @@ class AssociationStatus:
     eventId: str
     association: dict
     accountObservation: dict
+    reason: str = ""
+    revocationSource: dict = field(default_factory=dict)
+
+
+@dataclass
+class UpstreamRevocation:
+    """One accepted association to revoke because an LE or QVI credential was revoked.
+
+    associationSaid names the accepted association and is the storage key, so an
+    LE and a QVI revocation reaching it collapse to one record and one event; the
+    first cause wins. sourceSaid and sourceRole ("le" or "qvi") name the revoked
+    credential in the association's verified chain. telEvtSaid names the
+    KERIpy-validated rev/brv TEL event. reason is only a dead-letter diagnostic.
+    """
+
+    associationSaid: str
+    sourceSaid: str
+    sourceRole: str
+    telEvtSaid: str
     reason: str = ""
 
 
