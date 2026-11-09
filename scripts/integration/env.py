@@ -13,7 +13,14 @@ import sys
 from contextlib import redirect_stdout
 from pathlib import Path
 
-from .environment import clean_run, load_run, prepare_run, present_credential, start_run
+from .environment import (
+    clean_run,
+    load_run,
+    prepare_run,
+    present_credential,
+    present_source,
+    start_run,
+)
 from .processes import is_running, process_records, stop
 
 # Repository root used to snapshot this command and owned integration inputs.
@@ -31,6 +38,8 @@ COMMANDS = (
     "issue",
     "present",
     "revoke",
+    "revoke-source",
+    "present-source",
     "_initialize",
     "_infrastructure",
     "_bootstrap",
@@ -54,6 +63,7 @@ def parser() -> argparse.ArgumentParser:
     parser.add_argument("--nonce")
     parser.add_argument("--wallet", type=int, choices=(1, 2), default=1)
     parser.add_argument("--service")
+    parser.add_argument("--kind", choices=("le", "qvi"), default="le")
     return parser
 
 
@@ -114,7 +124,7 @@ def inspect_or_stop(root: Path, arguments) -> None:
 def execute(root: Path, configuration: dict, arguments) -> None:
     """Dispatch in the isolated interpreter; internal daemon commands stay narrow."""
     action = arguments.command
-    if action in ("issue", "revoke", "_bootstrap"):
+    if action in ("issue", "revoke", "revoke-source", "_bootstrap"):
         issue_or_revoke(root, arguments)
     elif action == "_initialize":
         from .infrastructure import initialize
@@ -128,6 +138,8 @@ def execute(root: Path, configuration: dict, arguments) -> None:
         if not arguments.said:
             raise ValueError("present requires --said")
         present_credential(root, configuration, arguments.said)
+    elif action == "present-source":
+        present_source(root, configuration, arguments.kind)
     elif action == "start":
         start(root, configuration, arguments)
     elif action == "flow":
@@ -173,6 +185,8 @@ def issue_or_revoke(root: Path, arguments) -> None:
             ceremonyGen = ceremony.issue_association(
                 TEST_KEYS[arguments.wallet], arguments.nonce
             )
+        elif arguments.command == "revoke-source":
+            ceremonyGen = ceremony.revoke_source(arguments.kind)
         else:
             ceremonyGen = ceremony.revoke_association(arguments.said)
         ceremonyResult = complete_ceremony(ceremony, ceremonyGen)

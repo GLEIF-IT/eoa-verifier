@@ -176,6 +176,32 @@ class IssuerCeremony:
         yield from revoke_credential(self.issuers["le"], registry, credential)
         return self._export_association(credential, registry)
 
+    def revoke_source(self, kind: str) -> Generator:
+        """Witness revocation of the chain's LE or QVI credential and export its evidence.
+
+        kind "le" is revoked by the QVI and kind "qvi" by GEDA. Write the issuer's
+        KEL, registry/credential TEL and ACDC bytes to sources/<kind>-revocation.cesr.
+        """
+        issuer_name = {"le": "qvi", "qvi": "geda"}[kind]
+        said = load_json(self.root / "chain.json")["leSaid"]
+        if kind == "qvi":
+            le = self.actors["qvi"][2].reger.creds.get(keys=(said,))
+            said = le.edge["qvi"]["n"]
+        rgy = self.actors[issuer_name][2]
+        credential = rgy.reger.creds.get(keys=(said,))
+        registry = rgy.regs[credential.regi]
+        yield from revoke_credential(self.issuers[issuer_name], registry, credential)
+        sources = self.root / "sources"
+        sources.mkdir(exist_ok=True)
+        evidence = sources / f"{kind}-revocation.cesr"
+        evidence.write_bytes(replay(registry.hab, rgy, registry, credential))
+        return {
+            "kind": kind,
+            "said": said,
+            "issuerAid": registry.hab.pre,
+            "evidence": str(evidence),
+        }
+
     def _association_context(self):
         """Read the completed chain and its native LE registry without creating one."""
         chain = load_json(self.root / "chain.json")

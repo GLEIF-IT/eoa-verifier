@@ -63,6 +63,11 @@ def make_parser():
             "Revoke the credential and wait for revoked status plus webhook",
         ),
         (
+            "revoke-source",
+            revoke_source,
+            "Revoke the LE or QVI credential and wait for the association's webhook",
+        ),
+        (
             "status",
             status,
             "Show service URLs, holder identities and current association",
@@ -97,6 +102,8 @@ def make_parser():
             command.add_argument(
                 "--said", help="An earlier demo credential; defaults to the latest"
             )
+        elif name == "revoke-source":
+            command.add_argument("--kind", choices=("le", "qvi"), default="le")
         elif name == "logs":
             command.add_argument(
                 "--service",
@@ -201,6 +208,11 @@ def present(root, configuration, args):
 def revoke(root, configuration, args):
     """Revoke the selected credential using its issuer, not the Ethereum wallet."""
     return demoing.revoke_association(root, configuration, said=args.said)
+
+
+def revoke_source(root, configuration, args):
+    """Revoke the chain's source credential using its issuer, not the Ethereum wallet."""
+    return demoing.revoke_source(root, configuration, kind=args.kind)
 
 
 def status(root, configuration, args):
