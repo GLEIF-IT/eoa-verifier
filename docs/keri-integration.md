@@ -311,6 +311,16 @@ separately; restart safely replays the gap. Revocation known before acceptance
 prevents acceptance rather than creating an accepted-then-revoked event pair.
 The Verifier applies an issuer revocation; it does not issue that revocation itself.
 
+The same intake applies an LE or QVI credential revocation, authored by the QVI or
+GEDA and self-certifying, so anyone holding it may deliver it. Send the TEL `rev` or
+`brv` with its seal-source attachment and the issuer KEL through its witnessed anchor
+as raw CESR to `PUT /`, separately or in the same body as a Grant; a Grant's own embeds
+do not carry it. The service has no raw TCP CESR listener and does not poll witnesses
+or watchers, so revocation waits for delivery. Pinned KERIpy accepts only an anchoring
+KEL event with exactly one seal. Every accepted association in that chain then revokes
+with its own revision-2 event. A re-issued LE credential has a new SAID, so it needs a
+new wallet signature, fresh nonce and new association.
+
 ## HTTP surface and signature options
 
 | Method and route | Meaning |

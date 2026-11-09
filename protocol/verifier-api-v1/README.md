@@ -43,15 +43,23 @@ SAID. Another SAID reusing the nonce is locally `rejected` with `NONCE_REUSED`;
 initial verification remains `verified`. Revocation and downstream selection supersession do not
 release claims. See [ADR 0005](../../adrs/0005-accepted-association-nonces.md).
 Only acceptance
-(`status: "accepted"`) and later association revocation (`status: "revoked"`,
+(`status: "accepted"`) and later revocation of the association or of the LE or QVI
+credential in its verified source chain (`status: "revoked"`,
 `reasonCode: "REVOKED"`) are webhook events; initial rejection/unavailability is
 available through public stored status, not sent as a status event.
 
-Verifier acceptance lasts indefinitely until verified revocation of that association.
+Verifier acceptance lasts indefinitely until verified revocation of that association
+credential, or of the LE or QVI credential in its verified source chain.
 Oracle supersession changes selection only; it does not revoke verifier acceptance.
 Elapsed time, old observations and outages do not invalidate it. There are no
-verification refreshes, periodic account checks or continuing source-chain
-reassessments. Initial source-chain validation remains mandatory.
+verification refreshes or periodic account checks. The Verifier does not poll or
+re-verify the source chain: it applies an LE or QVI revocation only when that TEL
+event and its witnessed KEL anchor are delivered to evidence intake, then revokes
+every accepted association chained to it. Initial source-chain validation remains
+mandatory. A revocation of the association, LE or QVI credential known at the
+acceptance guard makes the candidate terminally `rejected`, with a reason naming the
+credential, no event and no consumed nonce; evidence that is merely missing stops in
+the acceptance dead letter.
 
 ## Delivery and revocation
 
@@ -78,7 +86,9 @@ After KERIpy validates the issuer's credential TEL revocation, Verifier records
 revoked association status and a separate delivery obligation. Do not send an
 older acceptance after local revocation. Duplicate/reordered status events cannot
 restore a revoked Oracle association. Permanent association nonce consumption is
-unchanged and independent of HTTP signatures.
+unchanged and independent of HTTP signatures. An LE or QVI revocation produces the
+same revision-2 event as an association revocation, one per accepted association in
+that chain, with no cause on the wire.
 
 ## Transport signature profile
 
@@ -143,6 +153,11 @@ Delivery progress describes the requested association's current event; shared
 destination scheduling metadata is not public. Supersession is the oracle’s
 selection decision, not a verifier status.
 
+A `revoked` response adds `revocationSource` when the revocation came from the
+verified source chain: `credentialSaid` (the revoked LE or QVI credential), `role`
+(`le` or `qvi`) and `telEventSaid` (its accepted TEL event). The key is absent for an
+association's own revocation and for every other status.
+
 [carrier]: ../external-association-v1/eoa-v1/README.md
 
 ## Status event and HTTP completion
@@ -177,7 +192,8 @@ Identifiers above are illustrative. Issuance identifies the verified anchor in t
 issuer's KEL, not arrival order. The observation records the initial check only;
 its age never expires acceptance. `eventId` combines association SAID and status revision.
 
-Verified association revocation creates a second event: `statusRevision: 2`,
+Verified revocation of the association or its LE/QVI source creates a second event,
+identical in both cases and with no cause on the wire: `statusRevision: 2`,
 `eventId: "example-association:2"`, `status: "revoked"`, and
 `reasonCode: "REVOKED"`. Keep the original `association` and `accountObservation` objects;
 the issuance anchor must not become the revocation anchor. Commit revocation and
@@ -201,6 +217,12 @@ response does not complete delivery.
 
 
 ## Evidence intake
+
+Anyone holding revocation evidence may present it; no party is obliged to, and the
+delay until it arrives is unbounded. Raw CESR over HTTP `PUT /` is the only stream
+listener: the service opens no raw TCP CESR socket. An IPEX Grant's embeds carry only
+the presented association's issuance, so LE or QVI revocation evidence must be
+delivered as its own CESR messages, which may share a `PUT /` body with a Grant.
 
 `POST /` accepts the KERI JSON-body/CESR-attachment-header form; `PUT /` accepts
 a finite CESR stream. HTTP 204 means intake only. Each request is independent

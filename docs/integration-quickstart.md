@@ -148,8 +148,9 @@ acceptance. `pending`, `verifying` and `waiting` mean unfinished work. Inspect
 `delivery.delivered` reports webhook HTTP success, not on-chain publication.
 Health is process liveness, not dependency readiness.
 
-Acceptance has no automatic expiry. The issuer must deliver validated revocation
-evidence to change it. No periodic wallet or source-chain checks run. A consumed
+Acceptance has no automatic expiry. Validated revocation evidence for the association
+or the LE or QVI credential in its chain must be delivered to change it; anyone holding
+it may do so. No periodic wallet or source-chain checks run. A consumed
 nonce cannot be reused by another credential, even after revocation.
 
 ## Run your own Verifier
