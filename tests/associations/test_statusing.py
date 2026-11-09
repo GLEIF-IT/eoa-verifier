@@ -91,6 +91,7 @@ def test_public_status_does_not_disclose_other_delivery_activity(verified_store)
         "other",
         associationFacts={"issuerAid": "issuer"},
         nonce="other",
+        sources={"le": "le", "qvi": "qvi"},
         destination=delivery.destination,
     )
     delivery_service(baser).record_attempt(other.eventId, next_attempt_at=3000000000)

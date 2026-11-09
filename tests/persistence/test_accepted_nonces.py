@@ -71,6 +71,7 @@ with dbing.openLMDB(cls=VerifierBaser, name="process", headDirPath=root, temp=Fa
         baser.env = SimpleNamespace(begin=lambda **kwargs: InterruptedTransaction()
                                     if kwargs.get("write") else env.begin(**kwargs))
     status = AcceptanceService(AssociationReader(baser), AssociationWriter(baser), verification_reader=VerificationReader(baser)).accept(said, associationFacts={"issuerAid":"issuer"}, nonce="process-nonce",
+                          sources={"le": "le", "qvi": "qvi"},
                           destination="https://receiver.example/hook")
     if mode == "commit":
         os._exit(24)
@@ -100,6 +101,7 @@ def accept(baser, said, *, issuer="issuer", nonce="nonce", delivery=True):
         said,
         associationFacts={"issuerAid": issuer},
         nonce=nonce,
+        sources={"le": "le", "qvi": "qvi"},
         destination="https://receiver.example/hook" if delivery else None,
     )
 
@@ -369,6 +371,7 @@ def test_invalid_nonce_is_rejected_without_consumption(nonce):
                 "candidate",
                 associationFacts={"issuerAid": credential["i"]},
                 nonce=nonce,
+                sources={"le": "le", "qvi": "qvi"},
             )
         assert (
             baser.accepted_nonces.cntAll()

@@ -94,10 +94,11 @@ class AssociationWriter:
             txn.delete(key, db=db.acceptance_dead.sdb)
             txn.put(key, raw, db=db.accepting.sdb)
 
-    def accept(self, status, nonce):
-        """Commit nonce ownership and accepted status without delivery.
+    def accept(self, status, nonce, links):
+        """Commit nonce ownership, accepted status and source links without delivery.
 
-        False means this SAID already has status. NonceConflict aborts all writes.
+        links is [(sourceSaid, role), ...] from the verified chain. False means this
+        SAID already has status. NonceConflict aborts all writes.
         """
         from .keys import nonce_key
         from .records import AcceptedNonce
@@ -106,6 +107,7 @@ class AssociationWriter:
         key, raw = status.associationSaid.encode(), db.associations.serializer(status)
         claim_key = nonce_key(nonce)
         claim_raw = db.accepted_nonces.serializer(AcceptedNonce(status.associationSaid))
+        link_rows = self._link_rows(status.associationSaid, links)
         with db.env.begin(write=True) as txn:
             if txn.get(key, db=db.associations.sdb) is not None:
                 return False
@@ -114,13 +116,16 @@ class AssociationWriter:
             ):
                 raise NonceConflict()
             txn.put(key, raw, db=db.associations.sdb)
+            for link_key, role in link_rows:
+                txn.put(link_key, role, db=db.source_links.sdb)
             txn.delete(key, db=db.accepting.sdb)
         return True
 
-    def accept_and_queue(self, status, nonce, delivery, reference, schedule):
-        """Commit nonce ownership and accepted status with its ready event.
+    def accept_and_queue(self, status, nonce, delivery, reference, schedule, links):
+        """Commit nonce ownership, accepted status and source links with its ready event.
 
-        False means this SAID already has status. NonceConflict aborts all writes.
+        links is [(sourceSaid, role), ...] from the verified chain. False means this
+        SAID already has status. NonceConflict aborts all writes.
         """
         from .keys import nonce_key
         from .records import AcceptedNonce
@@ -135,6 +140,7 @@ class AssociationWriter:
             delivery.destination.encode(),
             db.destinations.serializer(schedule),
         )
+        link_rows = self._link_rows(status.associationSaid, links)
         with db.env.begin(write=True) as txn:
             if txn.get(key, db=db.associations.sdb) is not None:
                 return False
@@ -143,14 +149,16 @@ class AssociationWriter:
             ):
                 raise NonceConflict()
             txn.put(key, raw, db=db.associations.sdb)
+            for link_key, role in link_rows:
+                txn.put(link_key, role, db=db.source_links.sdb)
             txn.put(event_key, event_raw, db=db.outbox.sdb)
             txn.put(event_key, ref_raw, db=db.delivery_ready.sdb)
             txn.put(schedule_key, schedule_raw, db=db.destinations.sdb, overwrite=False)
             txn.delete(key, db=db.accepting.sdb)
         return True
 
-    def reject_nonce(self, status):
-        """Save nonce-reuse rejection and remove accepting; never write a nonce or event."""
+    def reject(self, status):
+        """Save terminal rejection and remove accepting; never write a nonce, event or link."""
         db = self._db
         key, raw = status.associationSaid.encode(), db.associations.serializer(status)
         with db.env.begin(write=True) as txn:
@@ -248,3 +256,11 @@ class AssociationWriter:
                 raise ValueError("revocation dead letter is absent or changed")
             txn.delete(key, db=db.revocation_dead.sdb)
             txn.put(key, raw, db=db.revocation_work.sdb)
+
+    @staticmethod
+    def _link_rows(association_said, links):
+        """Prepare raw fan-out rows before a write transaction opens."""
+        return [
+            (source_link_key(source, association_said), role.encode())
+            for source, role in links
+        ]

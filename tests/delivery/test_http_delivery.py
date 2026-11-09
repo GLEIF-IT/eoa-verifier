@@ -158,6 +158,7 @@ def test_webhook_accepts_unsigned_success_and_verifies_supplied_signatures(
             "association",
             associationFacts={"issuerAid": "issuer"},
             nonce="other",
+            sources={"le": "le", "qvi": "qvi"},
             destination=target,
         )
         if reply.startswith("revocation"):
@@ -292,6 +293,7 @@ def test_malformed_chunk_response_preserves_pending_delivery(tmp_path):
             "association",
             associationFacts={"issuerAid": "issuer"},
             nonce="other",
+            sources={"le": "le", "qvi": "qvi"},
             destination=f"http://127.0.0.1:{server.ha[1]}/hook",
         )
         original = baser.outbox.get(keys=(status.eventId,))
