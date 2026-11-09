@@ -8,11 +8,17 @@ from eoa_verifier.persistence.associations import AssociationReader
 from eoa_verifier.persistence.delivery import DeliveryReader
 from eoa_verifier.persistence.records import (
     DestinationSchedule,
+    UpstreamRevocation,
     VerificationRecord,
     VerificationResult,
 )
 from eoa_verifier.persistence.verification import VerificationReader
-from tests.support.acceptance import accept_verified_result, acceptance_service
+from tests.support.acceptance import (
+    accept_chained,
+    accept_verified_result,
+    acceptance_service,
+    revocation_service,
+)
 from tests.support.persistence import enqueue_verification
 from tests.support.services import delivery_service, verification_service
 
@@ -146,3 +152,41 @@ def test_waiting_and_dead_letter_are_passive_statuses(verified_store):
     stopped = client.simulate_get("/v1/associations/association/status").json
     assert stopped["phase"] == "acceptance" and stopped["status"] == "dead-letter"
     assert baser.accepted_nonces.cntAll() == 0
+
+
+def test_revocation_source_is_exposed_only_for_upstream_revocation(verified_store):
+    """Direct and accepted responses keep their shape; upstream adds the stored cause."""
+    baser = verified_store
+    app = falcon.App()
+    app.add_route(
+        "/v1/associations/{said}/status",
+        StatusEnd(
+            StatusQuery(
+                AssociationReader(baser),
+                VerificationReader(baser),
+                DeliveryReader(baser),
+            )
+        ),
+    )
+    client = TestClient(app)
+    accept_chained(baser, "upstream")
+    accept_chained(baser, "direct")
+    service = revocation_service(baser)
+    assert "revocationSource" not in (
+        client.simulate_get("/v1/associations/upstream/status").json
+    )
+    service.apply_revocation("direct")
+    baser.revocation_work.put(
+        keys=("upstream",), val=UpstreamRevocation("upstream", "le-said", "le", "tel-said")
+    )
+    service.process_work()
+    assert "revocationSource" not in (
+        client.simulate_get("/v1/associations/direct/status").json
+    )
+    upstream = client.simulate_get("/v1/associations/upstream/status").json
+    assert upstream["status"] == "revoked"
+    assert upstream["revocationSource"] == {
+        "credentialSaid": "le-said",
+        "role": "le",
+        "telEventSaid": "tel-said",
+    }
