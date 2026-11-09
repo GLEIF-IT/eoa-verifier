@@ -198,6 +198,18 @@ class AssociationWriter:
             txn.put(event_key, event_raw, db=db.outbox.sdb)
             txn.put(event_key, ref_raw, db=db.delivery_ready.sdb)
 
+    def queue_upstream(self, works):
+        """Durably queue fan-out work; existing and dead-lettered work is left unchanged."""
+        db = self._db
+        rows = [
+            (work.associationSaid.encode(), db.revocation_work.serializer(work))
+            for work in works
+        ]
+        with db.env.begin(write=True) as txn:
+            for key, raw in rows:
+                if txn.get(key, db=db.revocation_dead.sdb) is None:
+                    txn.put(key, raw, db=db.revocation_work.sdb, overwrite=False)
+
     def rev_upstream(self, previous, status, delivery, reference):
         """Commit revoked status with its cause and optional event, and finish the work.
 

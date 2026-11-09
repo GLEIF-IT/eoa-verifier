@@ -2,13 +2,16 @@
 
 The issuer issues the TEL revocation. KERIpy validates it; this module records
 the resulting association status and delivery obligation without issuing a TEL event.
+An association's own revocation applies directly. Revocation of an LE or QVI
+credential in its verified chain fans out through two idempotent stages: one registry
+record becomes durable work records, then one work record is applied per turn.
 """
 
 from dataclasses import replace
 
 from hio.base import doing
 
-from eoa_verifier.persistence.records import DeliveryReference
+from eoa_verifier.persistence.records import DeliveryReference, UpstreamRevocation
 
 from .events import status_delivery
 
@@ -22,14 +25,29 @@ class RevocationService:
         self.delivery_reader = delivery_reader
 
     def process_one(self):
-        """Apply at most one credential revocation without scanning association history."""
+        """Classify at most one credential revocation without scanning association history.
+
+        An association applies directly. An LE or QVI credential with source links
+        becomes one durable work record per association. Any other credential has no
+        effect. The registry record is acknowledged only after the application commit.
+        """
         revocationIds = self.evidence.next_revocation()
         if revocationIds is None:
             return
-        credSaid, _telEvtSaid = revocationIds
+        credSaid, telEvtSaid = revocationIds
         status = self.reader.association(credSaid)
-        if status is not None and status.status == "accepted":
-            self.apply_revocation(credSaid)
+        if status is not None:
+            if status.status == "accepted":
+                self.apply_revocation(credSaid)
+        else:
+            links = self.reader.source_links(credSaid)
+            if links:
+                self.writer.queue_upstream(
+                    [
+                        UpstreamRevocation(said, credSaid, role, telEvtSaid)
+                        for said, role in links
+                    ]
+                )
         self.evidence.remove_revocation(credSaid)
 
     def apply_revocation(self, credSaid):
