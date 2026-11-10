@@ -223,6 +223,39 @@ def test_retry_commands_resume_only_selected_dead_letter(tmp_path, phase):
     assert main(arguments) == 1  # A completed retry cannot silently reset work again.
 
 
+def test_retry_revocation_requeues_only_the_selected_dead_letter(tmp_path):
+    """The offline operator command clears the diagnostic and refuses a second reset."""
+    from keri.db import dbing
+
+    from eoa_verifier.persistence.basing import VerifierBaser
+    from eoa_verifier.persistence.records import UpstreamRevocation
+
+    options = dict(
+        cls=VerifierBaser, name="operator", headDirPath=str(tmp_path), temp=False
+    )
+    stopped = UpstreamRevocation("bad", "le", "le", "tel", reason="event absent")
+    other = UpstreamRevocation("other", "le", "le", "tel", reason="event absent")
+    with dbing.openLMDB(**options) as baser:
+        baser.revocation_dead.put(keys=("bad",), val=stopped)
+        baser.revocation_dead.put(keys=("other",), val=other)
+    arguments = [
+        "retry-revocation",
+        "bad",
+        "--name",
+        "operator",
+        "--head-dir",
+        str(tmp_path),
+    ]
+    assert main(arguments) == 0
+    with dbing.openLMDB(**options) as baser:
+        assert baser.revocation_dead.get(keys=("bad",)) is None
+        assert baser.revocation_dead.get(keys=("other",)) == other
+        assert baser.revocation_work.get(keys=("bad",)) == UpstreamRevocation(
+            "bad", "le", "le", "tel"
+        )
+    assert main(arguments) == 1  # Already resumed; no second reset.
+
+
 def test_invalid_startup_does_not_enter_runtime(config, monkeypatch, capsys):
     """Reject bad typed configuration before the runtime can acquire stores or sockets."""
     from eoa_verifier.runtime import cli

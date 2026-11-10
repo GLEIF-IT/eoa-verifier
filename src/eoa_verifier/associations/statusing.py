@@ -40,6 +40,8 @@ class StatusQuery:
                 if delivery is not None
                 else None
             )
+            if not statusBody["revocationSource"]:
+                del statusBody["revocationSource"]
         elif deadLetterResult is not None:
             statusBody = {
                 "associationSaid": said,

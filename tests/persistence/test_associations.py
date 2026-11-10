@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from eoa_verifier.persistence.associations import AssociationReader
+from eoa_verifier.persistence.records import UpstreamRevocation
 from tests.support.acceptance import (
     accept_chained,
     accept_verified_result,
@@ -116,3 +117,51 @@ def test_nonce_conflict_and_rejection_write_no_source_links(verified_store):
     assert AssociationReader(baser).source_links("le-b") == []
     assert AssociationReader(baser).source_links("qvi-b") == []
     assert baser.source_links.cntAll() == 2
+
+
+def test_failed_upstream_commit_keeps_work_and_writes_nothing(verified_store):
+    """Fail after every Stage B write: status, event and cause roll back; work remains."""
+    from types import SimpleNamespace
+
+    baser = verified_store
+    accepted = accept_chained(baser, "first")
+    work = UpstreamRevocation("first", "le", "le", "tel")
+    baser.revocation_work.put(keys=("first",), val=work)
+    service = revocation_service(baser)
+    env = baser.env
+
+    class Transaction:
+        """Delegate a real transaction and fail immediately after its work deletion."""
+
+        def __enter__(self):
+            """Open a real test-owned LMDB write transaction and return this wrapper."""
+            self.txn = env.begin(write=True)
+            return self
+
+        def __exit__(self, kind, value, traceback):
+            """Abort on an exception or commit on normal exit."""
+            self.txn.abort() if kind else self.txn.commit()
+
+        def __getattr__(self, name):
+            """Delegate unmodified transaction operations."""
+            return getattr(self.txn, name)
+
+        def delete(self, *args, **kwa):
+            """Perform the real delete, then interrupt before commit."""
+            result = self.txn.delete(*args, **kwa)
+            if kwa.get("db") == baser.revocation_work.sdb:
+                raise RuntimeError("after work delete")
+            return result
+
+    def begin(**kwa):
+        """Wrap write transactions for fault injection and leave readers unchanged."""
+        return Transaction() if kwa.get("write") else env.begin(**kwa)
+
+    with (
+        patch.object(baser, "env", SimpleNamespace(begin=begin)),
+        pytest.raises(RuntimeError, match="after work delete"),
+    ):
+        service.process_work()
+    assert baser.associations.get(keys=("first",)) == accepted
+    assert baser.revocation_work.get(keys=("first",)) == work
+    assert baser.outbox.cntAll() == 1

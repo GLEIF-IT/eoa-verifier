@@ -114,7 +114,8 @@ class UpstreamRevocation:
     associationSaid names the accepted association and is the storage key, so an
     LE and a QVI revocation reaching it collapse to one record and one event; the
     first cause wins. sourceSaid and sourceRole ("le" or "qvi") name the revoked
-    credential in the association's verified chain. telEvtSaid names the
+    credential in the association's verified chain; sourceRole "association" marks
+    the association's own revocation after it could not apply directly. telEvtSaid names the
     KERIpy-validated rev/brv TEL event. reason is only a dead-letter diagnostic.
     """
 

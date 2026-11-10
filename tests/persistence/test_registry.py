@@ -8,9 +8,13 @@ from keri import core
 from keri.db import dbing
 from keri.vdr import eventing
 
-from eoa_verifier.associations.revoking import RevocationDoer
+from eoa_verifier.associations.revoking import RevocationDoer, RevocationWorkDoer
 from eoa_verifier.persistence.registry import VerifierReger
-from tests.support.acceptance import accept_verified_result, revocation_service
+from tests.support.acceptance import (
+    accept_chained,
+    accept_verified_result,
+    revocation_service,
+)
 
 
 def revocation_serder(*, backers=False):
@@ -122,3 +126,45 @@ def test_revocation_ack_gap_repeats_only_the_same_event(verified_store, tmp_path
         assert reger.next_revocation() is None
         assert baser.outbox.get(keys=(revokedStatus.eventId,)).body == body
         assert baser.outbox.cntAll() == 2
+
+
+def test_upstream_ack_gap_recreates_work_without_a_second_event(verified_store, tmp_path):
+    """Crash after Stage A commit: replay finds finished work and rewrites no event."""
+    baser = verified_store
+    for said in ("first", "second"):
+        accept_chained(baser, said)
+    with dbing.openLMDB(
+        cls=VerifierReger, name="upstream", headDirPath=str(tmp_path), temp=False
+    ) as reger:
+        reger.revocations.put(keys=("le",), val="revocation")
+        service = revocation_service(baser, SimpleNamespace(reger=reger))
+        doer, worker = RevocationDoer(service), RevocationWorkDoer(service)
+        with (
+            patch.object(
+                reger.revocations,
+                "rem",
+                side_effect=RuntimeError("interrupted acknowledgement"),
+            ),
+            pytest.raises(RuntimeError, match="interrupted acknowledgement"),
+        ):
+            doer.recur(0)
+        assert reger.next_revocation() == ("le", "revocation")
+        assert baser.revocation_work.cntAll() == 2
+        worker.recur(0)
+        worker.recur(0)
+        bodies = {said: baser.outbox.get(keys=(f"{said}:2",)).body for said in ("first", "second")}
+        events = baser.outbox.cntAll()
+        baser.close()
+        baser.reopen()
+        reger.close()
+        reger.reopen()
+        doer.recur(0)
+        assert reger.next_revocation() is None
+        assert baser.revocation_work.cntAll() == 2  # Recreated, then discarded unapplied.
+        worker.recur(0)
+        worker.recur(0)
+        assert baser.revocation_work.cntAll() == 0
+        assert baser.outbox.cntAll() == events
+        assert {
+            said: baser.outbox.get(keys=(f"{said}:2",)).body for said in ("first", "second")
+        } == bodies
