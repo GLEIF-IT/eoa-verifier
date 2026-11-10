@@ -53,6 +53,8 @@ The installed-wheel suite uses this same interface outside the source checkout.
 python -m scripts.integration.env issue --run-dir RUN --wallet 1 --nonce fresh_nonce
 python -m scripts.integration.env present --run-dir RUN --said SAID
 python -m scripts.integration.env revoke --run-dir RUN --said SAID
+python -m scripts.integration.env revoke-source --run-dir RUN --kind le
+python -m scripts.integration.env present-source --run-dir RUN --kind le
 ```
 
 Issue/revoke open native issuer contexts, wait for witnessed completion, export
@@ -61,6 +63,12 @@ on stdout. Progress goes to stderr. Present sends source-chain and credential
 bytes to the public CESR endpoint. Neither operation writes application acceptance
 records. Nonces are passed unchanged; issuance permits reuse so Verifier policy
 can reject it during acceptance.
+
+`revoke-source` revokes the chain's LE credential with the QVI (`--kind le`) or its
+QVI credential with GEDA (`--kind qvi`) and exports the issuer's KEL, TEL and ACDC
+bytes to `sources/<kind>-revocation.cesr`. `present-source` sends those bytes to the
+same endpoint, after which the Verifier revokes every association in that chain.
+`./scripts/demo.sh revoke-source` runs both and waits for the latest association.
 
 A caller owning the full stack can start this fixture with `--rpc-url URL
 --webhook-url URL`. Add `--webhook-oobi URL` when the target signs responses. Native OOBI resolution

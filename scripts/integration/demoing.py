@@ -20,6 +20,7 @@ from .environment import (
     load_run,
     prepare_run,
     present_credential,
+    present_source,
     start_run,
     wait_for_status,
 )
@@ -250,6 +251,29 @@ def revoke_association(root: Path, configuration: dict, *, said=None) -> dict:
     with redirect_stdout(sys.stderr), open_ceremony(root) as ceremony:
         complete_ceremony(ceremony, ceremony.revoke_association(said))
     present_credential(root, configuration, said)
+    return wait_for_status(configuration, said, "revoked")
+
+
+def revoke_source(root: Path, configuration: dict, *, kind: str) -> dict:
+    """Revoke the chain's LE or QVI credential, present it and wait for the latest association.
+
+    Only an already accepted association is the demo's target. Repeated invocation
+    of an already delivered revocation returns stored status unchanged.
+    """
+    require_running(root)
+    from .ceremony import complete_ceremony, open_ceremony
+
+    said = current_association(root)["said"]
+    status = request_json(
+        configuration["verifierUrl"] + f"/v1/associations/{said}/status"
+    )
+    if status["status"] == "revoked":
+        return wait_for_status(configuration, said, "revoked")
+    if status["status"] != "accepted":
+        raise ValueError("Present and accept the association before revoking its source")
+    with redirect_stdout(sys.stderr), open_ceremony(root) as ceremony:
+        complete_ceremony(ceremony, ceremony.revoke_source(kind))
+    present_source(root, configuration, kind)
     return wait_for_status(configuration, said, "revoked")
 
 

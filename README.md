@@ -153,8 +153,10 @@ verifier records the resulting local association status and does not issue a
 revocation itself. `RevocationDoer` consumes one `(credSaid, telEvtSaid)` record, records revoked status for only its exact accepted association
 and commits its immutable second delivery event before removing the revocation record.
 Restart safely repeats either side of this two-store commit boundary. Completed
-association history is never scanned. Revocation before acceptance is caught by
-the final verification check and the local acceptance guard. Original issuance
+association history is never scanned. An LE or QVI revocation instead fans out through
+`source-links.` into durable `revocation-work.` applied by `RevocationWorkDoer`, one
+association per turn. Revocation before acceptance is caught by the final verification
+check and the local acceptance guard, which rejects the candidate. Original issuance
 facts, observation and destination are preserved; other associations for the
 wallet are untouched. Previously accepted records still become revoked with sending
 disabled, retaining any original delivery obligations.

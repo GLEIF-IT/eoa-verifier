@@ -5,6 +5,7 @@ transport and Anvil observation. Restart and hostile ordering exercise durable
 phase boundaries rather than a second verification simulator.
 """
 
+import json
 import shutil
 import subprocess
 import time
@@ -12,9 +13,11 @@ from contextlib import ExitStack, closing
 from importlib.resources import files
 from uuid import uuid4
 
+import falcon
 import pytest
 from eth_account import Account
 from eth_account.messages import encode_typed_data
+from falcon.testing import TestClient
 from hio.base import doing
 from hio.core import http
 from keri.app import habbing, httping, indirecting, oobiing, signing
@@ -22,7 +25,8 @@ from keri.core import coring, scheming
 from keri.db import basing, dbing
 from keri.help import helping
 
-from eoa_verifier.associations.revoking import RevocationDoer
+from eoa_verifier.associations.revoking import RevocationDoer, RevocationWorkDoer
+from eoa_verifier.persistence.associations import AssociationReader
 from eoa_verifier.persistence.keys import nonce_key
 from eoa_verifier.persistence.verification import VerificationReader
 from eoa_verifier.receiving.grants import GrantNotificationDoer
@@ -525,3 +529,395 @@ def test_grant_verification_and_restart(tmp_path, method, delivery):
         workflow = doing.DoDoer(doers=[*doers, task])
         doing.Doist(real=True, tock=0.01, limit=60).do(doers=[workflow])
         assert finished, "IPEX workflow timed out"
+
+
+def test_upstream_revocation_from_witnessed_evidence(tmp_path):
+    """Revoke witnessed LE and QVI credentials and observe every accepted association.
+
+    The QVI issues two LE credentials to one holder, so only the credential SAID
+    can distinguish their associations. LE 1 is revoked by raw PUT with its TEL
+    before its KEL anchor while another association waits on missing evidence. A
+    third LE is revoked by evidence in the same PUT body as a Grant presentation.
+    GEDA then revokes the QVI across restarts on both sides of Stage A. Webhooks
+    reach a real receiver.
+    """
+    anvil_path = shutil.which("anvil")
+    assert anvil_path, "Anvil is required for KERI/IPEX integration; install Foundry"
+    schemas = [
+        scheming.Schemer(raw=p.read_bytes())
+        for p in files("eoa_verifier.verification").joinpath("schema_data").iterdir()
+    ]
+    by_said = {s.said: s for s in schemas}
+    with ExitStack() as stack:
+        witness_hby = stack.enter_context(habbing.openHby(name="witness", temp=True))
+        witness_port = free_port()
+        witness_doers = indirecting.setupWitness(
+            hby=witness_hby, alias="witness", tcpPort=None, httpPort=witness_port
+        )
+        witness = witness_hby.habByName("witness")
+        witness_url = f"http://127.0.0.1:{witness_port}"
+        witness_hby.psr.parse(ims=witness.makeEndRole(eid=witness.pre))
+        witness_hby.psr.parse(ims=witness.makeLocScheme(url=witness_url))
+        actors, issuers = open_issuers(
+            stack, schemas, base="", temp=True, witness=witness
+        )
+        oobi = f"{witness_url}/oobi/{witness.pre}/controller"
+        resolvers = []
+        for hby, _, _ in actors.values():
+            hby.db.oobis.pin(
+                keys=(oobi,), val=basing.OobiRecord(date=helping.nowIso8601())
+            )
+            resolvers.append(oobiing.Oobiery(hby=hby, clienter=httping.Clienter()))
+        _, geda, geda_rgy = actors["geda"]
+        _, qvi, qvi_rgy = actors["qvi"]
+        le_hby, le, le_rgy = actors["le"]
+        rpc_port, port, hook_port = free_port(), free_port(), free_port()
+        anvil = subprocess.Popen(
+            [anvil_path, "--host", "127.0.0.1", "--port", str(rpc_port), "--silent"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        stack.callback(anvil.wait, timeout=5)
+        stack.callback(anvil.terminate)
+        webhooks = []
+
+        class Hook:
+            """Retain every status event body received over real HTTP."""
+
+            def on_post(self, req, rep):
+                """Record the delivered JSON event and return an unsigned success."""
+                webhooks.append(json.loads(req.bounded_stream.read()))
+                rep.status = falcon.HTTP_200
+
+        hook_app = falcon.App()
+        hook_app.add_route("/hook", Hook())
+        config = ServiceConfig(
+            trusted_geda_aid=geda.pre,
+            chain_id=31337,
+            rpc_url=f"http://127.0.0.1:{rpc_port}",
+            head_dir=str(tmp_path),
+            http_port=port,
+            webhook_url=f"http://127.0.0.1:{hook_port}/hook",
+        )
+        service_stores = stack.enter_context(ExitStack())
+        epoch = time.time()
+
+        def open_service(*omitted):
+            """Reopen the persistent Verifier on one test timeline, leaving out named workers."""
+            service = service_stores.enter_context(verifier_service(config))
+            for doer in service.doers:
+                if isinstance(doer, (GrantNotificationDoer, VerificationCoordinator)):
+                    doer.service.clock = lambda: epoch + workflow.tyme
+            service.doers = [d for d in service.doers if not isinstance(d, omitted)]
+            return service
+
+        runtime = open_service()
+        finished = []
+
+        def restart(*omitted):
+            """Stop and reopen the Verifier without presenting any evidence."""
+            nonlocal runtime
+            workflow.remove([runtime])
+            service_stores.close()
+            runtime = open_service(*omitted)
+            workflow.extend([runtime])
+
+        def send(stream):
+            """Yield while PUTting CESR on a new connection; idle ones close during issuance."""
+            client = http.Client(hostname="127.0.0.1", port=port)
+            client_doer = http.ClientDoer(client=client)
+            workflow.extend([client_doer])
+            client.request(method="PUT", path="/", body=stream)
+            while not client.responses:
+                yield 0.01
+            assert client.responses.popleft()["status"] in (200, 202, 204)
+            workflow.remove([client_doer])
+
+        def until(condition, reason):
+            """Yield until condition holds, failing after a bounded HIO deadline."""
+            deadline = workflow.tyme + 10
+            while not condition():
+                assert workflow.tyme < deadline, reason
+                yield 0.01
+
+        def stored(said):
+            """Read one association's current application status."""
+            return runtime.baser.associations.get(keys=(said,))
+
+        def has_status(said, expected):
+            """Return a predicate for one association reaching one status."""
+            return lambda: (s := stored(said)) is not None and s.status == expected
+
+        def tel_state(creder):
+            """Read a credential's current accepted TEL state in the Verifier."""
+            return runtime.rgy.reger.tevers[creder.regi].vcState(creder.said)
+
+        def status_view(said):
+            """Return the public status response through the service's own routes."""
+            return TestClient(runtime.app).simulate_get(
+                f"/v1/associations/{said}/status"
+            ).json
+
+        def issue_association(source):
+            """Yield through witnessed issuance on one LE credential; return (ACDC, evidence)."""
+            challenge = build_challenge(
+                issuer_aid=le.pre,
+                le_vlei_said=source.said,
+                ext_id=f"eip155:31337:{Account.from_key(KEY).address.lower()}",
+                nonce=str(uuid4()),
+            )
+            sig = Account.sign_message(
+                encode_typed_data(full_message=challenge), KEY
+            ).signature
+            creder = association_from_challenge(
+                challenge, "0x" + sig.hex(), registries["le"].regk
+            )
+            yield from issue_credential(issuers["le"], registries["le"], creder)
+            evidence = b"".join(le.db.clonePreIter(pre=le.pre))
+            evidence += b"".join(le_rgy.reger.clonePreIter(pre=registries["le"].regk))
+            evidence += grant(le, le_rgy, creder, runtime.hab.pre)
+            return creder, evidence
+
+        def issue_source(name, recipient, schema_said, data, source=None):
+            """Yield through one witnessed source credential and return (ACDC, evidence)."""
+            creder = issuers[name].create(
+                regname=name,
+                recp=recipient.pre,
+                schema=schema_said,
+                source=source,
+                rules=rules(by_said[schema_said]),
+                data=data,
+            )
+            yield from issue_credential(issuers[name], registries[name], creder)
+            stream = replay(registries[name].hab, issuers[name].rgy, registries[name], creder)
+            return creder, stream
+
+        def accept(source):
+            """Yield until one new association on the LE credential is accepted; return it."""
+            creder, evidence = yield from issue_association(source)
+            yield from send(evidence)
+            yield from until(has_status(creder.said, "accepted"), creder.said)
+            return creder
+
+        def run(tymth, tock=0.0, **kwa):
+            """Yield through the upstream revocation scenario; mark success and unschedule."""
+            yield tock
+            for hby, _, _ in actors.values():
+                while hby.db.roobi.get(keys=(oobi,)) is None:
+                    yield 0.01
+                assert hby.db.roobi.get(keys=(oobi,)).state == oobiing.Result.resolved
+            yield from approve_qvi(actors, issuers)
+            for name, (_, hab, rgy) in actors.items():
+                registry = rgy.makeRegistry(name=name, prefix=hab.pre, noBackers=True)
+                issuers[name].registrar.incept(registry.vcp, anchor(hab, registry.vcp))
+                while not issuers[name].registrar.complete(registry.regk):
+                    yield 0.01
+                registries[name] = registry
+
+            qvi_credential, qvi_stream = yield from issue_source(
+                "geda", qvi, QVI_SCHEMA, {"LEI": "5493001KJTIIGC8Y1R12"}
+            )
+            receive(actors["qvi"][0], qvi_rgy, qvi_stream)
+            edge = coring.Saider.saidify(
+                sad={"d": "", "qvi": {"n": qvi_credential.said, "s": QVI_SCHEMA}}
+            )[1]
+            le_one, le_one_stream = yield from issue_source(
+                "qvi", le, LE_SCHEMA, {"LEI": "5493001KJTIIGC8Y1R12"}, source=edge
+            )
+            le_two, le_two_stream = yield from issue_source(
+                "qvi", le, LE_SCHEMA, {"LEI": "254900OPPU84GM83MG36"}, source=edge
+            )
+            le_three, le_three_stream = yield from issue_source(
+                "qvi", le, LE_SCHEMA, {"LEI": "529900T8BM49AURSDO55"}, source=edge
+            )
+            sources = (qvi_stream, le_one_stream, le_two_stream, le_three_stream)
+            receive(le_hby, le_rgy, b"".join(sources))
+            assert le_one.said != le_two.said
+            assert le_rgy.reger.saved.get(keys=(le_one.said,))
+            assert le_rgy.reger.saved.get(keys=(le_two.said,))
+            for stream in sources:
+                yield from send(stream)
+
+            first = yield from accept(le_one)
+            second = yield from accept(le_one)
+            third = yield from accept(le_two)
+            fourth = yield from accept(le_two)
+            fifth = yield from accept(le_three)
+            accepted = {
+                c.said: stored(c.said) for c in (first, second, third, fourth, fifth)
+            }
+            yield from until(
+                lambda: len(webhooks) >= 5, "accepted webhooks were not delivered"
+            )
+
+            # Withhold one KEL event: the embedded anchor escrows and verification waits.
+            yield from issue_association(le_one)
+            waiting, _ = yield from issue_association(le_one)
+            yield from send(grant(le, le_rgy, waiting, runtime.hab.pre))
+            verification = VerificationReader(runtime.baser)
+            yield from until(
+                lambda: verification.progress(waiting.said)[0] == "waiting",
+                "association did not reach waiting",
+            )
+
+            # LE 1: TEL first escrows without effect; the witnessed anchor resolves it.
+            yield from revoke_credential(issuers["qvi"], registries["qvi"], le_one)
+            assert len(qvi.kever.serder.ked["a"]) == 1
+            yield from send(qvi_rgy.reger.cloneTvtAt(le_one.said, sn=1))
+            yield from until(
+                lambda: runtime.rgy.reger.getTae(dbing.snKey(le_one.said, 1)),
+                "LE revocation did not enter KERIpy anchor escrow",
+            )
+            assert tel_state(le_one).et == "iss" and stored(first.said).status == "accepted"
+            yield from send(b"".join(qvi.db.clonePreIter(pre=qvi.pre)))
+            for creder in (first, second):
+                yield from until(has_status(creder.said, "revoked"), creder.said)
+            leRevocation = tel_state(le_one).d
+            for creder in (first, second):
+                status = stored(creder.said)
+                assert status.eventId == f"{creder.said}:2"
+                assert status.association == accepted[creder.said].association
+                assert status_view(creder.said)["revocationSource"] == {
+                    "credentialSaid": le_one.said,
+                    "role": "le",
+                    "telEventSaid": leRevocation,
+                }
+            for creder in (third, fourth):
+                assert stored(creder.said) == accepted[creder.said]
+                assert "revocationSource" not in status_view(creder.said)
+            yield from until(
+                lambda: len(webhooks) >= 7, "LE revocation webhooks were not delivered"
+            )
+            assert {e["eventId"] for e in webhooks if e["status"] == "revoked"} == {
+                f"{first.said}:2",
+                f"{second.said}:2",
+            }
+
+            # The waiting association names the now-revoked LE and cannot be accepted.
+            yield from until(
+                lambda: runtime.baser.results.get(keys=(waiting.said,)) is not None,
+                "waiting association did not settle",
+            )
+            rejected = runtime.baser.results.get(keys=(waiting.said,))
+            assert rejected.status == "rejected" and "revoked" in rejected.reason
+            assert stored(waiting.said) is None
+            assert AssociationReader(runtime.baser).source_links(le_one.said) == sorted(
+                [(first.said, "le"), (second.said, "le")]
+            )
+            assert (
+                runtime.baser.accepted_nonces.get(keys=(nonce_key(waiting.sad["u"]),))
+                is None
+            )
+
+            # A presenter may place the evidence in the same CESR body as a Grant. The
+            # Grant's own embeds carry only the presented association's issuance.
+            presented, presentation = yield from issue_association(le_three)
+            yield from revoke_credential(issuers["qvi"], registries["qvi"], le_three)
+            yield from send(
+                replay(qvi, qvi_rgy, registries["qvi"], le_three) + presentation
+            )
+            yield from until(has_status(fifth.said, "revoked"), fifth.said)
+            assert status_view(fifth.said)["revocationSource"] == {
+                "credentialSaid": le_three.said,
+                "role": "le",
+                "telEventSaid": tel_state(le_three).d,
+            }
+            yield from until(
+                lambda: runtime.baser.results.get(keys=(presented.said,)) is not None,
+                "presented association did not settle",
+            )
+            refused = runtime.baser.results.get(keys=(presented.said,))
+            assert refused.status == "rejected" and le_three.said in refused.reason
+            assert stored(presented.said) is None
+
+            # QVI: hold both stages so the TEL commit is the only durable progress.
+            runtime.remove(
+                [
+                    d
+                    for d in runtime.doers
+                    if isinstance(d, (RevocationDoer, RevocationWorkDoer))
+                ]
+            )
+            yield from revoke_credential(
+                issuers["geda"], registries["geda"], qvi_credential
+            )
+            assert len(geda.kever.serder.ked["a"]) == 1
+            yield from send(replay(geda, geda_rgy, registries["geda"], qvi_credential))
+            yield from until(
+                lambda: tel_state(qvi_credential).et == "rev",
+                "QVI revocation was not accepted",
+            )
+            qviRevocation = tel_state(qvi_credential).d
+            assert runtime.rgy.reger.next_revocation() == (
+                qvi_credential.said,
+                qviRevocation,
+            )
+            assert stored(third.said) == accepted[third.said]
+            assert runtime.baser.revocation_work.cntAll() == 0
+
+            # Restart with the registry record only: Stage A alone may run next.
+            restart(RevocationWorkDoer)
+            yield from until(
+                lambda: runtime.rgy.reger.next_revocation() is None,
+                "restarted Stage A did not acknowledge the QVI revocation",
+            )
+            assert runtime.baser.revocation_work.cntAll() == 5  # Three already revoked.
+            assert stored(third.said) == accepted[third.said]
+
+            # Restart with durable work only: no evidence is presented again.
+            restart()
+            for creder in (third, fourth):
+                yield from until(has_status(creder.said, "revoked"), creder.said)
+                assert status_view(creder.said)["revocationSource"] == {
+                    "credentialSaid": qvi_credential.said,
+                    "role": "qvi",
+                    "telEventSaid": qviRevocation,
+                }
+            yield from until(
+                lambda: runtime.baser.revocation_work.cntAll() == 0,
+                "finished work was not dropped",
+            )
+            yield from until(
+                lambda: len(webhooks) >= 10, "QVI revocation webhooks were not delivered"
+            )
+            assert status_view(first.said)["revocationSource"]["role"] == "le"
+            assert runtime.baser.outbox.cntAll() == 10
+            revoked = [e for e in webhooks if e["status"] == "revoked"]
+            assert {e["eventId"] for e in revoked} == {
+                f"{c.said}:2" for c in (first, second, third, fourth, fifth)
+            }
+            for event in revoked:
+                assert event["statusRevision"] == 2 and event["reasonCode"] == "REVOKED"
+                assert set(event) == {
+                    "version",
+                    "eventId",
+                    "associationSaid",
+                    "statusRevision",
+                    "status",
+                    "reasonCode",
+                    "association",
+                    "accountObservation",
+                }
+            finished.append(True)
+            workflow.remove([d for d in workflow.doers if d is not task])
+            return True
+
+        registries = {}
+        task = doing.doify(run)
+        workflow = doing.DoDoer(
+            doers=[
+                *witness_doers,
+                *(d for r in resolvers for d in r.doers),
+                *(d for i in issuers.values() for d in (i.registrar, i)),
+                IssuerEscrows(list(issuers.values())),
+                http.ServerDoer(
+                    server=http.Server(
+                        host="127.0.0.1", port=hook_port, app=hook_app
+                    )
+                ),
+                runtime,
+                task,
+            ]
+        )
+        doing.Doist(real=True, tock=0.01, limit=90).do(doers=[workflow])
+        assert finished, "upstream revocation workflow timed out"

@@ -210,6 +210,15 @@ def present_credential(root: Path, configuration: dict, said: str) -> None:
     )
 
 
+def present_source(root: Path, configuration: dict, kind: str) -> None:
+    """Send exported LE or QVI revocation evidence to the public CESR-stream endpoint."""
+    services.request_json(
+        configuration["verifierUrl"] + "/",
+        (root / "sources" / f"{kind}-revocation.cesr").read_bytes(),
+        method="PUT",
+    )
+
+
 def wait_for_status(
     configuration: dict, said: str, expected: str, timeout: float = 25
 ) -> dict:

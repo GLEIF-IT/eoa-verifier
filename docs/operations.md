@@ -111,6 +111,14 @@ when the association had an original outbox obligation. Local-only acceptance
 becomes revoked locally without an event.
 Revoking an old association does not revoke its replacement.
 
+Revocation of the LE or QVI credential in an accepted association's verified chain
+revokes every accepted association chained to it. Acceptance records the chain in
+`source-links.`; one registry record becomes one `revocation-work.` record per
+association, and one is applied per turn with its status and event. The verifier does
+not poll: anyone holding the TEL revocation and witnessed issuer KEL anchor may
+deliver them, and revocation is delayed until someone does. Public status adds
+`revocationSource` for these revocations; the webhook event is unchanged.
+
 ## Queue latency and key-state reads
 
 The root HIO scheduler offers workers a turn every five milliseconds. Each worker
@@ -138,8 +146,9 @@ The service progresses one item per worker through dedicated durable phases:
 | --- | --- | --- | --- |
 | Grant replay | native Noter / `grant-active.` | `grant-waiting.` with `grant-due.` deadline index | `grant-dead.` |
 | Initial verification | `pending.` / `verifying.` | `waiting.` with `verification-due.` deadline index | `verification-dead.` |
-| Acceptance | `accepting.` | none: local evidence was already verified | `acceptance-dead.` |
+| Acceptance | `accepting.` | none: local evidence was already verified | `acceptance-dead.` for missing evidence; a revoked chain credential is terminally `rejected` |
 | Verified revocation | `verifier-revocations.` in the native registry | none | unexpected storage errors stop the worker and retain work |
+| Upstream revocation | `revocation-work.` | none | `revocation-dead.` for one association; storage errors stop the worker and retain work |
 
 Grant replay and verification allow three attempts with five-second UTC cooldowns.
 The attempt commits before processing; an interruption consumes that attempt.
@@ -159,11 +168,12 @@ stop the service, and explicitly resume the affected phase:
 eoa-verifier retry-grant "$NOTICE_ID" --name verifier --head-dir /var/lib/eoa-verifier
 eoa-verifier retry-verification "$SAID" --name verifier --head-dir /var/lib/eoa-verifier
 eoa-verifier retry-acceptance "$SAID" --name verifier --head-dir /var/lib/eoa-verifier
+eoa-verifier retry-revocation "$SAID" --name verifier --head-dir /var/lib/eoa-verifier
 ```
 
 Retry renews only the selected operation's budget; it does not bypass validation,
 revocation guards or nonce ownership. Known revocation cannot be repaired by retry.
-These queues require fresh stores. There are no compatibility readers or migration.
+Stores from earlier versions are not supported; operators start fresh.
 The native `putTel` boundary is qualified against `gleif_keri==1.2.19`; upgrading
 that dependency requires checking its accepted-event write order and requalifying.
 
@@ -215,10 +225,9 @@ provides the local verifier/oracle/Anvil setup and qualification.
 ## Protocol and store baseline
 
 Use the current [Verifier API](../protocol/verifier-api-v1/README.md) with a compatible
-consumer. Application stores use the current record layout and have no
-old-format readers, migrations or backfill. Preserve operator data and select
-fresh demonstration stores deliberately. Oracle selection/supersession does not
-revoke Verifier acceptance; verified association revocation does.
+consumer. Stores from earlier versions are not supported; operators start fresh.
+Oracle selection/supersession does not revoke Verifier acceptance; verified
+revocation of the association or its LE or QVI source does.
 
 ## Optional webhook verification
 
