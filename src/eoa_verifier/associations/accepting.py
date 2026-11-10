@@ -4,6 +4,7 @@ from dataclasses import replace
 
 from hio.base import doing
 
+from eoa_verifier.associations.evidence import RevokedCredential
 from eoa_verifier.persistence.associations import NonceConflict
 from eoa_verifier.persistence.records import (
     AssociationStatus,
@@ -34,32 +35,53 @@ class AcceptanceService:
         self.destination = destination
 
     def process_one(self):
-        """Guard one verified candidate against locally missing or revoked issuance."""
+        """Guard one verified candidate against locally missing or revoked issuance.
+
+        Revocation of the association, LE or QVI credential is a terminal rejection
+        that consumes no nonce and creates no event, matching verification. Missing
+        evidence stops in the acceptance dead letter for correction and retry.
+        """
         result = self.reader.acceptance()
         if result is None:
             return
-        facts = self.evidence.issuance_facts(result.associationSaid)
+        try:
+            facts = self.evidence.issuance_facts(result.associationSaid)
+        except RevokedCredential as revoked:
+            self.writer.reject(
+                AssociationStatus(
+                    result.associationSaid,
+                    "rejected",
+                    "",
+                    {},
+                    self._observation(result),
+                    str(revoked),
+                )
+            )
+            return
         if facts is None:
             self.stop(
                 result.associationSaid,
-                "issuance evidence missing or revoked before acceptance",
+                "issuance evidence missing before acceptance",
             )
         else:
-            associationFacts, nonce = facts
+            associationFacts, nonce, sources = facts
             self.accept(
                 result.associationSaid,
                 associationFacts=associationFacts,
                 nonce=nonce,
+                sources=sources,
                 destination=self.destination,
             )
 
-    def accept(self, credSaid, *, associationFacts, nonce, destination=None):
+    def accept(self, credSaid, *, associationFacts, nonce, sources, destination=None):
         """Accept a verified credential once, or record a global nonce-reuse rejection.
 
         credSaid identifies a completed verified result. associationFacts is copied
         from accepted evidence by the scheduled caller; nonce is its exact profile
-        string. destination optionally creates a signed-delivery obligation. Prepare
-        all records before the atomic writer claims the nonce and saves status/event.
+        string. sources is {"le": leSaid, "qvi": qviSaid} from the verified chain and
+        becomes the upstream-revocation index. destination optionally creates a
+        signed-delivery obligation. Prepare all records before the atomic writer
+        claims the nonce and saves status/event/index.
 
         Return the committed AssociationStatus, including an existing same-SAID result
         without rewriting it. A different credential reusing any consumed nonce becomes
@@ -72,15 +94,12 @@ class AcceptanceService:
         result = self.verification_reader.result(credSaid)
         if result is None or result.status != "verified":
             raise ValueError("acceptance requires a completed verified result")
-        observation = dict(
-            result.eoaResult["accountObservation"], wallet=result.eoaResult["wallet"]
-        )
         status = AssociationStatus(
             credSaid,
             "accepted",
             f"{credSaid}:1" if destination else "",
             associationFacts,
-            observation,
+            self._observation(result),
         )
         delivery = (
             status_delivery(status, status_revision=1, destination=destination)
@@ -89,12 +108,13 @@ class AcceptanceService:
         )
         reference = DeliveryReference(delivery.eventId) if delivery else None
         schedule = DestinationSchedule() if delivery else None
+        links = [(sources["le"], "le"), (sources["qvi"], "qvi")]
         try:
             if delivery is None:
-                saved = self.writer.accept(status, nonce)
+                saved = self.writer.accept(status, nonce, links)
             else:
                 saved = self.writer.accept_and_queue(
-                    status, nonce, delivery, reference, schedule
+                    status, nonce, delivery, reference, schedule, links
                 )
         except NonceConflict:
             # The failed no-overwrite insert aborted the entire acceptance. A
@@ -105,8 +125,15 @@ class AcceptanceService:
             status = replace(
                 status, status="rejected", eventId="", reason="NONCE_REUSED"
             )
-            saved = self.writer.reject_nonce(status)
+            saved = self.writer.reject(status)
         return status if saved else self.reader.association(credSaid)
+
+    @staticmethod
+    def _observation(result):
+        """Copy the verified account observation with its wallet."""
+        return dict(
+            result.eoaResult["accountObservation"], wallet=result.eoaResult["wallet"]
+        )
 
     def stop(self, cred_said, reason):
         """Prepare one acceptance dead letter, retaining the completed verification."""

@@ -56,6 +56,7 @@ def test_real_sender_recovers_commit_ack_gaps(
             "association",
             associationFacts={"issuerAid": sender_hab.pre},
             nonce="gap-fixture",
+            sources={"le": "le", "qvi": "qvi"},
             destination=target,
         )
 

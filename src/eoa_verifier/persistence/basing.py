@@ -9,6 +9,7 @@ from .records import (
     DeliveryReference,
     DestinationSchedule,
     GrantReplayRecord,
+    UpstreamRevocation,
     VerificationRecord,
     VerificationResult,
     VerificationScope,
@@ -117,5 +118,16 @@ class VerifierBaser(dbing.LMDBer):
         # nextAttemptAt is UTC Unix seconds, never an association expiry.
         self.destinations = koming.Komer(
             db=self, subkey="destinations.", schema=DestinationSchedule
+        )
+        # "<source credential SAID>.<association SAID>" -> "le" or "qvi": permanent
+        # fan-out index written at acceptance and read by one bounded prefix scan.
+        self.source_links = subing.Suber(db=self, subkey="source-links.")
+        # Association SAID -> UpstreamRevocation: accepted association awaiting revocation.
+        self.revocation_work = koming.Komer(
+            db=self, subkey="revocation-work.", schema=UpstreamRevocation
+        )
+        # Association SAID -> UpstreamRevocation: stopped work awaiting operator recovery.
+        self.revocation_dead = koming.Komer(
+            db=self, subkey="revocation-dead.", schema=UpstreamRevocation
         )
         return self.env
